@@ -23,6 +23,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Observers
     private var observers: [AudioPlayerObserver] = []
     
+    // Loop tracking
+    private var currentRepeatCount = 0
+    private var currentTrackURL: URL?
+    private var isLoopCrossfadeInProgress = false
+    
     // MARK: - Initialization
     
     public init(configuration: AudioConfiguration = AudioConfiguration()) {
@@ -95,6 +100,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         try configuration.validate()
         self.configuration = configuration
         
+        // Reset loop tracking
+        self.currentTrackURL = url
+        self.currentRepeatCount = 0
+        self.isLoopCrossfadeInProgress = false
+        
         // Configure audio session
         try await sessionManager.configure()
         try await sessionManager.activate()
@@ -149,6 +159,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await audioEngine.stop()
         _ = await stateMachine.enterFinished()
         
+        // Reset loop tracking
+        currentRepeatCount = 0
+        isLoopCrossfadeInProgress = false
+        
         Task { @MainActor in
             remoteCommandManager.clearNowPlayingInfo()
         }
@@ -192,6 +206,71 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     public func setVolume(_ volume: Float) async {
         let clampedVolume = max(0.0, min(1.0, volume))
         await audioEngine.setVolume(clampedVolume)
+    }
+    
+    /// Get current repeat count (number of loop iterations completed)
+    public func getRepeatCount() -> Int {
+        return currentRepeatCount
+    }
+    
+    /// Replace current track with a new one using crossfade
+    /// - Parameters:
+    ///   - url: URL of the new audio file
+    ///   - crossfadeDuration: Duration of the crossfade in seconds (default: 5.0)
+    public func replaceTrack(url: URL, crossfadeDuration: TimeInterval = 5.0) async throws {
+        // Only allow replace when playing
+        guard state == .playing else {
+            throw AudioPlayerError.invalidState(
+                current: state.description,
+                attempted: "replace track"
+            )
+        }
+        
+        // Store new URL
+        currentTrackURL = url
+        
+        // Load new file on secondary player
+        let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: url)
+        
+        // Schedule new file on secondary player
+        await audioEngine.scheduleFileOnSecondaryPlayer()
+        
+        // Perform crossfade
+        let curve = configuration.fadeCurve
+        
+        async let fadeOut: () = audioEngine.fadeActiveMixer(
+            from: 1.0,
+            to: 0.0,
+            duration: crossfadeDuration,
+            curve: curve
+        )
+        
+        async let fadeIn: () = audioEngine.fadeInactiveMixer(
+            from: 0.0,
+            to: 1.0,
+            duration: crossfadeDuration,
+            curve: curve
+        )
+        
+        // Wait for both fades to complete
+        await fadeOut
+        await fadeIn
+        
+        // Stop the old player (now inactive after crossfade)
+        await audioEngine.stopActivePlayer()
+        
+        // Switch active player
+        await audioEngine.switchActivePlayer()
+        
+        // Update track info
+        currentTrack = newTrack
+        
+        // Reset repeat count for new track
+        currentRepeatCount = 0
+        isLoopCrossfadeInProgress = false
+        
+        // Update now playing info
+        await updateNowPlayingInfo()
     }
     
     // MARK: - Observers
@@ -242,6 +321,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                     self.playbackPosition = position
                     notifyObservers(positionUpdate: position)
                     await updateNowPlayingPosition()
+                    
+                    // Check for loop crossfade trigger
+                    if shouldTriggerLoopCrossfade(position) {
+                        await startLoopCrossfade()
+                    }
                 }
             }
         }
@@ -326,6 +410,81 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             
         default:
             break
+        }
+    }
+    
+    // MARK: - Loop Crossfade Logic
+    
+    /// Check if we should trigger loop crossfade
+    private func shouldTriggerLoopCrossfade(_ position: PlaybackPosition) -> Bool {
+        // Only loop if enabled in configuration
+        guard configuration.enableLooping else { return false }
+        
+        // Don't trigger if already in progress
+        guard !isLoopCrossfadeInProgress else { return false }
+        
+        // Only trigger when playing
+        guard state == .playing else { return false }
+        
+        // Calculate trigger point (crossfade duration before end)
+        let triggerPoint = position.duration - configuration.crossfadeDuration
+        
+        // Trigger crossfade when we reach the trigger point
+        return position.currentTime >= triggerPoint && position.currentTime < position.duration
+    }
+    
+    /// Start the loop crossfade process
+    private func startLoopCrossfade() async {
+        // Mark as in progress
+        isLoopCrossfadeInProgress = true
+        
+        // Schedule the beginning of the file on the secondary player
+        await audioEngine.scheduleLoopOnSecondaryPlayer()
+        
+        // Start crossfade (fade out current, fade in new)
+        let duration = configuration.crossfadeDuration
+        let curve = configuration.fadeCurve
+        
+        async let fadeOut: () = audioEngine.fadeActiveMixer(
+            from: 1.0,
+            to: 0.0,
+            duration: duration,
+            curve: curve
+        )
+        
+        async let fadeIn: () = audioEngine.fadeInactiveMixer(
+            from: 0.0,
+            to: 1.0,
+            duration: duration,
+            curve: curve
+        )
+        
+        // Wait for both fades to complete
+        await fadeOut
+        await fadeIn
+        
+        // Switch active player
+        await audioEngine.switchActivePlayer()
+        
+        // Increment repeat count and check if we should stop
+        incrementRepeatCount()
+        
+        // Reset flag
+        isLoopCrossfadeInProgress = false
+    }
+    
+    /// Increment repeat count and stop if max reached
+    private func incrementRepeatCount() {
+        currentRepeatCount += 1
+        
+        // Check if we've reached max repeats
+        if let maxRepeats = configuration.repeatCount {
+            if currentRepeatCount >= maxRepeats {
+                // Stop playback after completing this iteration
+                Task {
+                    try? await finish(fadeDuration: configuration.fadeOutDuration)
+                }
+            }
         }
     }
 }
