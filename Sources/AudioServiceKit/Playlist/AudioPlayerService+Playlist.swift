@@ -211,34 +211,25 @@ extension AudioPlayerService {
     
     /// Crossfade to specific track
     private func crossfadeToTrack(url: URL) async throws {
-        print("🔴 [CROSSFADE] crossfadeToTrack() called for: \(url.lastPathComponent)")
-        
         guard let position = playbackPosition else {
-            print("❌ [CROSSFADE] No playback position!")
             throw AudioPlayerError.noActiveTrack
         }
-        
-        // CRITICAL: Mark track replacement BEFORE starting crossfade
-        // This ensures UI shows crossfade state immediately
-        isTrackReplacementInProgress = true
-        print("🔴 [CROSSFADE] Marked replacement in progress")
-        
-        // Send preparing state to observers immediately
-        let prepareProgress = CrossfadeProgress(
-            phase: .preparing,
-            duration: configuration.crossfadeDuration,
-            elapsed: 0
-        )
-        print("🔴 [CROSSFADE] Sending .preparing progress to observers...")
-        updateCrossfadeProgress(prepareProgress)
-        print("🔴 [CROSSFADE] Progress sent")
         
         // Calculate crossfade duration based on remaining time
         let remainingTime = position.duration - position.currentTime
         let crossfadeDuration = min(configuration.crossfadeDuration, remainingTime)
         
+        // Send preparing state to observers immediately (BEFORE replaceTrack)
+        let prepareProgress = CrossfadeProgress(
+            phase: .preparing,
+            duration: crossfadeDuration,
+            elapsed: 0
+        )
+        updateCrossfadeProgress(prepareProgress)
+        
         // Use existing replaceTrack method
-        // Note: replaceTrack will handle isTrackReplacementInProgress flag
+        // NOTE: Do NOT set isTrackReplacementInProgress here!
+        // replaceTrack() will manage it and send proper progress updates
         try await replaceTrack(url: url, crossfadeDuration: crossfadeDuration)
     }
     

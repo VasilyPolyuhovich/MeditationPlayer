@@ -102,8 +102,6 @@ actor AudioEngineActor {
     }
     
     func pause() {
-        print("🟢 [ENGINE] pause() called, activePlayer: \(activePlayer)")
-        
         // 1. Capture current position in offset before pausing
         // This ensures position is preserved for accurate resume
         if let current = getCurrentPosition() {
@@ -112,19 +110,14 @@ actor AudioEngineActor {
             
             if activePlayer == .a {
                 playbackOffsetA = currentFrame
-                print("🟢 [ENGINE] Saved position A: \(currentFrame) (\(current.currentTime)s)")
             } else {
                 playbackOffsetB = currentFrame
-                print("🟢 [ENGINE] Saved position B: \(currentFrame) (\(current.currentTime)s)")
             }
-        } else {
-            print("⚠️ [ENGINE] Could not get current position!")
         }
         
         // 2. Pause BOTH players (safe during crossfade)
         playerNodeA.pause()
         playerNodeB.pause()
-        print("🟢 [ENGINE] Players paused")
     }
     
     func play() {
@@ -575,30 +568,35 @@ actor AudioEngineActor {
         crossfadeProgressContinuation = continuation
         
         // Create and store crossfade task
-        let task = Task { @MainActor in
+        // Task runs asynchronously and sends progress updates through continuation
+        let task = Task {
             await self.executeCrossfade(
                 duration: duration,
                 curve: curve,
                 progress: continuation
             )
+            
+            // CRITICAL: Small delay to ensure .idle state is delivered to all observers
+            // Before closing the stream. Without this, race condition may prevent UI from
+            // receiving the final .idle update, causing it to be stuck at "Crossfading 0%"
+            try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+            
+            // Cleanup after crossfade completes
+            await self.cleanupCrossfade(continuation: continuation)
         }
         
         activeCrossfadeTask = task
         
-        // Wait for completion
-        await task.value
-        
-        // CRITICAL: Small delay to ensure .idle state is delivered to all observers
-        // Before closing the stream. Without this, race condition may prevent UI from
-        // receiving the final .idle update, causing it to be stuck at "Crossfading 0%"
-        try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
-        
-        // Cleanup
+        // ✅ FIX: Return stream immediately so caller can subscribe to progress updates
+        // Task continues running asynchronously and generates updates
+        return stream
+    }
+    
+    /// Cleanup crossfade state after completion
+    private func cleanupCrossfade(continuation: AsyncStream<CrossfadeProgress>.Continuation) {
         activeCrossfadeTask = nil
         continuation.finish()
         crossfadeProgressContinuation = nil
-        
-        return stream
     }
     
     /// Execute crossfade with progress reporting

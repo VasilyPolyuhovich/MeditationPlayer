@@ -54,4 +54,10 @@ protocol AudioStateMachineContext: Actor {
     
     /// Transition to finished state after fade out
     func transitionToFinished() async
+    
+    /// Transition to playing state (called from PreparingState)
+    func transitionToPlaying() async
+    
+    /// Transition to failed state (called from PreparingState)
+    func transitionToFailed(error: AudioPlayerError) async
 }

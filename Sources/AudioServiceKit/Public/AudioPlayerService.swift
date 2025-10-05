@@ -166,17 +166,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
-        print("🔵 [PAUSE] Called - current state: \(state)")
-        
         // Rollback any active crossfade before pausing
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            print("🔵 [PAUSE] Rolling back crossfade...")
             await rollbackCrossfade()
         }
         
         // Guard: only pause if playing or preparing (to prevent Error 4)
         guard state == .playing || state == .preparing else {
-            print("❌ [PAUSE] Invalid state: \(state)")
             // If already paused or finished, just return
             if state == .paused || state == .finished {
                 return
@@ -187,14 +183,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        print("🔵 [PAUSE] Entering paused state via state machine...")
         // ✅ FIX: Delegate to state machine (removes duplicate call)
         // State machine will call context.pausePlayback() which handles:
         // - Capturing position ONCE
         // - Pausing audio engine
         // - Stopping playback timer
         await stateMachine.enterPaused()
-        print("✅ [PAUSE] Complete - new state: \(state)")
         
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
@@ -875,16 +869,12 @@ extension AudioPlayerService: AudioStateMachineContext {
     }
     
     func pausePlayback() async {
-        print("🟡 [CONTEXT] pausePlayback() called")
-        
         // Stop playback timer BEFORE pausing
         // This prevents position updates during pause
         stopPlaybackTimer()
-        print("🟡 [CONTEXT] Timer stopped")
         
         // Pause audio engine (captures position accurately)
         await audioEngine.pause()
-        print("🟡 [CONTEXT] AudioEngine paused")
     }
     
     func resumePlayback() async throws {
@@ -906,6 +896,14 @@ extension AudioPlayerService: AudioStateMachineContext {
     func transitionToFinished() async {
         // Properly transition to finished state after fade out
         await stop()
+    }
+    
+    func transitionToPlaying() async {
+        await stateMachine.enterPlaying()
+    }
+    
+    func transitionToFailed(error: AudioPlayerError) async {
+        await stateMachine.enterFailed(error: error)
     }
 }
 
