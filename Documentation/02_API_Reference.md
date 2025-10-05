@@ -1,17 +1,17 @@
 # API Reference
 
-**ProsperPlayer v2.6.0**
+**ProsperPlayer v2.11.0 - Complete API Guide**
 
 ---
 
 ## AudioPlayerService
 
-Primary interface for audio playback control.
+Primary interface for audio playback control with playlist management.
 
 ### Initialization
 
 ```swift
-public init(configuration: AudioConfiguration = AudioConfiguration())
+public init()
 ```
 
 **Post-init requirement:**
@@ -27,7 +27,225 @@ await service.setup()
 
 ---
 
-## Core Methods
+## Playlist API (v2.11.0)
+
+### loadPlaylist(_:configuration:)
+
+```swift
+public func loadPlaylist(
+    _ tracks: [URL],
+    configuration: PlayerConfiguration? = nil
+) async throws
+```
+
+**Parameters:**
+- `tracks`: Array of track URLs (non-empty)
+- `configuration`: Player configuration (uses current if nil)
+
+**Throws:**
+- `AudioPlayerError.emptyPlaylist` - Tracks array is empty
+- `ConfigurationError.*` - Invalid configuration
+
+**Behavior:**
+- Loads playlist into PlaylistManager
+- Starts playback with first track
+- Enables auto-advance between tracks
+
+**Example:**
+```swift
+let config = PlayerConfiguration(
+    crossfadeDuration: 10.0,
+    enableLooping: true
+)
+
+try await service.loadPlaylist(
+    [track1URL, track2URL, track3URL],
+    configuration: config
+)
+```
+
+---
+
+### nextTrack()
+
+```swift
+public func nextTrack() async throws
+```
+
+**Behavior:**
+- Manual advance to next track in playlist
+- Crossfades to next track (adaptive duration)
+- Loops to first track if at end (if looping enabled)
+
+**Throws:**
+- `AudioPlayerError.emptyPlaylist` - No tracks loaded
+- `AudioPlayerError.crossfadeInProgress` - Already crossfading
+
+**Example:**
+```swift
+try await service.nextTrack()
+```
+
+---
+
+### previousTrack()
+
+```swift
+public func previousTrack() async throws
+```
+
+**Behavior:**
+- Manual return to previous track
+- Crossfades to previous track
+- Wraps to last track if at beginning (if looping)
+
+**Throws:**
+- `AudioPlayerError.emptyPlaylist` - No tracks loaded
+
+**Example:**
+```swift
+try await service.previousTrack()
+```
+
+---
+
+### jumpToTrack(at:)
+
+```swift
+public func jumpToTrack(at index: Int) async throws
+```
+
+**Parameters:**
+- `index`: Target track index (0-based)
+
+**Throws:**
+- `AudioPlayerError.invalidPlaylistIndex` - Index out of bounds
+
+**Behavior:**
+- Crossfades to specified track
+- Updates current index
+
+**Example:**
+```swift
+try await service.jumpToTrack(at: 2)  // Jump to 3rd track
+```
+
+---
+
+### addTrackToPlaylist(_:)
+
+```swift
+public func addTrackToPlaylist(_ url: URL) async
+```
+
+**Parameters:**
+- `url`: Track URL to add
+
+**Behavior:**
+- Appends track to playlist
+- Enables controls if first track
+
+**Example:**
+```swift
+await service.addTrackToPlaylist(newTrackURL)
+```
+
+---
+
+### removeTrackFromPlaylist(at:)
+
+```swift
+public func removeTrackFromPlaylist(at index: Int) async throws
+```
+
+**Parameters:**
+- `index`: Track index to remove
+
+**Throws:**
+- `AudioPlayerError.invalidPlaylistIndex` - Invalid index
+
+**Behavior:**
+- Removes track from playlist
+- Stops playback if last track removed
+- Adjusts current index if needed
+
+**Example:**
+```swift
+try await service.removeTrackFromPlaylist(at: 1)
+```
+
+---
+
+### moveTrackInPlaylist(from:to:)
+
+```swift
+public func moveTrackInPlaylist(from: Int, to: Int) async throws
+```
+
+**Parameters:**
+- `from`: Source index
+- `to`: Destination index
+
+**Throws:**
+- `AudioPlayerError.invalidPlaylistIndex` - Invalid indices
+
+**Example:**
+```swift
+try await service.moveTrackInPlaylist(from: 0, to: 2)
+```
+
+---
+
+### getCurrentPlaylist()
+
+```swift
+public func getCurrentPlaylist() async -> [URL]
+```
+
+**Returns:** Array of track URLs in playlist
+
+**Example:**
+```swift
+let tracks = await service.getCurrentPlaylist()
+print("Playlist: \(tracks.count) tracks")
+```
+
+---
+
+### getCurrentTrackIndex()
+
+```swift
+public func getCurrentTrackIndex() async -> Int
+```
+
+**Returns:** Current track index (0-based)
+
+**Example:**
+```swift
+let index = await service.getCurrentTrackIndex()
+print("Playing track \(index + 1)")
+```
+
+---
+
+### isPlaylistEmpty()
+
+```swift
+public func isPlaylistEmpty() async -> Bool
+```
+
+**Returns:** `true` if playlist has no tracks
+
+**Example:**
+```swift
+if await service.isPlaylistEmpty() {
+    print("No tracks loaded")
+}
+```
+
+---
+
+## Legacy Playback Methods
 
 ### startPlaying(url:configuration:)
 
@@ -38,32 +256,20 @@ public func startPlaying(
 ) async throws
 ```
 
+**Note:** Legacy method. Use `loadPlaylist()` for v2.11.0+
+
 **Parameters:**
 - `url`: Local audio file URL
-- `configuration`: Playback configuration
+- `configuration`: Legacy AudioConfiguration
 
 **Throws:**
-- `AudioPlayerError.invalidConfiguration` - Config validation failed
-- `AudioPlayerError.fileNotFound` - URL invalid
-- `AudioPlayerError.invalidState` - Cannot start from current state
-
-**State transition:** `*` → `preparing` → `playing`
-
-**Example:**
-```swift
-let config = AudioConfiguration(
-    crossfadeDuration: 10.0,
-    fadeInDuration: 3.0,
-    enableLooping: true
-)
-
-try await service.startPlaying(
-    url: audioURL,
-    configuration: config
-)
-```
+- `AudioPlayerError.invalidConfiguration`
+- `AudioPlayerError.fileNotFound`
+- `AudioPlayerError.invalidState`
 
 ---
+
+## Playback Control
 
 ### pause()
 
@@ -95,8 +301,6 @@ public func resume() async throws
 
 **State transition:** `paused` → `playing`
 
-**Idempotent:** Safe to call when already playing
-
 ---
 
 ### stop()
@@ -108,7 +312,7 @@ public func stop() async
 **Effects:**
 - Stops playback
 - Deactivates audio session
-- Clears all state
+- Clears state
 - Clears Now Playing info
 
 **State transition:** `*` → `finished`
@@ -117,21 +321,50 @@ public func stop() async
 
 ---
 
-### finish(fadeDuration:)
+### reset()
 
 ```swift
-public func finish(fadeDuration: TimeInterval?) async throws
+public func reset() async
+```
+
+**Effects:**
+- Full engine reset
+- **Clears playlist** (v2.11.0)
+- Clear all files and state
+- Deactivate session
+- Re-initialize engine
+
+**Usage:** Prepare for completely new session
+
+---
+
+## Navigation
+
+### seekWithFade(to:fadeDuration:)
+
+```swift
+public func seekWithFade(
+    to position: TimeInterval,
+    fadeDuration: TimeInterval = 0.3
+) async throws
 ```
 
 **Parameters:**
-- `fadeDuration`: Override config fade-out (optional)
+- `position`: Target position in seconds
+- `fadeDuration`: Fade duration (default: 0.3s)
 
 **Behavior:**
-1. Fade volume: 1.0 → 0.0
-2. Transition to `finished`
-3. Deactivate session
+- Fade out (quick)
+- Seek to position
+- Fade in (quick)
 
-**State transition:** `playing` → `fadingOut` → `finished`
+**Throws:**
+- `AudioPlayerError.invalidState` - No active playback
+
+**Example:**
+```swift
+try await service.seekWithFade(to: 60.0, fadeDuration: 0.2)
+```
 
 ---
 
@@ -146,11 +379,11 @@ public func skipBackward(by interval: TimeInterval = 15.0) async throws
 - `interval`: Seek distance in seconds (default: 15.0)
 
 **Throws:**
-- `AudioPlayerError.invalidState` - During crossfade or no position
+- `AudioPlayerError.invalidState` - During crossfade
 
 **Constraints:**
 - Clamped to [0, duration]
-- Blocked during crossfade transitions
+- Uses `seekWithFade()` internally
 
 **Example:**
 ```swift
@@ -171,23 +404,17 @@ public func replaceTrack(
 
 **Parameters:**
 - `url`: New audio file URL
-- `crossfadeDuration`: Fade duration (range: 1.0-30.0s)
+- `crossfadeDuration`: Fade duration (1.0-30.0s)
 
 **Behavior:**
-- If playing: Synchronized crossfade to new track
-- If paused: Silent switch (no playback)
+- If playing: Crossfade to new track
+- If paused: Silent switch
 
 **Validation:** Duration clamped to [1.0, 30.0]
 
-**Example:**
-```swift
-try await service.replaceTrack(
-    url: newTrackURL,
-    crossfadeDuration: 8.0
-)
-```
-
 ---
+
+## Configuration
 
 ### setVolume(_:)
 
@@ -199,39 +426,6 @@ public func setVolume(_ volume: Float) async
 - `volume`: Master volume [0.0, 1.0]
 
 **Note:** Clamped automatically, never throws
-
----
-
-### reset()
-
-```swift
-public func reset() async
-```
-
-**Effects:**
-- Full engine reset
-- Clear all files and state
-- Deactivate session
-- Restore default configuration
-- Re-initialize engine
-
-**Usage:** Prepare for completely new session
-
----
-
-### cleanup()
-
-```swift
-public func cleanup() async
-```
-
-**Effects:**
-- Stop playback
-- Deactivate session
-- Remove remote commands
-- Clear observers
-
-**Usage:** Before service deallocation
 
 ---
 
@@ -254,18 +448,6 @@ enum PlayerState: Sendable {
     case failed(AudioPlayerError)
 }
 ```
-
----
-
-### configuration
-
-```swift
-public private(set) var configuration: AudioConfiguration { get }
-```
-
-**Mutable via:**
-- `startPlaying(url:configuration:)` - sets new config
-- `reset()` - restores default
 
 ---
 
@@ -296,6 +478,10 @@ public private(set) var playbackPosition: PlaybackPosition? { get }
 struct PlaybackPosition: Sendable {
     let currentTime: TimeInterval
     let duration: TimeInterval
+    
+    var progress: Double {
+        currentTime / duration
+    }
 }
 ```
 
@@ -338,74 +524,31 @@ actor MyObserver: AudioPlayerObserver {
     }
 }
 
-let observer = MyObserver()
-await service.addObserver(observer)
+await service.addObserver(MyObserver())
 ```
 
 ---
 
-## AudioConfiguration
+## PlayerConfiguration
 
 ### Structure
 
 ```swift
-public struct AudioConfiguration: Sendable {
-    public let crossfadeDuration: TimeInterval  // Default: 10.0
-    public let fadeInDuration: TimeInterval     // Default: 3.0
-    public let fadeOutDuration: TimeInterval    // Default: 6.0
-    public let fadeCurve: FadeCurve            // Default: .equalPower
-    public let enableLooping: Bool              // Default: false
-    public let repeatCount: Int?                // Default: nil (infinite)
-}
-```
-
-### Validation Rules
-
-```swift
-func validate() throws {
-    guard crossfadeDuration >= 1.0 && crossfadeDuration <= 30.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "crossfadeDuration must be in range [1.0, 30.0]"
-        )
-    }
+public struct PlayerConfiguration: Sendable {
+    public var crossfadeDuration: TimeInterval  // 1.0-30.0s
+    public var fadeCurve: FadeCurve            // Algorithm
+    public var enableLooping: Bool              // Playlist cycle
+    public var repeatCount: Int?                // nil = infinite
+    public var volume: Int                      // 0-100
     
-    guard fadeInDuration >= 0.0 && fadeInDuration <= 10.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "fadeInDuration must be in range [0.0, 10.0]"
-        )
-    }
-    
-    guard fadeOutDuration >= 0.0 && fadeOutDuration <= 30.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "fadeOutDuration must be in range [0.0, 30.0]"
-        )
-    }
-    
-    if let count = repeatCount {
-        guard count > 0 else {
-            throw AudioPlayerError.invalidConfiguration(
-                "repeatCount must be > 0"
-            )
-        }
+    // Auto-calculated:
+    public var fadeInDuration: TimeInterval {
+        crossfadeDuration * 0.3
     }
 }
 ```
 
----
-
-## FadeCurve
-
-```swift
-public enum FadeCurve: Sendable {
-    case equalPower    // sin/cos (recommended)
-    case linear        // t
-    case logarithmic   // log₁₀-based
-    case exponential   // t²
-    case sCurve        // smoothstep
-}
-```
-
-**See:** `04_Fade_Curves.md` for mathematical details
+**See:** `06_Configuration.md` for complete reference
 
 ---
 
@@ -416,28 +559,24 @@ public enum FadeCurve: Sendable {
 ```swift
 public enum AudioPlayerError: Error {
     case invalidState(current: String, attempted: String)
-    case invalidConfiguration(String)
     case fileNotFound(URL)
     case engineError(String)
     case sessionError(String)
+    
+    // Playlist errors (v2.11.0):
+    case emptyPlaylist
+    case invalidPlaylistIndex(index: Int, count: Int)
+    case noActiveTrack
 }
 ```
 
-### Error Recovery
+### ConfigurationError
 
-**Pattern:**
 ```swift
-do {
-    try await service.startPlaying(url: url, configuration: config)
-} catch AudioPlayerError.invalidConfiguration(let msg) {
-    print("Config error: \(msg)")
-    // Fix configuration and retry
-} catch AudioPlayerError.fileNotFound(let url) {
-    print("File not found: \(url)")
-    // Check file existence
-} catch {
-    print("Unexpected error: \(error)")
-    await service.reset()  // Full reset
+public enum ConfigurationError: Error {
+    case invalidCrossfadeDuration(TimeInterval)
+    case invalidVolume(Int)
+    case invalidRepeatCount(Int)
 }
 ```
 
@@ -445,48 +584,43 @@ do {
 
 ## Usage Patterns
 
-### Basic Playback
+### Playlist Playback
 
 ```swift
 let service = AudioPlayerService()
 await service.setup()
 
-let config = AudioConfiguration(
-    fadeInDuration: 2.0,
-    fadeOutDuration: 3.0
-)
-
-try await service.startPlaying(url: audioURL, configuration: config)
-try await service.pause()
-try await service.resume()
-await service.stop()
-```
-
----
-
-### Looping with Crossfade
-
-```swift
-let config = AudioConfiguration(
+let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
     enableLooping: true,
-    repeatCount: 5  // Loop 5 times
+    volume: 80
 )
 
-try await service.startPlaying(url: audioURL, configuration: config)
+try await service.loadPlaylist(trackURLs, configuration: config)
+
+// Auto-advance enabled
+// Manual navigation:
+try await service.nextTrack()
+try await service.previousTrack()
 ```
 
 ---
 
-### Track Replacement
+### Dynamic Playlist
 
 ```swift
-// Playing track A
-try await service.replaceTrack(
-    url: trackB_URL,
-    crossfadeDuration: 8.0
-)
-// Smooth crossfade to track B
+// Add tracks on the fly
+await service.addTrackToPlaylist(newTrackURL)
+
+// Remove tracks
+try await service.removeTrackFromPlaylist(at: 2)
+
+// Reorder
+try await service.moveTrackInPlaylist(from: 0, to: 3)
+
+// Query state
+let tracks = await service.getCurrentPlaylist()
+let index = await service.getCurrentTrackIndex()
 ```
 
 ---
@@ -497,6 +631,7 @@ try await service.replaceTrack(
 actor ViewModel: AudioPlayerObserver {
     @Published var isPlaying = false
     @Published var currentTime: TimeInterval = 0
+    @Published var trackName = ""
     
     func playerStateDidChange(_ state: PlayerState) async {
         await MainActor.run {
@@ -516,115 +651,41 @@ actor ViewModel: AudioPlayerObserver {
 
 ## Thread Safety
 
-**All methods are actor-isolated and inherently thread-safe.**
+**All methods are actor-isolated and thread-safe.**
 
 **Concurrency model:**
 ```swift
 // Multiple concurrent calls are serialized
 Task { try await service.pause() }
-Task { try await service.skipForward() }
+Task { try await service.nextTrack() }
 // Guaranteed sequential execution
 ```
 
-**UI Integration:**
-```swift
-// SwiftUI
-@State private var service: AudioPlayerService?
-
-.task {
-    let s = AudioPlayerService()
-    await s.setup()
-    service = s
-}
-
-// Calls from UI always safe
-Button("Play") {
-    Task {
-        try? await service?.resume()
-    }
-}
-```
-
 ---
 
-## Performance Considerations
+## Performance
 
-**Blocking operations:**
-- `startPlaying()`: ~100-500ms (file load + engine setup)
-- `replaceTrack()`: ~50-200ms (file load only)
-- `seek()`: < 50ms
+**Operation latency:**
+- `loadPlaylist()`: ~100-500ms (file load + setup)
+- `nextTrack()`: ~50-200ms (file load)
+- `seekWithFade()`: < 50ms
 - All other methods: < 10ms
 
-**Recommended:**
-- Preload files before `startPlaying()`
-- Use observers for UI updates (avoid polling)
-- Call `cleanup()` before deallocation
-- Use `reset()` for complete state reset
+**Recommendations:**
+- Preload files for instant playback
+- Use observers for UI updates
+- Call `reset()` for complete cleanup
 
 ---
 
-## SwiftUI Integration
+## Platform Support
 
-```swift
-struct ContentView: View {
-    @State private var service: AudioPlayerService?
-    @StateObject private var viewModel = AudioViewModel()
-    
-    var body: some View {
-        VStack {
-            if let service = service {
-                PlayerControls(service: service)
-                    .onAppear {
-                        Task {
-                            await viewModel.observe(service)
-                        }
-                    }
-            }
-        }
-        .task {
-            let s = AudioPlayerService()
-            await s.setup()
-            service = s
-        }
-    }
-}
-```
+- **iOS**: 15.0+
+- **Testing**: Physical device recommended (simulator may lack audio)
 
 ---
 
-## Testing
-
-### Unit Test Example
-
-```swift
-@Test
-func testPauseResume() async throws {
-    let service = AudioPlayerService()
-    await service.setup()
-    
-    try await service.startPlaying(url: testURL, configuration: .init())
-    
-    // Wait for playing state
-    try await Task.sleep(nanoseconds: 100_000_000)
-    
-    try await service.pause()
-    let pausedState = await service.state
-    #expect(pausedState == .paused)
-    
-    try await service.resume()
-    let playingState = await service.state
-    #expect(playingState == .playing)
-}
-```
-
----
-
-## Migration from v2.5.0
-
-**Breaking changes:** None
-
-**New features:**
-- Issue #8 fix: Float precision tolerance (internal)
-- Issue #9 fix: Adaptive volume fade steps (internal)
-
-**Deprecated:** None
+**See also:**
+- [Configuration Reference](06_Configuration.md)
+- [Migration Guide](07_Migration_Guide.md)
+- [Concurrency Patterns](05_Concurrency.md)

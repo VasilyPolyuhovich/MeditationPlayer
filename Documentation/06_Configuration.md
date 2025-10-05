@@ -1,19 +1,27 @@
 # Configuration Reference
 
-**AudioConfiguration parameters and validation**
+**PlayerConfiguration parameters and validation (v2.11.0)**
 
 ---
+
+## Overview
+
+PlayerConfiguration provides a simplified, intuitive API for audio playback configuration. Unlike the legacy AudioConfiguration, it uses a single crossfade parameter with automatic fade calculations.
 
 ## Structure
 
 ```swift
-public struct AudioConfiguration: Sendable, Equatable {
-    public let crossfadeDuration: TimeInterval
-    public let fadeInDuration: TimeInterval
-    public let fadeOutDuration: TimeInterval
-    public let fadeCurve: FadeCurve
-    public let enableLooping: Bool
-    public let repeatCount: Int?
+public struct PlayerConfiguration: Sendable {
+    public var crossfadeDuration: TimeInterval  // 1.0-30.0s
+    public var fadeCurve: FadeCurve            // Algorithm
+    public var enableLooping: Bool              // Playlist cycle
+    public var repeatCount: Int?                // nil = infinite
+    public var volume: Int                      // 0-100
+    
+    // Auto-calculated:
+    public var fadeInDuration: TimeInterval {
+        crossfadeDuration * 0.3  // 30% of crossfade
+    }
 }
 ```
 
@@ -27,95 +35,32 @@ public struct AudioConfiguration: Sendable, Equatable {
 **Range:** [1.0, 30.0] seconds  
 **Default:** 10.0
 
-**Purpose:** Duration for track-to-track and loop crossfades.
+**Purpose:** Duration for all fade operations:
+- Track-to-track crossfades (auto-advance)
+- Loop crossfades (same track)
+- Manual track switches
 
 **Validation:**
 ```swift
 guard crossfadeDuration >= 1.0 && crossfadeDuration <= 30.0 else {
-    throw AudioPlayerError.invalidConfiguration(
-        "crossfadeDuration must be in range [1.0, 30.0]"
-    )
+    throw ConfigurationError.invalidCrossfadeDuration(crossfadeDuration)
 }
 ```
 
-**Performance impact:**
-- 1s: 100 volume steps (10ms/step)
-- 10s: 300 volume steps (33ms/step)
-- 30s: 600 volume steps (50ms/step)
+**Auto-calculations:**
+- `fadeIn = crossfadeDuration * 0.3` (30%)
+- Example: 10s crossfade → 3s fadeIn
 
 **Recommendations:**
 ```swift
 // Quick transitions
-AudioConfiguration(crossfadeDuration: 2.0)
+PlayerConfiguration(crossfadeDuration: 2.0)
 
 // Standard (meditation/ambient)
-AudioConfiguration(crossfadeDuration: 10.0)
+PlayerConfiguration(crossfadeDuration: 10.0)
 
 // Extended (cinematic)
-AudioConfiguration(crossfadeDuration: 20.0)
-```
-
----
-
-### fadeInDuration
-
-**Type:** `TimeInterval`  
-**Range:** [0.0, 10.0] seconds  
-**Default:** 3.0
-
-**Purpose:** Fade from silence at playback start.
-
-**Validation:**
-```swift
-guard fadeInDuration >= 0.0 && fadeInDuration <= 10.0 else {
-    throw AudioPlayerError.invalidConfiguration(
-        "fadeInDuration must be in range [0.0, 10.0]"
-    )
-}
-```
-
-**Special cases:**
-- `0.0` → Instant start (no fade)
-- `>0.0` → Smooth entrance
-
-**Curve interaction:**
-```swift
-// Natural fade-in
-AudioConfiguration(
-    fadeInDuration: 3.0,
-    fadeCurve: .logarithmic  // Fast start, gentle end
-)
-```
-
----
-
-### fadeOutDuration
-
-**Type:** `TimeInterval`  
-**Range:** [0.0, 30.0] seconds  
-**Default:** 6.0
-
-**Purpose:** Fade to silence before stop.
-
-**Validation:**
-```swift
-guard fadeOutDuration >= 0.0 && fadeOutDuration <= 30.0 else {
-    throw AudioPlayerError.invalidConfiguration(
-        "fadeOutDuration must be in range [0.0, 30.0]"
-    )
-}
-```
-
-**Usage:**
-```swift
-// Quick stop
-try await service.finish(fadeDuration: 2.0)
-
-// Gentle ending
-try await service.finish(fadeDuration: 15.0)
-
-// Use config default
-try await service.finish(fadeDuration: nil)
+PlayerConfiguration(crossfadeDuration: 20.0)
 ```
 
 ---
@@ -132,16 +77,14 @@ try await service.finish(fadeDuration: nil)
 
 | Use Case | Curve | Rationale |
 |----------|-------|-----------|
-| Crossfading | `.equalPower` | Constant loudness |
+| Crossfading | `.equalPower` | Constant loudness (cos² + sin² = 1) |
 | Fade in | `.logarithmic` | Natural attack |
-| Fade out | `.exponential` | Smooth decay |
 | UI sync | `.sCurve` | Matches animations |
 
 **Example:**
 ```swift
-AudioConfiguration(
-    fadeInDuration: 3.0,
-    fadeOutDuration: 5.0,
+PlayerConfiguration(
+    crossfadeDuration: 10.0,
     fadeCurve: .equalPower  // Recommended
 )
 ```
@@ -151,34 +94,27 @@ AudioConfiguration(
 ### enableLooping
 
 **Type:** `Bool`  
-**Default:** `false`
+**Default:** `true`
 
-**Purpose:** Enable automatic loop with crossfade.
+**Purpose:** Enable automatic playlist cycling.
 
 **Behavior:**
-- `true` → Track loops with crossfade at end
-- `false` → Single playback, stops at end
+- `true` → Playlist cycles with crossfades
+- `false` → Play once and stop
 
 **Loop mechanics:**
 ```swift
-// Infinite loop
-AudioConfiguration(
+// Infinite playlist loop
+PlayerConfiguration(
     enableLooping: true,
     repeatCount: nil  // Loop forever
 )
 
 // Limited repeats
-AudioConfiguration(
+PlayerConfiguration(
     enableLooping: true,
-    repeatCount: 5  // Loop 5 times
+    repeatCount: 5  // Cycle 5 times
 )
-```
-
-**Trigger logic:**
-```
-Loop trigger point: duration - crossfadeDuration - ε
-
-Where ε = 0.1s (tolerance for float precision)
 ```
 
 ---
@@ -189,37 +125,89 @@ Where ε = 0.1s (tolerance for float precision)
 **Range:** > 0 or nil  
 **Default:** `nil`
 
-**Purpose:** Limit number of loop iterations.
+**Purpose:** Limit number of playlist cycles.
 
 **Validation:**
 ```swift
-if let count = repeatCount {
-    guard count > 0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "repeatCount must be > 0"
-        )
-    }
+if let count = repeatCount, count < 0 {
+    throw ConfigurationError.invalidRepeatCount(count)
 }
 ```
 
 **Semantics:**
 - `nil` → Infinite loop (if `enableLooping = true`)
-- `n` → Loop n times, then stop with fade-out
+- `n` → Cycle n times, then stop
 
-**Example:**
+**Examples:**
 ```swift
-// Play 3 times
-AudioConfiguration(
+// Play playlist 3 times
+PlayerConfiguration(
     enableLooping: true,
     repeatCount: 3
 )
 
 // Infinite (meditation)
-AudioConfiguration(
+PlayerConfiguration(
     enableLooping: true,
     repeatCount: nil
 )
+
+// Single playthrough
+PlayerConfiguration(
+    enableLooping: false
+)
 ```
+
+---
+
+### volume
+
+**Type:** `Int`  
+**Range:** [0, 100]  
+**Default:** 100
+
+**Purpose:** Master volume level.
+
+**Validation:**
+```swift
+guard volume >= 0 && volume <= 100 else {
+    throw ConfigurationError.invalidVolume(volume)
+}
+```
+
+**Internal conversion:**
+```swift
+var volumeFloat: Float {
+    Float(max(0, min(100, volume))) / 100.0
+}
+```
+
+**UI-friendly:**
+```swift
+// Direct slider binding
+Slider(value: $volume, in: 0...100, step: 1)
+
+// No Float conversion needed
+```
+
+---
+
+### fadeInDuration (Computed)
+
+**Type:** `TimeInterval` (read-only)  
+**Formula:** `crossfadeDuration * 0.3`
+
+**Purpose:** Automatic fade from silence at track start.
+
+**Examples:**
+- `crossfade: 10s` → `fadeIn: 3s`
+- `crossfade: 15s` → `fadeIn: 4.5s`
+- `crossfade: 3s` → `fadeIn: 0.9s`
+
+**Rationale:**
+- 30% provides natural entrance
+- Scales with crossfade duration
+- No manual tuning required
 
 ---
 
@@ -230,42 +218,27 @@ AudioConfiguration(
 ```swift
 public func validate() throws {
     // Crossfade duration
-    guard crossfadeDuration >= 1.0 && crossfadeDuration <= 30.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "crossfadeDuration must be in range [1.0, 30.0]"
-        )
+    if crossfadeDuration < 1.0 || crossfadeDuration > 30.0 {
+        throw ConfigurationError.invalidCrossfadeDuration(crossfadeDuration)
     }
     
-    // Fade in duration
-    guard fadeInDuration >= 0.0 && fadeInDuration <= 10.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "fadeInDuration must be in range [0.0, 10.0]"
-        )
+    // Volume range
+    if volume < 0 || volume > 100 {
+        throw ConfigurationError.invalidVolume(volume)
     }
     
-    // Fade out duration
-    guard fadeOutDuration >= 0.0 && fadeOutDuration <= 30.0 else {
-        throw AudioPlayerError.invalidConfiguration(
-            "fadeOutDuration must be in range [0.0, 30.0]"
-        )
-    }
-    
-    // Repeat count
-    if let count = repeatCount {
-        guard count > 0 else {
-            throw AudioPlayerError.invalidConfiguration(
-                "repeatCount must be > 0"
-            )
-        }
+    // RepeatCount
+    if let count = repeatCount, count < 0 {
+        throw ConfigurationError.invalidRepeatCount(count)
     }
 }
 ```
 
 **Automatic validation:**
 ```swift
-// Called automatically in startPlaying()
-try await service.startPlaying(url: url, configuration: config)
-// Throws if config invalid
+// Called automatically in loadPlaylist()
+try await service.loadPlaylist(tracks, configuration: config)
+// Throws ConfigurationError if invalid
 ```
 
 ---
@@ -275,91 +248,94 @@ try await service.startPlaying(url: url, configuration: config)
 ### Default
 
 ```swift
-AudioConfiguration()
+PlayerConfiguration()
 ```
 
 **Values:**
 - crossfadeDuration: 10.0
-- fadeInDuration: 3.0
-- fadeOutDuration: 6.0
 - fadeCurve: .equalPower
-- enableLooping: false
+- enableLooping: true
 - repeatCount: nil
+- volume: 100
+- fadeInDuration: 3.0 (auto)
 
 ---
 
 ### Meditation/Ambient
 
 ```swift
-extension AudioConfiguration {
-    static var meditation: AudioConfiguration {
-        AudioConfiguration(
+extension PlayerConfiguration {
+    static var meditation: PlayerConfiguration {
+        PlayerConfiguration(
             crossfadeDuration: 15.0,
-            fadeInDuration: 5.0,
-            fadeOutDuration: 10.0,
             fadeCurve: .equalPower,
             enableLooping: true,
-            repeatCount: nil
+            repeatCount: nil,
+            volume: 80
         )
+        // fadeInDuration = 4.5s (auto)
     }
 }
 ```
-
-**Characteristics:**
-- Extended crossfades (smooth)
-- Gentle fade-in/out
-- Infinite looping
-- Equal-power (no artifacts)
 
 ---
 
 ### Quick Transitions
 
 ```swift
-extension AudioConfiguration {
-    static var quick: AudioConfiguration {
-        AudioConfiguration(
+extension PlayerConfiguration {
+    static var quick: PlayerConfiguration {
+        PlayerConfiguration(
             crossfadeDuration: 2.0,
-            fadeInDuration: 1.0,
-            fadeOutDuration: 2.0,
             fadeCurve: .sCurve,
             enableLooping: false,
-            repeatCount: nil
+            repeatCount: nil,
+            volume: 100
         )
+        // fadeInDuration = 0.6s (auto)
     }
 }
 ```
-
-**Characteristics:**
-- Fast crossfades
-- Immediate start/stop
-- S-curve (smooth acceleration)
-- Single playback
 
 ---
 
-### Podcast/Voice
+## Migration from AudioConfiguration
+
+### Old API (v2.10.1)
 
 ```swift
-extension AudioConfiguration {
-    static var voice: AudioConfiguration {
-        AudioConfiguration(
-            crossfadeDuration: 0.5,
-            fadeInDuration: 0.0,
-            fadeOutDuration: 0.5,
-            fadeCurve: .linear,
-            enableLooping: false,
-            repeatCount: nil
-        )
-    }
-}
+// AudioConfiguration (deprecated)
+AudioConfiguration(
+    crossfadeDuration: 10.0,
+    fadeInDuration: 3.0,      // Manual
+    fadeOutDuration: 6.0,     // Manual
+    volume: 0.8,              // Float 0.0-1.0
+    enableLooping: true,
+    repeatCount: nil,
+    fadeCurve: .equalPower
+)
 ```
 
-**Characteristics:**
-- Minimal crossfade (0.5s)
-- Instant start
-- Quick fade-out
-- Linear (voice-optimized)
+### New API (v2.11.0)
+
+```swift
+// PlayerConfiguration (current)
+PlayerConfiguration(
+    crossfadeDuration: 10.0,
+    // fadeIn auto = 3.0s (30%)
+    // fadeOut removed (not used)
+    volume: 80,               // Int 0-100
+    enableLooping: true,
+    repeatCount: nil,
+    fadeCurve: .equalPower
+)
+```
+
+**Benefits:**
+- ✅ Simpler API (fewer parameters)
+- ✅ Auto-calculated fadeIn (scales properly)
+- ✅ UI-friendly volume (0-100)
+- ✅ Removed unused fadeOut
 
 ---
 
@@ -369,10 +345,10 @@ extension AudioConfiguration {
 
 **Crossfade duration:**
 ```
-CPU_usage = steps_per_second × duration × overhead_per_step
+CPU_usage = adaptive_steps × overhead
 
 Example (10s crossfade):
-  30 steps/sec × 10s × 0.01% = 3% CPU
+  300 steps × 0.01% = 3% CPU
 ```
 
 **Adaptive optimization (v2.6.0):**
@@ -380,19 +356,15 @@ Example (10s crossfade):
 1s:  100 steps → 1%
 10s: 300 steps → 3%
 30s: 600 steps → 6%
-
-Old (fixed): 30s = 3000 steps → 30% ❌
-New (adaptive): 30s = 600 steps → 6% ✅
 ```
 
 ### Memory Impact
 
-**Looping:**
+**Playlist looping:**
 ```
-Memory = file_size × (enableLooping ? 2 : 1)
+Memory = 2 × file_size (during crossfade)
 
-During crossfade: 2 × file_size
-After crossfade: 1 × file_size (old released)
+Post-crossfade: old file released
 ```
 
 ---
@@ -404,8 +376,7 @@ After crossfade: 1 × file_size (old released)
 | Parameter | Min | Max | Reason |
 |-----------|-----|-----|--------|
 | crossfadeDuration | 1.0s | 30.0s | Perceptual/performance |
-| fadeInDuration | 0.0s | 10.0s | UX (instant start allowed) |
-| fadeOutDuration | 0.0s | 30.0s | UX (instant stop allowed) |
+| volume | 0 | 100 | UI range |
 | repeatCount | 1 | ∞ | Logical minimum |
 
 ### Soft Recommendations
@@ -413,68 +384,58 @@ After crossfade: 1 × file_size (old released)
 | Parameter | Recommended | Rationale |
 |-----------|-------------|-----------|
 | crossfadeDuration | 5-15s | Balance smooth/efficiency |
-| fadeInDuration | 2-5s | Natural entrance |
-| fadeOutDuration | 3-10s | Gentle exit |
+| volume | 70-100 | Normal listening range |
+| fadeIn (auto) | 1.5-4.5s | Natural entrance |
 
 ---
 
 ## Edge Cases
 
-### Zero Durations
+### Minimum Values
 
-**fadeInDuration = 0:**
+**1s crossfade:**
 ```swift
-// Instant start (no ramp)
-mixer.volume = 1.0
-player.play()
+PlayerConfiguration(crossfadeDuration: 1.0)
+// fadeIn = 0.3s (very quick)
 ```
 
-**fadeOutDuration = 0:**
+**0% volume:**
 ```swift
-// Instant stop
-mixer.volume = 0.0
-player.stop()
+PlayerConfiguration(volume: 0)
+// Muted playback (still works)
 ```
 
-### Maximum Duration
+### Maximum Values
 
 **30s crossfade:**
-- 600 volume steps
-- 50ms per step
-- ~6% CPU usage
-- Smooth, imperceptible
-
-### Loop Edge
-
-**Crossfade starts at:**
-```
-t = duration - crossfadeDuration - 0.1
-
-Example (60s track, 10s crossfade):
-  Trigger at t = 49.9s (not 50.0 exactly)
-  
-Reason: Float precision tolerance (Issue #8 fix)
+```swift
+PlayerConfiguration(crossfadeDuration: 30.0)
+// fadeIn = 9s (very smooth)
+// 600 volume steps
+// ~6% CPU
 ```
 
 ---
 
 ## Testing
 
-### Valid Configurations
+### Valid Configuration
 
 ```swift
 @Test
 func testValidConfiguration() throws {
-    let config = AudioConfiguration(
-        crossfadeDuration: 5.0,
-        fadeInDuration: 2.0,
-        fadeOutDuration: 3.0,
+    let config = PlayerConfiguration(
+        crossfadeDuration: 10.0,
         fadeCurve: .equalPower,
         enableLooping: true,
-        repeatCount: 10
+        repeatCount: 5,
+        volume: 80
     )
     
     try config.validate()  // Should not throw
+    
+    // Auto-calculated
+    #expect(config.fadeInDuration == 3.0)
 }
 ```
 
@@ -482,24 +443,23 @@ func testValidConfiguration() throws {
 
 ```swift
 @Test
-func testInvalidCrossfadeDuration() {
-    let config = AudioConfiguration(
+func testInvalidCrossfade() {
+    let config = PlayerConfiguration(
         crossfadeDuration: 0.5  // Too short!
     )
     
-    #expect(throws: AudioPlayerError.invalidConfiguration) {
+    #expect(throws: ConfigurationError.self) {
         try config.validate()
     }
 }
 
 @Test
-func testInvalidRepeatCount() {
-    let config = AudioConfiguration(
-        enableLooping: true,
-        repeatCount: 0  // Must be > 0!
+func testInvalidVolume() {
+    let config = PlayerConfiguration(
+        volume: 150  // Too high!
     )
     
-    #expect(throws: AudioPlayerError.invalidConfiguration) {
+    #expect(throws: ConfigurationError.self) {
         try config.validate()
     }
 }
@@ -512,63 +472,56 @@ func testInvalidRepeatCount() {
 ### DO ✅
 
 ```swift
-// Use presets for common scenarios
-let config = AudioConfiguration.meditation
+// Use default preset
+let config = PlayerConfiguration()
 
-// Validate before use (automatic in startPlaying)
-try config.validate()
+// Use auto-calculated fadeIn
+// fadeIn = crossfadeDuration * 0.3
 
-// Choose appropriate fade curve
-let config = AudioConfiguration(
-    fadeCurve: .equalPower  // For crossfading
-)
+// Volume as Int (0-100)
+PlayerConfiguration(volume: 80)
 
-// Limit loop iterations for battery
-let config = AudioConfiguration(
+// Infinite looping
+PlayerConfiguration(
     enableLooping: true,
-    repeatCount: 100  // Stop after 100 loops
+    repeatCount: nil
 )
 ```
 
 ### DON'T ❌
 
 ```swift
-// Extremely short crossfades (audible artifacts)
-AudioConfiguration(crossfadeDuration: 0.1)  // Too short!
+// Extremely short crossfades
+PlayerConfiguration(crossfadeDuration: 0.5)  // ❌ Too short!
 
-// Excessively long fades (waste CPU)
-AudioConfiguration(fadeOutDuration: 60.0)  // Too long!
+// Invalid volume range
+PlayerConfiguration(volume: -10)  // ❌ Negative!
+PlayerConfiguration(volume: 150)  // ❌ Too high!
 
-// Linear curve for music (power dip)
-AudioConfiguration(fadeCurve: .linear)  // Use equalPower!
-
-// Zero repeat count (invalid)
-AudioConfiguration(
-    enableLooping: true,
-    repeatCount: 0  // ❌ Throws error
-)
+// Negative repeat count
+PlayerConfiguration(repeatCount: -1)  // ❌ Invalid!
 ```
 
 ---
 
 ## Summary
 
-**Key points:**
+**Key improvements in v2.11.0:**
 
-1. ✅ All parameters have validated ranges
-2. ✅ Adaptive step sizing optimizes performance
-3. ✅ Equal-power curve recommended for audio
-4. ✅ Infinite looping supported (repeatCount: nil)
-5. ✅ Configuration immutable after creation
+1. ✅ Single crossfade parameter (simpler)
+2. ✅ Auto-calculated fadeIn (30% of crossfade)
+3. ✅ Volume as Int 0-100 (UI-friendly)
+4. ✅ Removed unused fadeOut parameter
+5. ✅ Playlist-first design
 
 **Recommended default:**
 ```swift
-AudioConfiguration(
+PlayerConfiguration(
     crossfadeDuration: 10.0,
-    fadeInDuration: 3.0,
-    fadeOutDuration: 6.0,
     fadeCurve: .equalPower,
     enableLooping: true,
-    repeatCount: nil
+    repeatCount: nil,
+    volume: 100
 )
+// fadeInDuration = 3.0s (auto)
 ```

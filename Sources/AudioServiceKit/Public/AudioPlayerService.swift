@@ -9,17 +9,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // SSOT: State managed exclusively by state machine
     private var _state: PlayerState
     public var state: PlayerState { _state }
-    public private(set) var configuration: AudioConfiguration
-    public private(set) var currentTrack: TrackInfo?
+    public internal(set) var configuration: AudioConfiguration  // Public read, internal write for playlist API
+    public internal(set) var currentTrack: TrackInfo?  // Public read, internal write for playlist API
     public private(set) var playbackPosition: PlaybackPosition?
     
     // Internal components
-    private let audioEngine: AudioEngineActor
-    private let sessionManager: AudioSessionManager
+    internal let audioEngine: AudioEngineActor  // Allow internal access for playlist API
+    internal let sessionManager: AudioSessionManager  // Allow internal access for playlist API
     // RemoteCommandManager is now @MainActor isolated for thread safety
     // Must be created in setup() due to MainActor isolation
     private var remoteCommandManager: RemoteCommandManager!
-    private var stateMachine: AudioStateMachine!
+    internal var stateMachine: AudioStateMachine!  // Allow internal access for playlist API
     
     // Playback timer for position updates
     private var playbackTimer: Task<Void, Never>?
@@ -29,16 +29,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Loop tracking
     private var currentRepeatCount = 0
-    private var currentTrackURL: URL?
+    internal var currentTrackURL: URL?  // Allow internal access for playlist API
     private var isLoopCrossfadeInProgress = false
-    private var isTrackReplacementInProgress = false
+    internal var isTrackReplacementInProgress: Bool = false  // Allow internal access for playlist API
     
     // Crossfade progress observation
     private var crossfadeProgressTask: Task<Void, Never>?
     public private(set) var currentCrossfadeProgress: CrossfadeProgress = .idle
     
     // Playlist manager (NEW)
-    private var playlistManager: PlaylistManager
+    internal var playlistManager: PlaylistManager  // Allow internal access for playlist API
     
     // MARK: - Initialization
     
@@ -166,13 +166,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
+        print("🔵 [PAUSE] Called - current state: \(state)")
+        
         // Rollback any active crossfade before pausing
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+            print("🔵 [PAUSE] Rolling back crossfade...")
             await rollbackCrossfade()
         }
         
         // Guard: only pause if playing or preparing (to prevent Error 4)
         guard state == .playing || state == .preparing else {
+            print("❌ [PAUSE] Invalid state: \(state)")
             // If already paused or finished, just return
             if state == .paused || state == .finished {
                 return
@@ -183,11 +187,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // Pause playback
-        await audioEngine.pause()
-        
-        // State change via state machine
+        print("🔵 [PAUSE] Entering paused state via state machine...")
+        // ✅ FIX: Delegate to state machine (removes duplicate call)
+        // State machine will call context.pausePlayback() which handles:
+        // - Capturing position ONCE
+        // - Pausing audio engine
+        // - Stopping playback timer
         await stateMachine.enterPaused()
+        print("✅ [PAUSE] Complete - new state: \(state)")
         
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
@@ -219,10 +226,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // Resume playback
-        await audioEngine.play()
-        
-        // State change via state machine
+        // ✅ FIX: Delegate to state machine (removes duplicate call)
+        // State machine will call context.resumePlayback() which handles:
+        // - Rescheduling buffer from saved position
+        // - Playing audio engine
+        // - Restarting playback timer
         await stateMachine.enterPlaying()
         
         // Update UI
@@ -492,6 +500,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // 3. Reset OLD mixer volume (now inactive)
             await audioEngine.resetInactiveMixer()
             
+            // 4. Clear inactive file to free memory
+            await audioEngine.clearInactiveFile()
+            
             // CRITICAL FIX: Ensure state=.playing after crossfade
             // During crossfade (5-10s), state may have changed (e.g., pause())
             // Force state back to playing since new track is now active
@@ -555,7 +566,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Playback Timer
     
-    private func startPlaybackTimer() {
+    internal func startPlaybackTimer() {  // Allow internal access for playlist API
         stopPlaybackTimer()
         
         // CRITICAL: Use [weak self] to prevent retain cycle
@@ -601,7 +612,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Now Playing Updates
     
-    private func updateNowPlayingInfo() async {
+    internal func updateNowPlayingInfo() async {  // Allow internal access for playlist API
         guard let track = currentTrack else { return }
         
         // Read actor-isolated properties before MainActor hop
@@ -714,6 +725,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Mark as in progress BEFORE any async operations
         isLoopCrossfadeInProgress = true
         
+        // ✅ FIX: Send .preparing state immediately for instant UI feedback
+        // This matches the behavior of manual track switch (nextTrack/previousTrack)
+        let prepareProgress = CrossfadeProgress(
+            phase: .preparing,
+            duration: configuration.crossfadeDuration,
+            elapsed: 0
+        )
+        updateCrossfadeProgress(prepareProgress)
+        
         // 1. Get next track from playlist manager
         guard let nextURL = await playlistManager.getNextTrack() else {
             // No more tracks - finish playback
@@ -750,6 +770,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await audioEngine.switchActivePlayer()
             await audioEngine.stopInactivePlayer()
             await audioEngine.resetInactiveMixer()
+            
+            // CRITICAL: Clear inactive file reference to free memory
+            // After switch, old active is now inactive
+            await audioEngine.clearInactiveFile()
             
             // 6. Update current track info
             currentTrack = nextTrack
@@ -812,13 +836,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     /// Update crossfade progress and notify observers
-    private func updateCrossfadeProgress(_ progress: CrossfadeProgress) {
+    internal func updateCrossfadeProgress(_ progress: CrossfadeProgress) {
+        print("🟣 [PROGRESS] Updating crossfade progress: \(progress.phase), observers count: \(observers.count)")
         currentCrossfadeProgress = progress
         
         // Notify observers about crossfade progress
         for observer in observers {
             Task {
                 if let progressObserver = observer as? CrossfadeProgressObserver {
+                    print("🟣 [PROGRESS] Notifying observer...")
                     await progressObserver.crossfadeProgressDidUpdate(progress)
                 }
             }
@@ -849,11 +875,22 @@ extension AudioPlayerService: AudioStateMachineContext {
     }
     
     func pausePlayback() async {
+        print("🟡 [CONTEXT] pausePlayback() called")
+        
+        // Stop playback timer BEFORE pausing
+        // This prevents position updates during pause
+        stopPlaybackTimer()
+        print("🟡 [CONTEXT] Timer stopped")
+        
+        // Pause audio engine (captures position accurately)
         await audioEngine.pause()
+        print("🟡 [CONTEXT] AudioEngine paused")
     }
     
     func resumePlayback() async throws {
         await audioEngine.play()
+        // Restart playback timer after resume
+        startPlaybackTimer()
     }
     
     func startFadeOut(duration: TimeInterval) async {
@@ -874,7 +911,7 @@ extension AudioPlayerService: AudioStateMachineContext {
 
 // MARK: - PlayerState Description
 
-private extension PlayerState {
+internal extension PlayerState {  // Made internal for playlist extension access
     var description: String {
         switch self {
         case .preparing: return "preparing"

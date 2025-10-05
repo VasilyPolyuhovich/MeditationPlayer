@@ -41,7 +41,7 @@ public struct PlayerConfiguration: Sendable {
     }
     
     /// Volume as Float (0.0-1.0) for internal use
-    var volumeFloat: Float {
+    public var volumeFloat: Float {  // Made public for AudioPlayerService extension
         Float(max(0, min(100, volume))) / 100.0
     }
     

@@ -34,6 +34,11 @@ actor AudioEngineActor {
     /// Is crossfade currently in progress
     var isCrossfading: Bool { activeCrossfadeTask != nil }
     
+    // Volume management
+    /// Target volume set by user (0.0-1.0)
+    /// Crossfade curves are scaled to this target for smooth volume changes
+    private var targetVolume: Float = 1.0
+    
     // MARK: - Initialization
     
     init() {
@@ -97,14 +102,65 @@ actor AudioEngineActor {
     }
     
     func pause() {
-        // FIXED: Pause BOTH players (safe during crossfade)
+        print("🟢 [ENGINE] pause() called, activePlayer: \(activePlayer)")
+        
+        // 1. Capture current position in offset before pausing
+        // This ensures position is preserved for accurate resume
+        if let current = getCurrentPosition() {
+            let sampleRate = getActiveAudioFile()?.fileFormat.sampleRate ?? 44100
+            let currentFrame = AVAudioFramePosition(current.currentTime * sampleRate)
+            
+            if activePlayer == .a {
+                playbackOffsetA = currentFrame
+                print("🟢 [ENGINE] Saved position A: \(currentFrame) (\(current.currentTime)s)")
+            } else {
+                playbackOffsetB = currentFrame
+                print("🟢 [ENGINE] Saved position B: \(currentFrame) (\(current.currentTime)s)")
+            }
+        } else {
+            print("⚠️ [ENGINE] Could not get current position!")
+        }
+        
+        // 2. Pause BOTH players (safe during crossfade)
         playerNodeA.pause()
         playerNodeB.pause()
+        print("🟢 [ENGINE] Players paused")
     }
     
     func play() {
-        // Resume only active player
-        getActivePlayerNode().play()
+        let player = getActivePlayerNode()
+        guard let file = getActiveAudioFile() else { return }
+        
+        // Get saved offset
+        let offset = activePlayer == .a ? playbackOffsetA : playbackOffsetB
+        
+        // ✅ FIX: Always check if we need to reschedule after pause
+        // AVFoundation quirk: isPlaying may be unreliable after pause()
+        // Strategy: If player is not playing AND we have an offset, it's a resume
+        let needsReschedule = !player.isPlaying && offset > 0
+        
+        if needsReschedule {
+            // Resume from saved position
+            // Stop player completely to clear any stale state
+            player.stop()
+            
+            // Reschedule from offset (like seek)
+            let remainingFrames = AVAudioFrameCount(file.length - offset)
+            if remainingFrames > 0 {
+                player.scheduleSegment(
+                    file,
+                    startingFrame: offset,
+                    frameCount: remainingFrames,
+                    at: nil,
+                    completionCallbackType: .dataPlayedBack
+                ) { _ in
+                    // Completion on audio thread - keep minimal
+                }
+            }
+        }
+        
+        // Play (either fresh scheduled buffer or continue)
+        player.play()
     }
     
     /// Stop both players completely and reset volumes
@@ -165,12 +221,12 @@ actor AudioEngineActor {
         crossfadeProgressContinuation?.finish()
         crossfadeProgressContinuation = nil
         
-        // 3. Graceful rollback: restore active volume to 1.0
-        if currentActiveVolume < 1.0 {
+        // 3. Graceful rollback: restore active volume to targetVolume
+        if currentActiveVolume < targetVolume {
             await fadeVolume(
                 mixer: activeMixer,
                 from: currentActiveVolume,
-                to: 1.0,
+                to: targetVolume,  // Use target, not 1.0
                 duration: rollbackDuration,
                 curve: .linear  // Fast linear restore
             )
@@ -267,15 +323,16 @@ actor AudioEngineActor {
             mixer.volume = 0.0
             Task {
                 // Use actor method to avoid data races
+                // Fade to targetVolume (not 1.0) to respect user's volume setting
                 await self.fadeActiveMixer(
                     from: 0.0,
-                    to: 1.0,
+                    to: targetVolume,
                     duration: fadeInDuration,
                     curve: fadeCurve
                 )
             }
         } else {
-            mixer.volume = 1.0
+            mixer.volume = targetVolume  // Use target, not 1.0
         }
         
         // Start playback
@@ -338,7 +395,17 @@ actor AudioEngineActor {
     // MARK: - Volume Control
     
     func setVolume(_ volume: Float) {
-        engine.mainMixerNode.volume = volume
+        // Store target volume for crossfade scaling
+        targetVolume = max(0.0, min(1.0, volume))
+        
+        // Set volume on main mixer (global)
+        engine.mainMixerNode.volume = targetVolume
+        
+        // If NOT crossfading, update active mixer to target volume
+        // During crossfade, fadeWithProgress() handles volume scaling
+        if !isCrossfading {
+            getActiveMixerNode().volume = targetVolume
+        }
     }
     
     func fadeVolume(
@@ -500,8 +567,11 @@ actor AudioEngineActor {
         duration: TimeInterval,
         curve: FadeCurve
     ) async -> AsyncStream<CrossfadeProgress> {
-        // Create progress stream
-        let (stream, continuation) = AsyncStream.makeStream(of: CrossfadeProgress.self)
+        // Create progress stream with buffering to prevent loss of .idle state
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: CrossfadeProgress.self,
+            bufferingPolicy: .bufferingNewest(1)  // Keep last value if consumer is slow
+        )
         crossfadeProgressContinuation = continuation
         
         // Create and store crossfade task
@@ -517,6 +587,11 @@ actor AudioEngineActor {
         
         // Wait for completion
         await task.value
+        
+        // CRITICAL: Small delay to ensure .idle state is delivered to all observers
+        // Before closing the stream. Without this, race condition may prevent UI from
+        // receiving the final .idle update, causing it to be stuck at "Crossfading 0%"
+        try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
         
         // Cleanup
         activeCrossfadeTask = nil
@@ -637,9 +712,10 @@ actor AudioEngineActor {
                 elapsed: elapsed
             ))
             
-            // Calculate volumes
-            let fadeOutValue = curve.inverseVolume(for: stepProgress)
-            let fadeInValue = curve.volume(for: stepProgress)
+            // Calculate volumes scaled to target volume
+            // This ensures crossfade respects user's volume setting
+            let fadeOutValue = curve.inverseVolume(for: stepProgress) * targetVolume
+            let fadeInValue = curve.volume(for: stepProgress) * targetVolume
             
             activeMixer.volume = fadeOutValue
             inactiveMixer.volume = fadeInValue
@@ -650,7 +726,7 @@ actor AudioEngineActor {
         // Ensure final volumes (if not cancelled)
         if !Task.isCancelled {
             activeMixer.volume = 0.0
-            inactiveMixer.volume = 1.0
+            inactiveMixer.volume = targetVolume  // Use target, not 1.0
         }
     }
     
@@ -752,7 +828,21 @@ actor AudioEngineActor {
     /// Stop the currently inactive player (used after crossfade)
     func stopInactivePlayer() {
         let player = getInactivePlayerNode()
-        player.stop()
+        let mixer = getInactiveMixerNode()
+        
+        // CRITICAL: Full cleanup to prevent memory leaks
+        player.stop()  // Stop playback
+        player.reset()  // Clear all scheduled buffers
+        mixer.volume = 0.0  // Reset volume
+    }
+    
+    /// Clear inactive file reference to free memory
+    func clearInactiveFile() {
+        if activePlayer == .a {
+            audioFileB = nil
+        } else {
+            audioFileA = nil
+        }
     }
 }
 
