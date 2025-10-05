@@ -41,4 +41,7 @@ protocol AudioStateMachineContext: Actor {
     
     /// Request to start fade out
     func startFadeOut(duration: TimeInterval) async
+    
+    /// Transition to finished state after fade out
+    func transitionToFinished() async
 }

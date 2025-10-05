@@ -6,6 +6,11 @@ struct PreparingState: AudioStateProtocol {
     var playerState: PlayerState { .preparing }
     
     func isValidTransition(to state: any AudioStateProtocol) -> Bool {
+        // Always allow transition to finished (for stop)
+        if state.playerState == .finished {
+            return true
+        }
+        
         return state.playerState == .playing || state.playerState == .failed(.unknown(reason: ""))
     }
     
