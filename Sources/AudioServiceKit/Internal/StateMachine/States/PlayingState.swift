@@ -12,6 +12,8 @@ struct PlayingState: AudioStateProtocol {
         }
         
         switch state.playerState {
+        case .preparing:  // Allow reset during playback
+            return true
         case .paused, .fadingOut, .failed:
             return true
         default:

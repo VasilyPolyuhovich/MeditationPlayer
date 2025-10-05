@@ -39,14 +39,16 @@ actor AudioStateMachine {
         
         let previousState = currentStateBox
         
-        // Call willExit on current state
+        // 1. Exit hooks
         await previousState.willExit(to: newState, context: context)
+        await previousState.onExit(context: context)
         
-        // Update current state
+        // 2. State change (atomic)
         currentStateBox = newState
         
-        // Call didEnter on new state
+        // 3. Entry hooks
         await newState.didEnter(from: previousState, context: context)
+        await newState.onEnter(context: context)
         
         return true
     }

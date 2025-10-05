@@ -23,6 +23,15 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// Buffer scheduling failed
     case bufferSchedulingFailed(reason: String)
     
+    /// Playlist is empty (cannot play)
+    case emptyPlaylist
+    
+    /// No active track playing
+    case noActiveTrack
+    
+    /// Invalid playlist index
+    case invalidPlaylistIndex(index: Int, count: Int)
+    
     /// Unknown error occurred
     case unknown(reason: String)
     
@@ -42,6 +51,12 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             return "Audio route change failed: \(reason)"
         case .bufferSchedulingFailed(let reason):
             return "Buffer scheduling failed: \(reason)"
+        case .emptyPlaylist:
+            return "Playlist is empty - add tracks before playing"
+        case .noActiveTrack:
+            return "No active track playing"
+        case .invalidPlaylistIndex(let index, let count):
+            return "Invalid playlist index \(index) (playlist has \(count) tracks)"
         case .unknown(let reason):
             return "Unknown error: \(reason)"
         }

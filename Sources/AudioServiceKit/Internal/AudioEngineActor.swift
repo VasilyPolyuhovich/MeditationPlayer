@@ -27,6 +27,13 @@ actor AudioEngineActor {
     private var playbackOffsetA: AVAudioFramePosition = 0
     private var playbackOffsetB: AVAudioFramePosition = 0
     
+    // Crossfade task management
+    private var activeCrossfadeTask: Task<Void, Never>?
+    private var crossfadeProgressContinuation: AsyncStream<CrossfadeProgress>.Continuation?
+    
+    /// Is crossfade currently in progress
+    var isCrossfading: Bool { activeCrossfadeTask != nil }
+    
     // MARK: - Initialization
     
     init() {
@@ -90,15 +97,21 @@ actor AudioEngineActor {
     }
     
     func pause() {
-        getActivePlayerNode().pause()
+        // FIXED: Pause BOTH players (safe during crossfade)
+        playerNodeA.pause()
+        playerNodeB.pause()
     }
     
     func play() {
+        // Resume only active player
         getActivePlayerNode().play()
     }
     
     /// Stop both players completely and reset volumes
     func stopBothPlayers() {
+        // Cancel active crossfade if running
+        cancelActiveCrossfade()
+        
         playerNodeA.stop()
         playerNodeB.stop()
         mixerNodeA.volume = 0.0
@@ -108,6 +121,77 @@ actor AudioEngineActor {
             engine.stop()
             isEngineRunning = false
         }
+    }
+    
+    /// Cancel active crossfade and cleanup
+    func cancelActiveCrossfade() {
+        guard let task = activeCrossfadeTask else { return }
+        
+        // Cancel task
+        task.cancel()
+        activeCrossfadeTask = nil
+        
+        // Report idle state
+        crossfadeProgressContinuation?.yield(.idle)
+        crossfadeProgressContinuation?.finish()
+        crossfadeProgressContinuation = nil
+        
+        // Quick cleanup: reset volumes
+        mixerNodeA.volume = 0.0
+        mixerNodeB.volume = 0.0
+    }
+    
+    /// Rollback crossfade transaction - restore active player to normal state
+    /// - Parameter rollbackDuration: Duration to restore active volume (default: 0.5s)
+    /// - Returns: Current volume of active mixer before rollback (for smooth transition)
+    func rollbackCrossfade(rollbackDuration: TimeInterval = 0.5) async -> Float {
+        // 1. Get current volumes before cancellation
+        let activeMixer = getActiveMixerNode()
+        let inactiveMixer = getInactiveMixerNode()
+        let currentActiveVolume = activeMixer.volume
+        let currentInactiveVolume = inactiveMixer.volume
+        
+        // 2. Cancel crossfade task
+        guard let task = activeCrossfadeTask else {
+            // No active crossfade, just return current volume
+            return currentActiveVolume
+        }
+        
+        task.cancel()
+        activeCrossfadeTask = nil
+        
+        // Report cancellation
+        crossfadeProgressContinuation?.yield(.idle)
+        crossfadeProgressContinuation?.finish()
+        crossfadeProgressContinuation = nil
+        
+        // 3. Graceful rollback: restore active volume to 1.0
+        if currentActiveVolume < 1.0 {
+            await fadeVolume(
+                mixer: activeMixer,
+                from: currentActiveVolume,
+                to: 1.0,
+                duration: rollbackDuration,
+                curve: .linear  // Fast linear restore
+            )
+        }
+        
+        // 4. Fade out inactive player if it's playing
+        if currentInactiveVolume > 0.0 {
+            await fadeVolume(
+                mixer: inactiveMixer,
+                from: currentInactiveVolume,
+                to: 0.0,
+                duration: rollbackDuration,
+                curve: .linear
+            )
+        }
+        
+        // 5. Stop inactive player and reset
+        stopInactivePlayer()
+        inactiveMixer.volume = 0.0
+        
+        return currentActiveVolume
     }
     
     /// Complete reset - clears all state and files
@@ -411,55 +495,163 @@ actor AudioEngineActor {
     }
     
     /// Perform synchronized crossfade between active and inactive players
-    /// FIXED Issue #10A: Added graceful interruption handling
+    /// Returns async stream for progress observation
     func performSynchronizedCrossfade(
         duration: TimeInterval,
         curve: FadeCurve
+    ) async -> AsyncStream<CrossfadeProgress> {
+        // Create progress stream
+        let (stream, continuation) = AsyncStream.makeStream(of: CrossfadeProgress.self)
+        crossfadeProgressContinuation = continuation
+        
+        // Create and store crossfade task
+        let task = Task { @MainActor in
+            await self.executeCrossfade(
+                duration: duration,
+                curve: curve,
+                progress: continuation
+            )
+        }
+        
+        activeCrossfadeTask = task
+        
+        // Wait for completion
+        await task.value
+        
+        // Cleanup
+        activeCrossfadeTask = nil
+        continuation.finish()
+        crossfadeProgressContinuation = nil
+        
+        return stream
+    }
+    
+    /// Execute crossfade with progress reporting
+    private func executeCrossfade(
+        duration: TimeInterval,
+        curve: FadeCurve,
+        progress: AsyncStream<CrossfadeProgress>.Continuation
     ) async {
+        let startTime = Date()
+        
+        // Phase 1: Preparing
+        progress.yield(CrossfadeProgress(
+            phase: .preparing,
+            duration: duration,
+            elapsed: 0
+        ))
+        
         let inactivePlayer = getInactivePlayerNode()
         
-        // FIXED Issue #10A: Early exit if task already cancelled
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else {
+            progress.yield(.idle)
+            return
+        }
         
         // Get synchronized start time
         let syncTime = getSyncedStartTime()
         
-        // Start inactive player at exact time for sample-accurate sync
+        // Start inactive player
         if let syncTime = syncTime {
             inactivePlayer.play(at: syncTime)
-            // Small delay to ensure player has started
             try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
         } else {
-            // Fallback: start immediately
             inactivePlayer.play()
         }
         
-        // FIXED Issue #10A: Check again after suspension point
         guard !Task.isCancelled else {
-            // Interrupted during startup - stop inactive player
             inactivePlayer.stop()
+            progress.yield(.idle)
             return
         }
         
-        // Perform volume fades while BOTH players are running
-        // fadeVolume() now checks Task.isCancelled internally
-        async let fadeOut: () = fadeActiveMixer(
-            from: 1.0,
-            to: 0.0,
-            duration: duration,
-            curve: curve
-        )
+        // Phase 2: Fading
+        let fadeTask = Task {
+            await self.fadeWithProgress(
+                duration: duration,
+                curve: curve,
+                startTime: startTime,
+                progress: progress
+            )
+        }
         
-        async let fadeIn: () = fadeInactiveMixer(
-            from: 0.0,
-            to: 1.0,
-            duration: duration,
-            curve: curve
-        )
+        await fadeTask.value
         
-        // Wait for both fades to complete (may abort early if cancelled)
-        await fadeOut
-        await fadeIn
+        guard !Task.isCancelled else {
+            progress.yield(.idle)
+            return
+        }
+        
+        // Phase 3: Switching (instant)
+        progress.yield(CrossfadeProgress(
+            phase: .switching,
+            duration: duration,
+            elapsed: Date().timeIntervalSince(startTime)
+        ))
+        
+        // Phase 4: Cleanup (instant)
+        progress.yield(CrossfadeProgress(
+            phase: .cleanup,
+            duration: duration,
+            elapsed: Date().timeIntervalSince(startTime)
+        ))
+        
+        // Phase 5: Complete
+        progress.yield(.idle)
+    }
+    
+    /// Fade with progress reporting
+    private func fadeWithProgress(
+        duration: TimeInterval,
+        curve: FadeCurve,
+        startTime: Date,
+        progress: AsyncStream<CrossfadeProgress>.Continuation
+    ) async {
+        let activeMixer = getActiveMixerNode()
+        let inactiveMixer = getInactiveMixerNode()
+        
+        let stepsPerSecond: Int
+        if duration < 1.0 {
+            stepsPerSecond = 100
+        } else if duration < 5.0 {
+            stepsPerSecond = 50
+        } else if duration < 15.0 {
+            stepsPerSecond = 30
+        } else {
+            stepsPerSecond = 20
+        }
+        
+        let steps = Int(duration * Double(stepsPerSecond))
+        let stepTime = duration / Double(steps)
+        
+        for i in 0...steps {
+            guard !Task.isCancelled else { return }
+            
+            let stepProgress = Float(i) / Float(steps)
+            let elapsed = Date().timeIntervalSince(startTime)
+            
+            // Report progress
+            progress.yield(CrossfadeProgress(
+                phase: .fading(progress: Double(stepProgress)),
+                duration: duration,
+                elapsed: elapsed
+            ))
+            
+            // Calculate volumes
+            let fadeOutValue = curve.inverseVolume(for: stepProgress)
+            let fadeInValue = curve.volume(for: stepProgress)
+            
+            activeMixer.volume = fadeOutValue
+            inactiveMixer.volume = fadeInValue
+            
+            try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
+        }
+        
+        // Ensure final volumes (if not cancelled)
+        if !Task.isCancelled {
+            activeMixer.volume = 0.0
+            inactiveMixer.volume = 1.0
+        }
     }
     
     /// Reset inactive mixer volume to 0
@@ -495,7 +687,7 @@ actor AudioEngineActor {
     
     // MARK: - Public Helper Methods
     
-    /// Fade the active mixer volume (actor-isolated)
+    /// Fade the active mixer volume (for seek and fade-out)
     func fadeActiveMixer(
         from: Float,
         to: Float,
@@ -512,40 +704,12 @@ actor AudioEngineActor {
         )
     }
     
-    /// Fade the inactive mixer volume (actor-isolated)
-    func fadeInactiveMixer(
-        from: Float,
-        to: Float,
-        duration: TimeInterval,
-        curve: FadeCurve = .equalPower
-    ) async {
-        let mixer = getInactiveMixerNode()
-        await fadeVolume(
-            mixer: mixer,
-            from: from,
-            to: to,
-            duration: duration,
-            curve: curve
-        )
-    }
-    
-
-    
     /// Switch the active player (used after crossfade completes)
+    /// NOTE: For track replacement, files are already loaded correctly.
+    /// For loop, both players have the same file, so no copying needed.
     func switchActivePlayer() {
-        // Store the file reference before switch
-        let currentFile = getActiveAudioFile()
-        
-        // Switch active player
+        // Simply switch the active flag - files are already in correct slots
         activePlayer = activePlayer == .a ? .b : .a
-        
-        // Update the new active player's file reference
-        switch activePlayer {
-        case .a:
-            audioFileA = currentFile
-        case .b:
-            audioFileB = currentFile
-        }
     }
     
     /// Load audio file on the secondary player (for replace/next track)
@@ -582,6 +746,12 @@ actor AudioEngineActor {
     /// Stop the currently active player
     func stopActivePlayer() {
         let player = getActivePlayerNode()
+        player.stop()
+    }
+    
+    /// Stop the currently inactive player (used after crossfade)
+    func stopInactivePlayer() {
+        let player = getInactivePlayerNode()
         player.stop()
     }
 }

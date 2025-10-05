@@ -14,12 +14,22 @@ protocol AudioStateProtocol: Sendable {
     
     /// Called when exiting this state
     func willExit(to nextState: any AudioStateProtocol, context: AudioStateMachineContext) async
+    
+    // MARK: - Side Effect Hooks
+    
+    /// Called on state entry - for side effects
+    func onEnter(context: AudioStateMachineContext) async
+    
+    /// Called on state exit - for cleanup
+    func onExit(context: AudioStateMachineContext) async
 }
 
 /// Default implementations
 extension AudioStateProtocol {
     func didEnter(from previousState: (any AudioStateProtocol)?, context: AudioStateMachineContext) async {}
     func willExit(to nextState: any AudioStateProtocol, context: AudioStateMachineContext) async {}
+    func onEnter(context: AudioStateMachineContext) async {}
+    func onExit(context: AudioStateMachineContext) async {}
 }
 
 /// Context protocol for state machine to communicate with player
