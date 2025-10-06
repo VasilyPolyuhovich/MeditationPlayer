@@ -231,7 +231,44 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await updateNowPlayingPlaybackRate(1.0)
     }
     
-    public func stop() async {
+    /// Stop playback with optional fade out
+    /// - Parameter fadeDuration: Duration of fade out (nil = instant stop, 0.0-10.0 seconds)
+    /// - Note: Use nil or 0.0 for instant stop (default behavior)
+    /// - Note: Fade duration is clamped to 0.0-10.0 seconds range
+    public func stop(fadeDuration: TimeInterval? = nil) async {
+        if let duration = fadeDuration, duration > 0 {
+            // Stop with fade
+            await stopWithFade(duration: duration)
+        } else {
+            // Instant stop (existing behavior)
+            await stopImmediately()
+        }
+    }
+    
+    /// Stop playback with fade out
+    /// - Parameter duration: Duration of fade out (clamped to 0.0-10.0 seconds)
+    private func stopWithFade(duration: TimeInterval) async {
+        // Clamp duration to safe range
+        let clampedDuration = max(0.0, min(10.0, duration))
+        
+        // Get current volume before fade
+        let currentVolume = configuration.volume
+        
+        // Fade out active mixer
+        await audioEngine.fadeActiveMixer(
+            from: currentVolume,
+            to: 0.0,
+            duration: clampedDuration,
+            curve: configuration.fadeCurve
+        )
+        
+        // Then perform instant stop
+        await stopImmediately()
+    }
+    
+    /// Stop playback immediately without fade
+    /// - Note: This is the original stop() behavior
+    private func stopImmediately() async {
         // Stop playback components
         stopPlaybackTimer()
         await audioEngine.stopBothPlayers()
@@ -255,6 +292,18 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Task { @MainActor in
             manager.clearNowPlayingInfo()
         }
+    }
+    
+    /// Stop playback with default fade duration from configuration
+    /// - Note: Uses stopFadeDuration from AudioConfiguration (default: 3.0 seconds)
+    public func stopWithDefaultFade() async {
+        await stop(fadeDuration: configuration.stopFadeDuration)
+    }
+    
+    /// Stop playback immediately without any fade
+    /// - Note: Alias for stop() without parameters for code clarity
+    public func stopImmediatelyWithoutFade() async {
+        await stop(fadeDuration: nil)
     }
     
     public func finish(fadeDuration: TimeInterval?) async throws {
@@ -795,7 +844,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             fadeCurve: configuration.fadeCurve,
             enableLooping: configuration.enableLooping,
             repeatCount: configuration.repeatCount,
-            volume: Int(configuration.volume * 100)
+            volume: Int(configuration.volume * 100),
+            stopFadeDuration: configuration.stopFadeDuration
         )
         await playlistManager.updateConfiguration(playerConfig)
     }

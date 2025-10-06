@@ -33,6 +33,13 @@ public struct PlayerConfiguration: Sendable {
     /// Internally converted to Float 0.0-1.0
     public var volume: Int
     
+    // MARK: - Stop Settings
+    
+    /// Default fade duration when stopping playback with fade (0.5-10.0 seconds)
+    /// Used by stopWithDefaultFade() method
+    /// - Note: Set to 0.0 for instant stop without fade
+    public var stopFadeDuration: TimeInterval
+    
     // MARK: - Computed Properties
     
     /// Fade in duration at track start (30% of crossfade)
@@ -52,13 +59,15 @@ public struct PlayerConfiguration: Sendable {
         fadeCurve: FadeCurve = .equalPower,
         enableLooping: Bool = true,
         repeatCount: Int? = nil,
-        volume: Int = 100
+        volume: Int = 100,
+        stopFadeDuration: TimeInterval = 3.0
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.enableLooping = enableLooping
         self.repeatCount = repeatCount
         self.volume = max(0, min(100, volume))
+        self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
     }
     
     // MARK: - Default Configuration
@@ -85,6 +94,11 @@ public struct PlayerConfiguration: Sendable {
         if let count = repeatCount, count < 0 {
             throw ConfigurationError.invalidRepeatCount(count)
         }
+        
+        // StopFadeDuration validation
+        if stopFadeDuration < 0.0 || stopFadeDuration > 10.0 {
+            throw ConfigurationError.invalidStopFadeDuration(stopFadeDuration)
+        }
     }
 }
 
@@ -94,6 +108,7 @@ public enum ConfigurationError: Error, LocalizedError {
     case invalidCrossfadeDuration(TimeInterval)
     case invalidVolume(Int)
     case invalidRepeatCount(Int)
+    case invalidStopFadeDuration(TimeInterval)
     
     public var errorDescription: String? {
         switch self {
@@ -103,6 +118,8 @@ public enum ConfigurationError: Error, LocalizedError {
             return "Volume must be between 0 and 100 (got \(volume))"
         case .invalidRepeatCount(let count):
             return "Repeat count must be >= 0 or nil for infinite (got \(count))"
+        case .invalidStopFadeDuration(let duration):
+            return "Stop fade duration must be between 0.0 and 10.0 seconds (got \(duration))"
         }
     }
 }

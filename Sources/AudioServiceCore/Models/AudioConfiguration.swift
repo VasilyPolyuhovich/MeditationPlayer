@@ -42,6 +42,9 @@ public struct AudioConfiguration: Sendable, Equatable {
     /// Fade curve type for smooth transitions
     public let fadeCurve: FadeCurve
     
+    /// Default fade duration when stopping playback with fade (0.0-10.0 seconds)
+    public let stopFadeDuration: TimeInterval
+    
     public init(
         crossfadeDuration: TimeInterval = 10.0,
         fadeInDuration: TimeInterval = 3.0,
@@ -49,7 +52,8 @@ public struct AudioConfiguration: Sendable, Equatable {
         volume: Float = 1.0,
         repeatCount: Int? = nil,
         enableLooping: Bool = true,
-        fadeCurve: FadeCurve = .equalPower
+        fadeCurve: FadeCurve = .equalPower,
+        stopFadeDuration: TimeInterval = 3.0
     ) {
         // Validate and clamp values
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
@@ -59,6 +63,7 @@ public struct AudioConfiguration: Sendable, Equatable {
         self.repeatCount = repeatCount
         self.enableLooping = enableLooping
         self.fadeCurve = fadeCurve
+        self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
     }
     
     /// Validate configuration parameters
@@ -73,6 +78,10 @@ public struct AudioConfiguration: Sendable, Equatable {
         
         if let count = repeatCount, count < 0 {
             throw AudioPlayerError.invalidFormat(reason: "Repeat count cannot be negative")
+        }
+        
+        guard stopFadeDuration >= 0.0 && stopFadeDuration <= 10.0 else {
+            throw AudioPlayerError.invalidFormat(reason: "Stop fade duration must be between 0.0 and 10.0 seconds")
         }
     }
 }
