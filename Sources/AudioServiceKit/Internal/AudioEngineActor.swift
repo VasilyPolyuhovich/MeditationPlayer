@@ -65,6 +65,9 @@ actor AudioEngineActor {
         // Get the standard format from output
         let format = engine.outputNode.outputFormat(forBus: 0)
         
+        // 🔍 DIAGNOSTIC: Log engine format
+        print("[AudioEngine] Setup format: \(format.sampleRate)Hz, \(format.channelCount)ch")
+        
         // Connect player A: playerA -> mixerA -> mainMixer
         engine.connect(playerNodeA, to: mixerNodeA, format: format)
         engine.connect(mixerNodeA, to: engine.mainMixerNode, format: format)
@@ -264,6 +267,10 @@ actor AudioEngineActor {
     
     func loadAudioFile(url: URL) throws -> TrackInfo {
         let file = try AVAudioFile(forReading: url)
+        
+        // 🔍 DIAGNOSTIC: Log file format
+        print("[AudioEngine] Load file: \(url.lastPathComponent)")
+        print("  Format: \(file.fileFormat.sampleRate)Hz, \(file.fileFormat.channelCount)ch")
         
         // Store in active player's slot
         switch activePlayer {
@@ -544,8 +551,9 @@ actor AudioEngineActor {
             return nil
         }
         
-        // Add buffer for scheduling (2048 samples ≈ 46ms at 44.1kHz)
-        let bufferSamples: AVAudioFramePosition = 2048
+        // ✅ FIX: Increased buffer for better synchronization (4096 samples ≈ 93ms at 44.1kHz)
+        // Prevents timing glitches with complex audio files or high system load
+        let bufferSamples: AVAudioFramePosition = 4096  // Was: 2048
         let startSampleTime = lastRenderTime.sampleTime + bufferSamples
         
         return AVAudioTime(
@@ -790,6 +798,20 @@ actor AudioEngineActor {
     func loadAudioFileOnSecondaryPlayer(url: URL) throws -> TrackInfo {
         let file = try AVAudioFile(forReading: url)
         
+        // 🔍 DIAGNOSTIC: Log secondary file format
+        print("[AudioEngine] Load secondary file: \(url.lastPathComponent)")
+        print("  Format: \(file.fileFormat.sampleRate)Hz, \(file.fileFormat.channelCount)ch")
+        
+        // 🔍 DIAGNOSTIC: Compare with active file format
+        if let activeFile = getActiveAudioFile() {
+            let activeSR = activeFile.fileFormat.sampleRate
+            let secondarySR = file.fileFormat.sampleRate
+            if activeSR != secondarySR {
+                print("  ⚠️ FORMAT MISMATCH: Active=\(activeSR)Hz, Secondary=\(secondarySR)Hz")
+                print("  ⚠️ Real-time conversion may cause crackling during crossfade!")
+            }
+        }
+        
         // Store in inactive player's slot
         switch activePlayer {
         case .a:
@@ -824,9 +846,24 @@ actor AudioEngineActor {
     }
     
     /// Stop the currently inactive player (used after crossfade)
-    func stopInactivePlayer() {
+    func stopInactivePlayer() async {
         let player = getInactivePlayerNode()
         let mixer = getInactiveMixerNode()
+        
+        // ✅ FIX: Add micro-fade before stop to prevent clicking
+        // Even if mixer.volume is already 0.0, this ensures smooth buffer cleanup
+        if mixer.volume > 0.01 {
+            await fadeVolume(
+                mixer: mixer,
+                from: mixer.volume,
+                to: 0.0,
+                duration: 0.02,  // 20ms - imperceptible but eliminates clicks
+                curve: .linear
+            )
+        }
+        
+        // Small delay to ensure fade completes before stop
+        try? await Task.sleep(nanoseconds: 25_000_000)  // 25ms
         
         // CRITICAL: Full cleanup to prevent memory leaks
         player.stop()  // Stop playback
