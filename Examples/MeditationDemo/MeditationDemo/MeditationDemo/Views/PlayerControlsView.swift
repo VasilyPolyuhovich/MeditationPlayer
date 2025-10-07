@@ -1,4 +1,5 @@
 import SwiftUI
+import AudioServiceCore
 
 /// Playback controls including play/stop, skip, track navigation, and volume
 struct PlayerControlsView: View {
@@ -93,6 +94,100 @@ struct PlayerControlsView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+            
+            // Repeat Mode Control (Feature #1)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Repeat Mode")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                
+                Picker("Repeat Mode", selection: Binding(
+                    get: { viewModel.repeatMode },
+                    set: { newMode in
+                        Task { await viewModel.updateRepeatMode(newMode) }
+                    }
+                )) {
+                    Text("Off").tag(RepeatMode.off)
+                    Text("Single Track").tag(RepeatMode.singleTrack)
+                    Text("Playlist").tag(RepeatMode.playlist)
+                }
+                .pickerStyle(.segmented)
+                
+                // Single Track Fade Durations (conditional)
+                if viewModel.repeatMode == .singleTrack {
+                    VStack(spacing: 16) {
+                        // Fade In Slider
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Fade In: ")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "%.1fs", viewModel.singleTrackFadeIn))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { viewModel.singleTrackFadeIn },
+                                set: { newValue in
+                                    viewModel.singleTrackFadeIn = newValue
+                                    // Debounced update
+                                    Task {
+                                        try? await Task.sleep(for: .milliseconds(500))
+                                        await viewModel.updateSingleTrackFadeDurations()
+                                    }
+                                }
+                            ), in: 0.5...10.0, step: 0.5)
+                        }
+                        
+                        // Fade Out Slider
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Fade Out: ")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "%.1fs", viewModel.singleTrackFadeOut))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.blue)
+                            }
+                            
+                            Slider(value: Binding(
+                                get: { viewModel.singleTrackFadeOut },
+                                set: { newValue in
+                                    viewModel.singleTrackFadeOut = newValue
+                                    // Debounced update
+                                    Task {
+                                        try? await Task.sleep(for: .milliseconds(500))
+                                        await viewModel.updateSingleTrackFadeDurations()
+                                    }
+                                }
+                            ), in: 0.5...10.0, step: 0.5)
+                        }
+                        
+                        // Repeat Count Display
+                        if viewModel.currentRepeatCount > 0 {
+                            HStack {
+                                Image(systemName: "repeat")
+                                    .font(.caption2)
+                                    .foregroundStyle(.green)
+                                Text("Repeat count: \(viewModel.currentRepeatCount)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.top, 8)
+                    .transition(.opacity)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Volume Control (0-100)
             VStack(alignment: .leading, spacing: 8) {

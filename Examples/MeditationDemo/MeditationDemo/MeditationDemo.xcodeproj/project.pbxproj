@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		D90E95512E917F5B0004C1C1 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D90E95502E917F5B0004C1C1 /* AudioServiceCore */; };
 		D90E95532E917F5B0004C1C1 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D90E95522E917F5B0004C1C1 /* AudioServiceKit */; };
+		D986179D2E955379001E8AF3 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D986179C2E955379001E8AF3 /* AudioServiceCore */; };
+		D986179F2E955379001E8AF3 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D986179E2E955379001E8AF3 /* AudioServiceKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +44,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				D90E95532E917F5B0004C1C1 /* AudioServiceKit in Frameworks */,
+				D986179D2E955379001E8AF3 /* AudioServiceCore in Frameworks */,
+				D986179F2E955379001E8AF3 /* AudioServiceKit in Frameworks */,
 				D90E95512E917F5B0004C1C1 /* AudioServiceCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -87,6 +91,8 @@
 			packageProductDependencies = (
 				D90E95502E917F5B0004C1C1 /* AudioServiceCore */,
 				D90E95522E917F5B0004C1C1 /* AudioServiceKit */,
+				D986179C2E955379001E8AF3 /* AudioServiceCore */,
+				D986179E2E955379001E8AF3 /* AudioServiceKit */,
 			);
 			productName = MeditationDemo;
 			productReference = D90E953F2E917F050004C1C1 /* MeditationDemo.app */;
@@ -117,7 +123,7 @@
 			mainGroup = D90E95362E917F050004C1C1;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D90E954F2E917F5A0004C1C1 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */,
+				D986179B2E955379001E8AF3 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D90E95402E917F050004C1C1 /* Products */;
@@ -353,7 +359,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		D90E954F2E917F5A0004C1C1 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */ = {
+		D986179B2E955379001E8AF3 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../../../ProsperPlayer;
 		};
@@ -365,6 +371,14 @@
 			productName = AudioServiceCore;
 		};
 		D90E95522E917F5B0004C1C1 /* AudioServiceKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioServiceKit;
+		};
+		D986179C2E955379001E8AF3 /* AudioServiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioServiceCore;
+		};
+		D986179E2E955379001E8AF3 /* AudioServiceKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AudioServiceKit;
 		};
