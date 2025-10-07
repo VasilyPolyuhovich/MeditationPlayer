@@ -174,7 +174,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.isTrackReplacementInProgress = false
         
         // Configure audio session
-        try await sessionManager.configure()
+        try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
         try await sessionManager.activate()
         
         // Prepare audio engine
@@ -489,7 +489,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             stopFadeDuration: configuration.stopFadeDuration,
             repeatMode: mode,
             singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration
+            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+            mixWithOthers: configuration.mixWithOthers
         )
         
         // Sync to PlaylistManager
@@ -562,7 +563,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             stopFadeDuration: configuration.stopFadeDuration,
             repeatMode: configuration.repeatMode,
             singleTrackFadeInDuration: fadeIn,
-            singleTrackFadeOutDuration: fadeOut
+            singleTrackFadeOutDuration: fadeOut,
+            mixWithOthers: configuration.mixWithOthers
         )
         
         // ✅ Sync to PlaylistManager

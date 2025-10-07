@@ -69,6 +69,13 @@ public struct PlayerConfiguration: Sendable {
     /// - Note: Set to 0.0 for instant stop without fade
     public var stopFadeDuration: TimeInterval
     
+    // MARK: - Audio Session Settings
+    
+    /// Mix with other audio apps (default: false - interrupts other audio)
+    /// When true, allows playing alongside other audio sources (music, podcasts, etc.)
+    /// When false, interrupts other audio sources (exclusive playback)
+    public var mixWithOthers: Bool
+    
     // MARK: - Computed Properties
     
     /// Fade in duration at track start (30% of crossfade)
@@ -91,7 +98,8 @@ public struct PlayerConfiguration: Sendable {
         singleTrackFadeInDuration: TimeInterval = 3.0,
         singleTrackFadeOutDuration: TimeInterval = 3.0,
         volume: Int = 100,
-        stopFadeDuration: TimeInterval = 3.0
+        stopFadeDuration: TimeInterval = 3.0,
+        mixWithOthers: Bool = false
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
@@ -101,6 +109,7 @@ public struct PlayerConfiguration: Sendable {
         self.singleTrackFadeOutDuration = max(0.5, min(10.0, singleTrackFadeOutDuration))
         self.volume = max(0, min(100, volume))
         self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
+        self.mixWithOthers = mixWithOthers
     }
     
     // MARK: - Default Configuration

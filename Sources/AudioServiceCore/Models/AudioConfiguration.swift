@@ -54,6 +54,11 @@ public struct AudioConfiguration: Sendable, Equatable {
     /// Fade out duration at track end when repeatMode = .singleTrack (0.5-10.0 seconds)
     public let singleTrackFadeOutDuration: TimeInterval
     
+    /// Mix with other audio apps (default: false - interrupts other audio)
+    /// When true, allows playing alongside other audio sources (music, podcasts, etc.)
+    /// When false, interrupts other audio sources (exclusive playback)
+    public let mixWithOthers: Bool
+    
     public init(
         crossfadeDuration: TimeInterval = 10.0,
         fadeInDuration: TimeInterval = 3.0,
@@ -65,7 +70,8 @@ public struct AudioConfiguration: Sendable, Equatable {
         stopFadeDuration: TimeInterval = 3.0,
         repeatMode: RepeatMode = .playlist,
         singleTrackFadeInDuration: TimeInterval = 3.0,
-        singleTrackFadeOutDuration: TimeInterval = 3.0
+        singleTrackFadeOutDuration: TimeInterval = 3.0,
+        mixWithOthers: Bool = false
     ) {
         // Validate and clamp values
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
@@ -79,6 +85,7 @@ public struct AudioConfiguration: Sendable, Equatable {
         self.repeatMode = repeatMode
         self.singleTrackFadeInDuration = max(0.5, min(10.0, singleTrackFadeInDuration))
         self.singleTrackFadeOutDuration = max(0.5, min(10.0, singleTrackFadeOutDuration))
+        self.mixWithOthers = mixWithOthers
     }
     
     /// Validate configuration parameters
