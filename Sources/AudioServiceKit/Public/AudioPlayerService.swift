@@ -850,6 +850,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.info("Playlist swapped successfully (\(tracks.count) tracks)")
     }
     
+    /// Get current playlist track URLs
+    /// - Returns: Array of track URLs in playback order
+    /// - Note: Returns empty array if no playlist loaded
+    public func getPlaylist() async -> [URL] {
+        return await playlistManager.getPlaylist()
+    }
+    
     // MARK: - Observers
     
     public func addObserver(_ observer: AudioPlayerObserver) {
