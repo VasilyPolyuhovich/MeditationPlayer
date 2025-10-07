@@ -5,6 +5,10 @@ import AudioServiceCore
 
 extension AudioPlayerService {
     
+    // MARK: - Private Logger
+    
+    private static let logger = Logger.playlist
+    
     // MARK: - Playlist Properties
     
     /// Access playlist manager (already exists as stored property in AudioPlayerService)
@@ -32,13 +36,14 @@ extension AudioPlayerService {
         }
         
         // Load playlist
-        let manager = await playlistManager
-        await manager.load(tracks: tracks)
+        await playlistManager.load(tracks: tracks)
         
         // Get first track
-        guard let firstTrack = await manager.getCurrentTrack() else {
+        guard let firstTrack = await playlistManager.getCurrentTrack() else {
             throw AudioPlayerError.emptyPlaylist
         }
+        
+        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
         
         // Start playback with fade in
         try await startPlayingTrack(
@@ -50,28 +55,28 @@ extension AudioPlayerService {
     /// Add track to playlist
     /// - Parameter url: Track URL to add
     public func addTrackToPlaylist(_ url: URL) async {
-        let manager = await playlistManager
-        await manager.addTrack(url)
+        await playlistManager.addTrack(url)
+        Self.logger.debug("Added track to playlist: \(url.lastPathComponent)")
     }
     
     /// Remove track from playlist at index
     /// - Parameter index: Index of track to remove
     /// - Throws: AudioPlayerError if index invalid
     public func removeTrackFromPlaylist(at index: Int) async throws {
-        let manager = await playlistManager
-        let count = await manager.count
+        let count = await playlistManager.count
         
         guard index < count else {
             throw AudioPlayerError.invalidPlaylistIndex(index: index, count: count)
         }
         
-        await manager.removeTrack(at: index)
+        await playlistManager.removeTrack(at: index)
+        Self.logger.debug("Removed track at index \(index)")
         
         // Check if playlist is now empty
-        if await manager.isEmpty {
+        if await playlistManager.isEmpty {
             // Stop playback and disable controls
-            await stop()
-        } else if await manager.isSingleTrack && !self.configuration.enableLooping {
+            await stop(fadeDuration: nil)
+        } else if await playlistManager.isSingleTrack && self.configuration.repeatMode == .off {
             // Single track without looping - will stop after this track
             // No action needed, will stop naturally
         }
@@ -81,16 +86,17 @@ extension AudioPlayerService {
     /// - Parameter index: Target track index
     /// - Throws: AudioPlayerError if index invalid or crossfade fails
     public func jumpToTrack(at index: Int) async throws {
-        let manager = await playlistManager
-        let count = await manager.count
+        let count = await playlistManager.count
         
         guard index < count else {
             throw AudioPlayerError.invalidPlaylistIndex(index: index, count: count)
         }
         
-        guard let trackURL = await manager.jumpTo(index: index) else {
+        guard let trackURL = await playlistManager.jumpTo(index: index) else {
             throw AudioPlayerError.noActiveTrack
         }
+        
+        Self.logger.info("Jumping to track \(index): \(trackURL.lastPathComponent)")
         
         // Crossfade to selected track
         try await crossfadeToTrack(url: trackURL)
@@ -102,8 +108,7 @@ extension AudioPlayerService {
     ///   - toIndex: Destination index
     /// - Throws: AudioPlayerError if indices invalid
     public func moveTrackInPlaylist(from fromIndex: Int, to toIndex: Int) async throws {
-        let manager = await playlistManager
-        let count = await manager.count
+        let count = await playlistManager.count
         
         guard fromIndex < count && toIndex < count else {
             throw AudioPlayerError.invalidPlaylistIndex(
@@ -112,28 +117,26 @@ extension AudioPlayerService {
             )
         }
         
-        await manager.moveTrack(from: fromIndex, to: toIndex)
+        await playlistManager.moveTrack(from: fromIndex, to: toIndex)
+        Self.logger.debug("Moved track from \(fromIndex) to \(toIndex)")
     }
     
     /// Get current playlist
     /// - Returns: Array of track URLs
     public func getCurrentPlaylist() async -> [URL] {
-        let manager = await playlistManager
-        return await manager.tracks
+        return await playlistManager.tracks
     }
     
     /// Get current track index in playlist
     /// - Returns: Current index
     public func getCurrentTrackIndex() async -> Int {
-        let manager = await playlistManager
-        return await manager.currentIndex
+        return await playlistManager.currentIndex
     }
     
     /// Check if playlist is empty
     /// - Returns: True if empty
     public func isPlaylistEmpty() async -> Bool {
-        let manager = await playlistManager
-        return await manager.isEmpty
+        return await playlistManager.isEmpty
     }
     
     // MARK: - Track Navigation
@@ -141,15 +144,16 @@ extension AudioPlayerService {
     /// Go to next track in playlist (manual)
     /// - Throws: AudioPlayerError if crossfade fails
     public func nextTrack() async throws {
-        let manager = await playlistManager
-        
-        guard let nextURL = await manager.skipToNext() else {
+        guard let nextURL = await playlistManager.skipToNext() else {
             // No next track - stop if not looping
-            if !configuration.enableLooping {
-                try await finish(fadeDuration: nil)  // Fixed: added missing fadeDuration parameter
+            if configuration.repeatMode == .off {
+                Self.logger.info("Reached end of playlist, stopping")
+                try await finish(fadeDuration: nil)
             }
             return
         }
+        
+        Self.logger.info("Next track: \(nextURL.lastPathComponent)")
         
         // Crossfade to next track
         try await crossfadeToTrack(url: nextURL)
@@ -158,12 +162,13 @@ extension AudioPlayerService {
     /// Go to previous track in playlist (manual)
     /// - Throws: AudioPlayerError if crossfade fails
     public func previousTrack() async throws {
-        let manager = await playlistManager
-        
-        guard let previousURL = await manager.skipToPrevious() else {
+        guard let previousURL = await playlistManager.skipToPrevious() else {
             // No previous track
+            Self.logger.debug("Already at first track")
             return
         }
+        
+        Self.logger.info("Previous track: \(previousURL.lastPathComponent)")
         
         // Crossfade to previous track
         try await crossfadeToTrack(url: previousURL)
@@ -174,8 +179,7 @@ extension AudioPlayerService {
     /// Auto-advance to next track (called from loop crossfade logic)
     /// - Returns: Next track URL or nil if should stop
     func autoAdvanceToNextTrack() async -> URL? {
-        let manager = await playlistManager
-        return await manager.getNextTrack()
+        return await playlistManager.getNextTrack()
     }
     
     // MARK: - Private Helpers
@@ -195,12 +199,21 @@ extension AudioPlayerService {
         self.currentTrackURL = url
         
         // Enter preparing state
-        guard await stateMachine.enterPreparing() else {
+        let success = await stateMachine.enterPreparing()
+        Logger.state.assertTransition(
+            success,
+            from: state.description,
+            to: "preparing"
+        )
+        
+        guard success else {
             throw AudioPlayerError.invalidState(
                 current: state.description,
                 attempted: "start playing"
             )
         }
+        
+        Self.logger.info("Started playing track: \(trackInfo.title)")
         
         // Update now playing info
         await updateNowPlayingInfo()
@@ -243,8 +256,12 @@ extension AudioPlayerService {
             fadeOutDuration: 0, // Not used in new API
             volume: config.volumeFloat,
             repeatCount: config.repeatCount,
-            enableLooping: config.enableLooping,
-            fadeCurve: config.fadeCurve
+            enableLooping: config.repeatMode == .playlist, // Convert repeatMode to enableLooping
+            fadeCurve: config.fadeCurve,
+            stopFadeDuration: config.stopFadeDuration,
+            repeatMode: config.repeatMode,
+            singleTrackFadeInDuration: config.singleTrackFadeInDuration,
+            singleTrackFadeOutDuration: config.singleTrackFadeOutDuration
         )
     }
     
@@ -253,9 +270,12 @@ extension AudioPlayerService {
         PlayerConfiguration(
             crossfadeDuration: configuration.crossfadeDuration,
             fadeCurve: configuration.fadeCurve,
-            enableLooping: configuration.enableLooping,
+            repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
-            volume: Int(configuration.volume * 100)
+            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+            volume: Int(configuration.volume * 100),
+            stopFadeDuration: configuration.stopFadeDuration
         )
     }
 }

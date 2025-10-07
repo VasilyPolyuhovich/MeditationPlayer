@@ -2,9 +2,40 @@ import Foundation
 import AVFoundation
 import AudioServiceCore
 
+// MARK: - Future Enhancements (v3.2)
+
+/// TODO: ValidationFeedback System
+/// ================================
+/// Return validation results with warnings/errors instead of prints
+///
+/// Proposed API:
+/// ```swift
+/// struct ValidationFeedback {
+///     let isValid: Bool
+///     let warnings: [ValidationWarning]
+///     let errors: [ValidationError]
+/// }
+///
+/// enum ValidationWarning {
+///     case totalFadeExceedsRecommended(total: TimeInterval, track: TimeInterval)
+///     case fadeOutConflictsWithCrossfade(fadeOut: TimeInterval, crossfade: TimeInterval)
+///     case trackTooShortForFade(duration: TimeInterval)
+/// }
+///
+/// func setSingleTrackFadeDurations(...) async throws -> ValidationFeedback
+/// ```
+///
+/// Benefits:
+/// - UI can show warnings before applying
+/// - Programmer can handle conflicts proactively
+/// - Better UX (inform user about auto-adjustments)
+
 /// Main audio player service implementing the AudioPlayerProtocol
 public actor AudioPlayerService: AudioPlayerProtocol {
     // MARK: - Properties
+    
+    // Private logger
+    private static let logger = Logger.audio
     
     // SSOT: State managed exclusively by state machine
     private var _state: PlayerState
@@ -52,9 +83,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             configuration: PlayerConfiguration(
                 crossfadeDuration: configuration.crossfadeDuration,
                 fadeCurve: configuration.fadeCurve,
-                enableLooping: configuration.enableLooping,
+                repeatMode: configuration.repeatMode,
                 repeatCount: configuration.repeatCount,
-                volume: Int(configuration.volume * 100)
+                singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+                singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+                volume: Int(configuration.volume * 100),
+                stopFadeDuration: configuration.stopFadeDuration
             )
         )
         // remoteCommandManager will be created in setup() on MainActor
@@ -151,7 +185,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.currentTrack = trackInfo
         
         // Enter preparing state
-        guard await stateMachine.enterPreparing() else {
+        let success = await stateMachine.enterPreparing()
+        Logger.state.assertTransition(
+            success,
+            from: state.description,
+            to: "preparing"
+        )
+        
+        guard success else {
             throw AudioPlayerError.invalidState(
                 current: state.description,
                 attempted: "start playing"
@@ -170,6 +211,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
             await rollbackCrossfade()
         }
+        
+        // TODO v3.2: Handle pause during single track fade in/out
+        // Current: Fade resets on pause (simple behavior)
+        // Future: Consider preserving fade state for smooth resume
         
         // Guard: only pause if playing or preparing (to prevent Error 4)
         guard state == .playing || state == .preparing else {
@@ -276,7 +321,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // ISSUE #7 FIX: Deactivate audio session
         try? await sessionManager.deactivate()
         
-        // Reset ALL state for clean restart
+        // Reset ALL state for clean restart (including crossfade flags)
         playbackPosition = nil
         currentTrack = nil
         currentTrackURL = nil
@@ -309,7 +354,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     public func finish(fadeDuration: TimeInterval?) async throws {
         let duration = fadeDuration ?? configuration.fadeOutDuration
         
-        guard await stateMachine.enterFadingOut(duration: duration) else {
+        let success = await stateMachine.enterFadingOut(duration: duration)
+        Logger.state.assertTransition(
+            success,
+            from: state.description,
+            to: "fading out"
+        )
+        
+        guard success else {
             throw AudioPlayerError.invalidState(
                 current: state.description,
                 attempted: "finish"
@@ -322,6 +374,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
             await rollbackCrossfade()
         }
+        
+        // TODO v3.2: Enhanced skip logic during single track fade
+        // Current: Fade is cancelled (reset), seek happens instantly
+        // Future Options:
+        //   1. Skip should preserve fade state if within fade region
+        //   2. Skip outside fade region should restart appropriate fade
+        //   3. Add skipWithFade() API for smooth transition
+        // Recommendation: Option 2 (context-aware fade restart)
         
         guard let position = playbackPosition else {
             throw AudioPlayerError.invalidState(
@@ -339,6 +399,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
             await rollbackCrossfade()
         }
+        
+        // TODO v3.2: Enhanced skip logic during single track fade
+        // Same considerations as skipForward (see above)
         
         guard let position = playbackPosition else {
             throw AudioPlayerError.invalidState(
@@ -400,6 +463,115 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         return currentRepeatCount
     }
     
+    // MARK: - Repeat Mode Control (Feature #1 - Phase 4)
+    
+    /// Sets the repeat mode for playback
+    ///
+    /// The repeat mode determines how playback continues after a track ends:
+    /// - `.off`: Play once, then stop
+    /// - `.singleTrack`: Loop current track with configurable fade in/out
+    /// - `.playlist`: Advance to next track with crossfade
+    ///
+    /// - Parameter mode: The repeat mode to set
+    /// - Note: Changes apply immediately without restarting playback
+    /// - Note: For `.singleTrack` mode, use `setSingleTrackFadeDurations()` to configure fade behavior
+    /// - SeeAlso: `getRepeatMode()`, `setSingleTrackFadeDurations(fadeIn:fadeOut:)`
+    public func setRepeatMode(_ mode: RepeatMode) async {
+        // Update configuration with new repeat mode
+        configuration = AudioConfiguration(
+            crossfadeDuration: configuration.crossfadeDuration,
+            fadeInDuration: configuration.fadeInDuration,
+            fadeOutDuration: configuration.fadeOutDuration,
+            volume: configuration.volume,
+            repeatCount: configuration.repeatCount,
+            enableLooping: mode == .playlist, // Backward compatibility
+            fadeCurve: configuration.fadeCurve,
+            stopFadeDuration: configuration.stopFadeDuration,
+            repeatMode: mode,
+            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration
+        )
+        
+        // Sync to PlaylistManager
+        await syncConfigurationToPlaylistManager()
+        
+        Self.logger.info("Repeat mode set to: \(mode)")
+    }
+    
+    /// Returns the current repeat mode
+    /// - Returns: Current repeat mode (.off, .singleTrack, .playlist)
+    public func getRepeatMode() -> RepeatMode {
+        return configuration.repeatMode
+    }
+    
+    /// Sets fade durations for single track repeat mode
+    ///
+    /// Configures fade in/out durations used when `repeatMode = .singleTrack`.
+    /// These values are validated statically and adapted dynamically per track at runtime.
+    ///
+    /// - Parameters:
+    ///   - fadeIn: Fade in duration at track start (0.5-10.0 seconds)
+    ///   - fadeOut: Fade out duration at track end (0.5-10.0 seconds)
+    /// - Throws: ConfigurationError if durations are outside valid range
+    /// - Note: **Static Validation**: Range checked against 0.5-10.0 seconds
+    /// - Note: **Dynamic Validation**: Auto-adapted per track at loop time (max 40% each, 80% total)
+    /// - Note: **Crossfade Overlap**: For `.playlist` mode, fadeOut may be auto-adjusted to prevent overlap
+    /// - Warning: Total fade duration \u003E 15s may not work well for short tracks (\u003c20s)
+    /// - Warning: Changes apply to **next loop iteration** (current loop unaffected)
+    /// - TODO: v3.2 - Add ValidationFeedback system to return warnings/errors
+    public func setSingleTrackFadeDurations(
+        fadeIn: TimeInterval,
+        fadeOut: TimeInterval
+    ) async throws {
+        // ✅ Level 1: Static Validation (Range Check)
+        guard fadeIn >= 0.5 && fadeIn <= 10.0 else {
+            throw ConfigurationError.invalidSingleTrackFadeInDuration(fadeIn)
+        }
+        
+        guard fadeOut >= 0.5 && fadeOut <= 10.0 else {
+            throw ConfigurationError.invalidSingleTrackFadeOutDuration(fadeOut)
+        }
+        
+        // ⚠️ Level 2: Warning for large total (may not fit short tracks)
+        let totalFade = fadeIn + fadeOut
+        if totalFade > 15.0 {
+            // TODO v3.2: Return ValidationWarning instead of logger
+            Self.logger.warning("Total fade duration (\(totalFade)s) may not work for short tracks (<20s)")
+        }
+        
+        // ⚠️ Level 3: Crossfade Overlap Check (only for .playlist mode)
+        // Note: .singleTrack mode has no crossfade overlap (loops same track)
+        if configuration.repeatMode == .playlist {
+            let crossfadeDuration = configuration.crossfadeDuration
+            if fadeOut > crossfadeDuration {
+                // TODO v3.2: Return ValidationWarning with conflicting values
+                Self.logger.warning("fadeOut (\(fadeOut)s) exceeds crossfade (\(crossfadeDuration)s) in .playlist mode")
+                Self.logger.info("fadeOut will be auto-adjusted at runtime to prevent overlap")
+            }
+        }
+        
+        // ✅ Update configuration (values stored, dynamic adaptation happens at loop time)
+        configuration = AudioConfiguration(
+            crossfadeDuration: configuration.crossfadeDuration,
+            fadeInDuration: configuration.fadeInDuration,
+            fadeOutDuration: configuration.fadeOutDuration,
+            volume: configuration.volume,
+            repeatCount: configuration.repeatCount,
+            enableLooping: configuration.enableLooping,
+            fadeCurve: configuration.fadeCurve,
+            stopFadeDuration: configuration.stopFadeDuration,
+            repeatMode: configuration.repeatMode,
+            singleTrackFadeInDuration: fadeIn,
+            singleTrackFadeOutDuration: fadeOut
+        )
+        
+        // ✅ Sync to PlaylistManager
+        await syncConfigurationToPlaylistManager()
+        
+        Self.logger.info("Single track fade durations set: fadeIn=\(fadeIn)s, fadeOut=\(fadeOut)s")
+        Self.logger.debug("Changes apply to NEXT loop iteration (current loop unaffected)")
+    }
+    
     /// Reset player to initial state with default configuration
     public func reset() async {
         // Stop timer first
@@ -418,7 +590,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await playlistManager.clear()
         await syncConfigurationToPlaylistManager()
         
-        // Clear all state
+        // Clear all state (including crossfade flags)
         currentTrack = nil
         currentTrackURL = nil
         playbackPosition = nil
@@ -452,7 +624,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Deactivate audio session
         try? await sessionManager.deactivate()
         
-        // Clear all state
+        // Clear all state (including crossfade flags)
         currentTrack = nil
         currentTrackURL = nil
         playbackPosition = nil
@@ -571,6 +743,111 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Update now playing info
         await updateNowPlayingInfo()
+    }
+    
+    /// Replace entire playlist with smooth crossfade to first track
+    /// - Parameters:
+    ///   - tracks: New playlist track URLs
+    ///   - crossfadeDuration: Duration of crossfade (default: 5.0s, range: 1.0-30.0s)
+    /// - Throws: AudioPlayerError if playlist is empty or swap fails
+    /// - Note: Preserves playback state (playing → crossfade, paused → silent switch)
+    /// - Note: Resets playlist index to 0 and repeat count to 0
+    /// - Note: If crossfade in progress, performs rollback and retries after 1.5s delay
+    public func swapPlaylist(
+        tracks: [URL],
+        crossfadeDuration: TimeInterval = 5.0
+    ) async throws {
+        // 1. Validation
+        guard !tracks.isEmpty else {
+            throw AudioPlayerError.invalidConfiguration(
+                reason: "Cannot swap to empty playlist"
+            )
+        }
+        
+        // Validate and clamp crossfade duration
+        let validDuration = max(1.0, min(30.0, crossfadeDuration))
+        
+        // 2. Rollback if crossfade in progress
+        if isTrackReplacementInProgress || isLoopCrossfadeInProgress {
+            await rollbackCrossfade()
+            try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s delay
+        }
+        
+        // 3. State preservation (BEFORE async operations!)
+        let wasPlaying = state == .playing
+        
+        // 4. Load first track of new playlist on secondary player
+        let firstTrackURL = tracks[0]
+        let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrackURL)
+        
+        // 5. Recheck state after async (actor reentrancy protection)
+        let isStillPlaying = state == .playing
+        
+        // 6. Decision: crossfade or silent switch
+        if wasPlaying && isStillPlaying {
+            // Mark as in progress
+            isTrackReplacementInProgress = true
+            defer { isTrackReplacementInProgress = false }
+            
+            // Prepare secondary player
+            await audioEngine.prepareSecondaryPlayer()
+            
+            // Perform synchronized crossfade with progress
+            let progressStream = await audioEngine.performSynchronizedCrossfade(
+                duration: validDuration,
+                curve: configuration.fadeCurve
+            )
+            
+            // Observe progress
+            crossfadeProgressTask = Task { [weak self] in
+                for await progress in progressStream {
+                    await self?.updateCrossfadeProgress(progress)
+                }
+            }
+            
+            // Wait for completion
+            await crossfadeProgressTask?.value
+            crossfadeProgressTask = nil
+            
+            // Switch players (secondary becomes active)
+            await audioEngine.switchActivePlayer()
+            
+            // Stop old player (now inactive)
+            await audioEngine.stopInactivePlayer()
+            
+            // Reset inactive mixer
+            await audioEngine.resetInactiveMixer()
+            
+            // Clear inactive file
+            await audioEngine.clearInactiveFile()
+            
+            // Ensure playing state after crossfade
+            if state != .playing {
+                await stateMachine.enterPlaying()
+            }
+        } else {
+            // Paused or stopped - just switch without playback
+            await audioEngine.switchActivePlayer()
+            await audioEngine.stopInactivePlayer()
+            // Keep current state (paused/finished)
+        }
+        
+        // 7. Update PlaylistManager
+        await playlistManager.replacePlaylist(tracks)
+        
+        // 8. Update current track state
+        currentTrack = newTrack
+        currentTrackURL = firstTrackURL
+        
+        // 9. Reset counters
+        currentRepeatCount = 0
+        isLoopCrossfadeInProgress = false
+        isTrackReplacementInProgress = false
+        
+        // 10. Update UI
+        await updateNowPlayingInfo()
+        
+        Self.logger.info("Playlist swapped successfully (\(tracks.count) tracks)")
     }
     
     // MARK: - Observers
@@ -733,7 +1010,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
     }
     
-    // MARK: - Loop Crossfade Logic (UPDATED)
+    // MARK: - Loop Crossfade Logic (UPDATED - Phase 3)
     
     /// Epsilon tolerance for floating-point comparison (100ms)
     /// Prevents precision errors in IEEE 754 arithmetic (e.g., 49.999999999 ≠ 50.0)
@@ -743,9 +1020,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Parameter position: Current playback position
     /// - Returns: True if crossfade should be triggered
     /// - Note: Uses epsilon tolerance to handle floating-point precision errors
+    /// - Note: Now checks repeatMode instead of enableLooping (Phase 3)
     private func shouldTriggerLoopCrossfade(_ position: PlaybackPosition) -> Bool {
-        // Only loop if enabled in configuration
-        guard configuration.enableLooping else { return false }
+        // Only loop if repeat mode is not .off
+        guard configuration.repeatMode != .off else { return false }
         
         // Don't trigger if already in progress
         guard !isLoopCrossfadeInProgress else { return false }
@@ -754,7 +1032,18 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard state == .playing else { return false }
         
         // Calculate trigger point (crossfade duration before end)
-        let triggerPoint = position.duration - configuration.crossfadeDuration
+        // For .singleTrack mode, use max(fadeIn, fadeOut) as crossfade duration
+        let crossfadeDuration: TimeInterval
+        if configuration.repeatMode == .singleTrack {
+            crossfadeDuration = max(
+                configuration.singleTrackFadeInDuration,
+                configuration.singleTrackFadeOutDuration
+            )
+        } else {
+            crossfadeDuration = configuration.crossfadeDuration
+        }
+        
+        let triggerPoint = position.duration - crossfadeDuration
         
         // FIXED Issue #8: Use epsilon tolerance for float precision
         // Trigger when: triggerPoint - tolerance ≤ currentTime < duration
@@ -762,14 +1051,145 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                position.currentTime < position.duration
     }
     
-    /// Start the loop crossfade process with synchronized playback
-    /// Now uses PlaylistManager to get next track
+    /// Start the loop crossfade process with support for all repeat modes
+    /// - Note: Handles .off (finish), .singleTrack (loop current), .playlist (advance)
     private func startLoopCrossfade() async {
         // Mark as in progress BEFORE any async operations
         isLoopCrossfadeInProgress = true
         
-        // ✅ FIX: Send .preparing state immediately for instant UI feedback
-        // This matches the behavior of manual track switch (nextTrack/previousTrack)
+        // Determine action based on repeat mode
+        switch configuration.repeatMode {
+        case .off:
+            // Finish playback with fade out
+            try? await finish(fadeDuration: configuration.fadeOutDuration)
+            isLoopCrossfadeInProgress = false
+            
+        case .singleTrack:
+            // Loop current track with fade
+            await loopCurrentTrackWithFade()
+            isLoopCrossfadeInProgress = false
+            
+        case .playlist:
+            // Advance to next playlist track
+            await advanceToNextPlaylistTrack()
+            isLoopCrossfadeInProgress = false
+        }
+    }
+    
+    /// Loop current track with fade out at end and fade in at start
+    /// - Note: Used only when repeatMode = .singleTrack
+    /// - Note: Respects singleTrackFadeInDuration and singleTrackFadeOutDuration
+    /// - Note: Dynamically adapts fade durations to track duration (max 40% each, 80% total)
+    private func loopCurrentTrackWithFade() async {
+        // 1. Validation
+        guard let currentURL = currentTrackURL,
+              let position = playbackPosition else {
+            Self.logger.error("Cannot loop: no current track URL or position")
+            return
+        }
+        
+        let trackDuration = position.duration
+        
+        // ✅ Level 2: Dynamic Validation Per Track
+        
+        // 2. Check minimum duration (5s)
+        guard trackDuration >= 5.0 else {
+            Self.logger.warning("Track too short (\(trackDuration)s) for fade, using minimal fade (0.5s)")
+            // TODO v3.2: Add to ValidationFeedback system
+            return
+        }
+        
+        // 3. Get configured fade durations
+        let configuredFadeIn = configuration.singleTrackFadeInDuration
+        let configuredFadeOut = configuration.singleTrackFadeOutDuration
+        
+        // 4. Adaptive scaling to track duration (max 40% each = 80% total)
+        let maxFadeIn = min(configuredFadeIn, trackDuration * 0.4)
+        let maxFadeOut = min(configuredFadeOut, trackDuration * 0.4)
+        
+        // 5. Ensure total doesn't exceed 80%
+        var actualFadeIn = maxFadeIn
+        var actualFadeOut = maxFadeOut
+        
+        if actualFadeIn + actualFadeOut > trackDuration * 0.8 {
+            let ratio = (trackDuration * 0.8) / (actualFadeIn + actualFadeOut)
+            actualFadeIn *= ratio
+            actualFadeOut *= ratio
+            Self.logger.info("Fade durations adapted to track: fadeIn=\(actualFadeIn)s, fadeOut=\(actualFadeOut)s")
+        }
+        
+        // 6. Calculate crossfade duration (max of adapted fade in/out)
+        let crossfadeDuration = max(actualFadeOut, actualFadeIn)
+        
+        Self.logger.debug("Single track loop: configured(\(configuredFadeIn)s,\(configuredFadeOut)s) → actual(\(actualFadeIn)s,\(actualFadeOut)s)")
+        Self.logger.debug("Track duration: \(trackDuration)s, crossfade: \(crossfadeDuration)s")
+        
+        // 7. Send .preparing state for instant UI feedback
+        let prepareProgress = CrossfadeProgress(
+            phase: .preparing,
+            duration: crossfadeDuration,
+            elapsed: 0
+        )
+        updateCrossfadeProgress(prepareProgress)
+        
+        // 4. Load same file on secondary player
+        do {
+            let trackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: currentURL)
+            
+            // 5. Prepare secondary player
+            await audioEngine.prepareSecondaryPlayer()
+            
+            // 6. Perform synchronized crossfade with progress
+            let progressStream = await audioEngine.performSynchronizedCrossfade(
+                duration: crossfadeDuration,
+                curve: configuration.fadeCurve
+            )
+            
+            // 7. Observe progress
+            crossfadeProgressTask = Task { [weak self] in
+                for await progress in progressStream {
+                    await self?.updateCrossfadeProgress(progress)
+                }
+            }
+            
+            // Wait for completion
+            await crossfadeProgressTask?.value
+            crossfadeProgressTask = nil
+            
+            // 8. Switch players (secondary becomes active)
+            await audioEngine.switchActivePlayer()
+            
+            // 9. Stop old player (now inactive)
+            await audioEngine.stopInactivePlayer()
+            
+            // 10. Reset inactive mixer
+            await audioEngine.resetInactiveMixer()
+            
+            // 11. Clear inactive file to free memory
+            await audioEngine.clearInactiveFile()
+            
+            // 12. Update track info (same URL, but refreshed)
+            currentTrack = trackInfo
+            // currentTrackURL stays the same
+            
+            // 13. Increment repeat count
+            currentRepeatCount += 1
+            
+            // 14. Update now playing
+            await updateNowPlayingInfo()
+            
+            Self.logger.info("Single track loop completed (repeat #\(currentRepeatCount))")
+            
+        } catch {
+            Self.logger.error("Single track loop failed: \(error)")
+        }
+    }
+    
+    /// Advance to next track in playlist with crossfade
+    /// - Note: Used only when repeatMode = .playlist
+    /// - Note: Existing logic moved from startLoopCrossfade()
+    private func advanceToNextPlaylistTrack() async {
+        // Send .preparing state immediately
         let prepareProgress = CrossfadeProgress(
             phase: .preparing,
             duration: configuration.crossfadeDuration,
@@ -781,7 +1201,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard let nextURL = await playlistManager.getNextTrack() else {
             // No more tracks - finish playback
             try? await finish(fadeDuration: configuration.fadeOutDuration)
-            isLoopCrossfadeInProgress = false
             return
         }
         
@@ -814,8 +1233,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await audioEngine.stopInactivePlayer()
             await audioEngine.resetInactiveMixer()
             
-            // CRITICAL: Clear inactive file reference to free memory
-            // After switch, old active is now inactive
+            // Clear inactive file reference to free memory
             await audioEngine.clearInactiveFile()
             
             // 6. Update current track info
@@ -825,25 +1243,23 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // 7. Update now playing
             await updateNowPlayingInfo()
             
-            // Safe to continue looping
-            isLoopCrossfadeInProgress = false
+            Self.logger.info("Playlist auto-advance completed")
             
         } catch {
             // Failed to load next track
-            print("❌ Auto-advance failed: \(error)")
-            isLoopCrossfadeInProgress = false
+            Self.logger.error("Auto-advance failed: \(error)")
         }
     }
-    
-    // checkShouldFinishAfterLoop() removed - logic now in PlaylistManager.getNextTrack()
     
     /// Sync current configuration to playlist manager
     private func syncConfigurationToPlaylistManager() async {
         let playerConfig = PlayerConfiguration(
             crossfadeDuration: configuration.crossfadeDuration,
             fadeCurve: configuration.fadeCurve,
-            enableLooping: configuration.enableLooping,
+            repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
+            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
             volume: Int(configuration.volume * 100),
             stopFadeDuration: configuration.stopFadeDuration
         )
@@ -854,11 +1270,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     /// Rollback active crossfade transaction to stable state
     /// - Parameter rollbackDuration: Duration to restore active volume (default: 0.5s)
+    /// - Note: Clears both loop and replacement flags (works for all repeat modes)
     private func rollbackCrossfade(rollbackDuration: TimeInterval = 0.5) async {
         // Perform rollback on audio engine
         _ = await audioEngine.rollbackCrossfade(rollbackDuration: rollbackDuration)
         
-        // Clear crossfade flags
+        // Clear crossfade flags (handles all repeat modes)
         isLoopCrossfadeInProgress = false
         isTrackReplacementInProgress = false
         
@@ -881,14 +1298,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     /// Update crossfade progress and notify observers
     internal func updateCrossfadeProgress(_ progress: CrossfadeProgress) {
-        print("🟣 [PROGRESS] Updating crossfade progress: \(progress.phase), observers count: \(observers.count)")
+        Self.logger.debug("[PROGRESS] Updating crossfade progress: \(progress.phase), observers count: \(observers.count)")
         currentCrossfadeProgress = progress
         
         // Notify observers about crossfade progress
         for observer in observers {
             Task {
                 if let progressObserver = observer as? CrossfadeProgressObserver {
-                    print("🟣 [PROGRESS] Notifying observer...")
+                    Self.logger.debug("[PROGRESS] Notifying observer...")
                     await progressObserver.crossfadeProgressDidUpdate(progress)
                 }
             }

@@ -30,7 +30,8 @@ public protocol AudioPlayerProtocol: Actor {
     func resume() async throws
     
     /// Stop playback and cleanup resources
-    func stop() async
+    /// - Parameter fadeDuration: Optional fade out duration (nil = instant stop)
+    func stop(fadeDuration: TimeInterval?) async
     
     /// Finish playback with fade out
     /// - Parameter fadeDuration: Custom fade out duration (uses config default if nil)

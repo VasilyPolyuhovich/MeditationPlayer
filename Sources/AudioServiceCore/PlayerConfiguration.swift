@@ -1,5 +1,17 @@
 import Foundation
 
+/// Repeat mode for playback
+public enum RepeatMode: Sendable, Equatable {
+    /// Play once, no repeat
+    case off
+    
+    /// Loop current track with fade in/out
+    case singleTrack
+    
+    /// Loop entire playlist
+    case playlist
+}
+
 /// Simplified player configuration with automatic fade calculations
 /// Replaces AudioConfiguration with more intuitive API
 public struct PlayerConfiguration: Sendable {
@@ -18,14 +30,31 @@ public struct PlayerConfiguration: Sendable {
     
     // MARK: - Playback Mode
     
+    /// Repeat mode for playback (default: .off)
+    /// - .off: Play once, no repeat
+    /// - .singleTrack: Loop current track with fade in/out
+    /// - .playlist: Loop entire playlist
+    public var repeatMode: RepeatMode
+    
     /// Enable looping (true = cycle playlist, false = play once and stop)
-    public var enableLooping: Bool
+    /// @deprecated Use repeatMode instead
+    @available(*, deprecated, message: "Use repeatMode instead. Set to .playlist for looping, .off for no repeat")
+    public var enableLooping: Bool {
+        get { repeatMode == .playlist }
+        set { repeatMode = newValue ? .playlist : .off }
+    }
     
     /// Number of times to repeat playlist
     /// - nil: Infinite repeats (loop forever)
-    /// - 0: Play once (same as enableLooping = false)
+    /// - 0: Play once (same as repeatMode = .off)
     /// - N: Loop N times then stop
     public var repeatCount: Int?
+    
+    /// Fade in duration at track start when repeatMode = .singleTrack (0.5-10.0 seconds)
+    public var singleTrackFadeInDuration: TimeInterval
+    
+    /// Fade out duration at track end when repeatMode = .singleTrack (0.5-10.0 seconds)
+    public var singleTrackFadeOutDuration: TimeInterval
     
     // MARK: - Audio Settings
     
@@ -57,15 +86,19 @@ public struct PlayerConfiguration: Sendable {
     public init(
         crossfadeDuration: TimeInterval = 10.0,
         fadeCurve: FadeCurve = .equalPower,
-        enableLooping: Bool = true,
+        repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
+        singleTrackFadeInDuration: TimeInterval = 3.0,
+        singleTrackFadeOutDuration: TimeInterval = 3.0,
         volume: Int = 100,
         stopFadeDuration: TimeInterval = 3.0
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
-        self.enableLooping = enableLooping
+        self.repeatMode = repeatMode
         self.repeatCount = repeatCount
+        self.singleTrackFadeInDuration = max(0.5, min(10.0, singleTrackFadeInDuration))
+        self.singleTrackFadeOutDuration = max(0.5, min(10.0, singleTrackFadeOutDuration))
         self.volume = max(0, min(100, volume))
         self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
     }
@@ -99,6 +132,15 @@ public struct PlayerConfiguration: Sendable {
         if stopFadeDuration < 0.0 || stopFadeDuration > 10.0 {
             throw ConfigurationError.invalidStopFadeDuration(stopFadeDuration)
         }
+        
+        // Single track fade durations validation
+        if singleTrackFadeInDuration < 0.5 || singleTrackFadeInDuration > 10.0 {
+            throw ConfigurationError.invalidSingleTrackFadeInDuration(singleTrackFadeInDuration)
+        }
+        
+        if singleTrackFadeOutDuration < 0.5 || singleTrackFadeOutDuration > 10.0 {
+            throw ConfigurationError.invalidSingleTrackFadeOutDuration(singleTrackFadeOutDuration)
+        }
     }
 }
 
@@ -109,6 +151,8 @@ public enum ConfigurationError: Error, LocalizedError {
     case invalidVolume(Int)
     case invalidRepeatCount(Int)
     case invalidStopFadeDuration(TimeInterval)
+    case invalidSingleTrackFadeInDuration(TimeInterval)
+    case invalidSingleTrackFadeOutDuration(TimeInterval)
     
     public var errorDescription: String? {
         switch self {
@@ -120,6 +164,10 @@ public enum ConfigurationError: Error, LocalizedError {
             return "Repeat count must be >= 0 or nil for infinite (got \(count))"
         case .invalidStopFadeDuration(let duration):
             return "Stop fade duration must be between 0.0 and 10.0 seconds (got \(duration))"
+        case .invalidSingleTrackFadeInDuration(let duration):
+            return "Single track fade in duration must be between 0.5 and 10.0 seconds (got \(duration))"
+        case .invalidSingleTrackFadeOutDuration(let duration):
+            return "Single track fade out duration must be between 0.5 and 10.0 seconds (got \(duration))"
         }
     }
 }
@@ -135,7 +183,7 @@ extension PlayerConfiguration {
         PlayerConfiguration(
             crossfadeDuration: audioConfig.crossfadeDuration,
             fadeCurve: audioConfig.fadeCurve,
-            enableLooping: audioConfig.enableLooping,
+            repeatMode: .playlist,  // Legacy behavior
             repeatCount: audioConfig.repeatCount,
             volume: Int(audioConfig.volume * 100)
         )

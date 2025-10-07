@@ -110,6 +110,22 @@ actor PlaylistManager {
         currentRepeatCount = 0
     }
     
+    /// Replace entire playlist and reset state
+    /// - Parameter tracks: New playlist tracks
+    /// - Note: Resets currentIndex to 0 and repeatCount to 0
+    /// - Note: Used by swapPlaylist() API for hot playlist replacement
+    func replacePlaylist(_ tracks: [URL]) {
+        self.tracks = tracks
+        self.currentIndex = 0
+        self.currentRepeatCount = 0
+    }
+    
+    /// Get current playlist
+    /// - Returns: Array of all track URLs in current playlist
+    func getPlaylist() -> [URL] {
+        return tracks
+    }
+    
     // MARK: - Navigation
     
     /// Get current track URL
@@ -119,15 +135,43 @@ actor PlaylistManager {
         return tracks[currentIndex]
     }
     
-    /// Get next track according to playback mode and repeat settings
+    /// Get next track according to repeat mode
     /// - Returns: Next track URL, nil if should stop
     func getNextTrack() -> URL? {
         guard !tracks.isEmpty else { return nil }
         
-        if configuration.enableLooping {
-            return getNextTrackLooping()
-        } else {
+        switch configuration.repeatMode {
+        case .off:
+            // Play once, no repeat
             return getNextTrackSequential()
+            
+        case .singleTrack:
+            // Loop current track - return same URL
+            return tracks[currentIndex]
+            
+        case .playlist:
+            // Loop entire playlist
+            return getNextTrackLooping()
+        }
+    }
+    
+    /// Check if should advance to next track based on repeat mode
+    /// - Returns: True if should advance, false if should loop current or stop
+    func shouldAdvanceToNextTrack() -> Bool {
+        guard !tracks.isEmpty else { return false }
+        
+        switch configuration.repeatMode {
+        case .off:
+            // Advance until end of playlist
+            return currentIndex + 1 < tracks.count
+            
+        case .singleTrack:
+            // Never advance - loop current track
+            return false
+            
+        case .playlist:
+            // Always advance in playlist loop
+            return true
         }
     }
     
@@ -200,7 +244,7 @@ actor PlaylistManager {
     
     // MARK: - Private Helpers
     
-    /// Get next track in looping mode
+    /// Get next track in looping mode (playlist repeat)
     private func getNextTrackLooping() -> URL? {
         // Single track - always return it (loop on same track)
         if tracks.count == 1 {

@@ -45,6 +45,15 @@ public struct AudioConfiguration: Sendable, Equatable {
     /// Default fade duration when stopping playback with fade (0.0-10.0 seconds)
     public let stopFadeDuration: TimeInterval
     
+    /// Repeat mode for playback (default: .playlist for backward compatibility)
+    public let repeatMode: RepeatMode
+    
+    /// Fade in duration at track start when repeatMode = .singleTrack (0.5-10.0 seconds)
+    public let singleTrackFadeInDuration: TimeInterval
+    
+    /// Fade out duration at track end when repeatMode = .singleTrack (0.5-10.0 seconds)
+    public let singleTrackFadeOutDuration: TimeInterval
+    
     public init(
         crossfadeDuration: TimeInterval = 10.0,
         fadeInDuration: TimeInterval = 3.0,
@@ -53,7 +62,10 @@ public struct AudioConfiguration: Sendable, Equatable {
         repeatCount: Int? = nil,
         enableLooping: Bool = true,
         fadeCurve: FadeCurve = .equalPower,
-        stopFadeDuration: TimeInterval = 3.0
+        stopFadeDuration: TimeInterval = 3.0,
+        repeatMode: RepeatMode = .playlist,
+        singleTrackFadeInDuration: TimeInterval = 3.0,
+        singleTrackFadeOutDuration: TimeInterval = 3.0
     ) {
         // Validate and clamp values
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
@@ -64,6 +76,9 @@ public struct AudioConfiguration: Sendable, Equatable {
         self.enableLooping = enableLooping
         self.fadeCurve = fadeCurve
         self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
+        self.repeatMode = repeatMode
+        self.singleTrackFadeInDuration = max(0.5, min(10.0, singleTrackFadeInDuration))
+        self.singleTrackFadeOutDuration = max(0.5, min(10.0, singleTrackFadeOutDuration))
     }
     
     /// Validate configuration parameters
@@ -82,6 +97,14 @@ public struct AudioConfiguration: Sendable, Equatable {
         
         guard stopFadeDuration >= 0.0 && stopFadeDuration <= 10.0 else {
             throw AudioPlayerError.invalidFormat(reason: "Stop fade duration must be between 0.0 and 10.0 seconds")
+        }
+        
+        guard singleTrackFadeInDuration >= 0.5 && singleTrackFadeInDuration <= 10.0 else {
+            throw AudioPlayerError.invalidFormat(reason: "Single track fade in duration must be between 0.5 and 10.0 seconds")
+        }
+        
+        guard singleTrackFadeOutDuration >= 0.5 && singleTrackFadeOutDuration <= 10.0 else {
+            throw AudioPlayerError.invalidFormat(reason: "Single track fade out duration must be between 0.5 and 10.0 seconds")
         }
     }
 }
