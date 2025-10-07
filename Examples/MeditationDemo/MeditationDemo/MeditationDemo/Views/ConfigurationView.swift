@@ -1,5 +1,6 @@
 import SwiftUI
 import AudioServiceCore
+import AudioServiceKit
 
 /// Configuration sheet for audio playback settings
 struct ConfigurationView: View {
@@ -9,6 +10,94 @@ struct ConfigurationView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // Repeat Mode Section (Feature #1)
+                Section {
+                    Picker("Repeat Mode", selection: Binding(
+                        get: { viewModel.repeatMode },
+                        set: { newMode in
+                            Task { await viewModel.updateRepeatMode(newMode) }
+                        }
+                    )) {
+                        Text("Off").tag(RepeatMode.off)
+                        Text("Single Track").tag(RepeatMode.singleTrack)
+                        Text("Playlist").tag(RepeatMode.playlist)
+                    }
+                    .pickerStyle(.segmented)
+                    
+                    // Single Track Fade Durations (conditional)
+                    if viewModel.repeatMode == .singleTrack {
+                        VStack(spacing: 16) {
+                            // Fade In Slider
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Fade In: ")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text(String(format: "%.1fs", viewModel.singleTrackFadeIn))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                                
+                                Slider(value: Binding(
+                                    get: { viewModel.singleTrackFadeIn },
+                                    set: { newValue in
+                                        viewModel.singleTrackFadeIn = newValue
+                                        // Debounced update
+                                        Task {
+                                            try? await Task.sleep(for: .milliseconds(500))
+                                            await viewModel.updateSingleTrackFadeDurations()
+                                        }
+                                    }
+                                ), in: 0.5...10.0, step: 0.5)
+                            }
+                            
+                            // Fade Out Slider
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text("Fade Out: ")
+                                        .font(.subheadline)
+                                    Spacer()
+                                    Text(String(format: "%.1fs", viewModel.singleTrackFadeOut))
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                                
+                                Slider(value: Binding(
+                                    get: { viewModel.singleTrackFadeOut },
+                                    set: { newValue in
+                                        viewModel.singleTrackFadeOut = newValue
+                                        // Debounced update
+                                        Task {
+                                            try? await Task.sleep(for: .milliseconds(500))
+                                            await viewModel.updateSingleTrackFadeDurations()
+                                        }
+                                    }
+                                ), in: 0.5...10.0, step: 0.5)
+                            }
+                            
+                            // Repeat Count Display
+                            if viewModel.currentRepeatCount > 0 {
+                                HStack {
+                                    Image(systemName: "repeat")
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                    Text("Current repeat count: \(viewModel.currentRepeatCount)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.top, 4)
+                            }
+                        }
+                        .transition(.opacity)
+                    }
+                } header: {
+                    Text("Repeat Mode")
+                } footer: {
+                    Text("Single Track loops current track with fade in/out. Playlist repeats entire playlist.")
+                }
+                
                 // Crossfade Section
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -76,6 +165,15 @@ struct ConfigurationView: View {
                     Text("Volume")
                 }
                 
+                // Audio Session Section (NEW)
+                Section {
+                    Toggle("Mix with Other Apps", isOn: $viewModel.mixWithOthers)
+                } header: {
+                    Text("Audio Session")
+                } footer: {
+                    Text("When enabled, allows playing alongside other audio sources (music, podcasts). When disabled, this player will interrupt other audio (exclusive playback). Changes apply to next playback.")
+                }
+                
                 // Looping Section
                 Section {
                     Toggle("Enable Looping", isOn: $viewModel.enableLooping)
@@ -95,9 +193,9 @@ struct ConfigurationView: View {
                         }
                     }
                 } header: {
-                    Text("Playlist Loop")
+                    Text("Playlist Loop (Legacy)")
                 } footer: {
-                    Text("When enabled, playlist cycles through tracks infinitely or N times")
+                    Text("When enabled, playlist cycles through tracks infinitely or N times. Use Repeat Mode above for modern control.")
                 }
                 
                 // Technical Info
@@ -175,4 +273,16 @@ struct InfoRow: View {
         }
         .font(.caption)
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    @Previewable @State var viewModel = AudioPlayerViewModel(
+        audioService: AudioPlayerService(
+            configuration: AudioConfiguration()
+        )
+    )
+    
+    ConfigurationView(viewModel: viewModel)
 }

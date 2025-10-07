@@ -48,10 +48,13 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     var singleTrackFadeOut: TimeInterval = 2.0  // 0.5-10.0s
     private(set) var currentRepeatCount: Int = 0
     
+    // Audio Session (NEW)
+    var mixWithOthers: Bool = false  // Mix with other audio apps
+    
     // MARK: - Private Properties
     
     private let allTracks = ["sample1", "sample2"]
-    private var currentTrackIndex = 0
+    private(set) var currentTrackIndex = 0  // Exposed for UI
     private let audioService: AudioPlayerService
     
     // Track switching debounce
@@ -253,7 +256,8 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             repeatCount: repeatCount,
             singleTrackFadeInDuration: singleTrackFadeIn,
             singleTrackFadeOutDuration: singleTrackFadeOut,
-            volume: volume
+            volume: volume,
+            mixWithOthers: mixWithOthers
         )
     }
     
@@ -271,6 +275,7 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         singleTrackFadeIn = 2.0
         singleTrackFadeOut = 2.0
         currentRepeatCount = 0
+        mixWithOthers = false
     }
     
     // MARK: - Computed Properties for UI
@@ -338,5 +343,45 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         let minutes = Int(time) / 60
         let seconds = Int(time) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    // MARK: - Playlist Management (Feature #3)
+    
+    /// Preset playlists for quick access
+    static let presetPlaylists: [String: [String]] = [
+        "Sample 1+2": ["sample1", "sample2"],
+        "Sample 3+4": ["sample3", "sample4"],
+        "Single Track": ["sample1"],
+        "All 4 Tracks": ["sample1", "sample2", "sample3", "sample4"]
+    ]
+    
+    /// Get current playlist track names (async)
+    func getCurrentPlaylistNames() async -> [String] {
+        let urls = await audioService.getPlaylist()
+        return urls.compactMap { url in
+            url.deletingPathExtension().lastPathComponent
+        }
+    }
+    
+    /// Swap entire playlist with crossfade (Feature #3)
+    /// - Parameters:
+    ///   - tracks: Array of track names (without extension)
+    ///   - crossfadeDuration: Duration of crossfade if playing
+    func swapPlaylist(tracks: [String], crossfadeDuration: TimeInterval) async throws {
+        let trackURLs = tracks.map { trackURL(named: $0) }
+        
+        // Call SDK's swapPlaylist method
+        try await audioService.swapPlaylist(
+            tracks: trackURLs,
+            crossfadeDuration: crossfadeDuration
+        )
+        
+        // Update UI state
+        currentTrackIndex = await audioService.getCurrentTrackIndex()
+        if currentTrackIndex < tracks.count {
+            currentTrack = tracks[currentTrackIndex]
+        }
+        
+        print("✅ Playlist swapped to: \(tracks.joined(separator: ", "))")
     }
 }

@@ -1,0 +1,15 @@
+{
+  "originHash" : "dfbfdddcdb49803bd3a0fb5311485a8b09b1f39190335bf54c15c39a62512fa9",
+  "pins" : [
+    {
+      "identity" : "meditationplayer",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/VasilyPolyuhovich/MeditationPlayer",
+      "state" : {
+        "branch" : "main",
+        "revision" : "0b8beb2e5e9ee6bc866fce81af5ad9e4e3750923"
+      }
+    }
+  ],
+  "version" : 3
+}

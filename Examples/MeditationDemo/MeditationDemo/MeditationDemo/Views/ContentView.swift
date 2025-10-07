@@ -1,5 +1,6 @@
 import SwiftUI
-import AudioServiceCore  // For PlayerState, FadeCurve types
+import AudioServiceCore
+import AudioServiceKit
 
 /// Main container view for MeditationDemo
 struct ContentView: View {
@@ -17,11 +18,11 @@ struct ContentView: View {
                     // Status Display
                     StatusView(viewModel: viewModel)
                     
-                    // Player Controls
+                    // Player Controls (simplified)
                     PlayerControlsView(viewModel: viewModel)
                     
-                    // Track Management
-                    TrackSwitcherView(viewModel: viewModel)
+                    // Quick Actions (NEW - Feature #3)
+                    QuickActionsView(viewModel: viewModel)
                     
                     // Info Footer
                     infoFooter
@@ -46,14 +47,30 @@ struct ContentView: View {
     
     private var infoFooter: some View {
         VStack(spacing: 8) {
-            Text("ProsperPlayer SDK v2.11.0")
+            Text("ProsperPlayer SDK v2.15.0")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             
-            Text("Dual-player crossfade • Swift 6 concurrency • Playlist & Single Loop modes")
+            Text("Dual-player crossfade • Swift 6 concurrency • Hot playlist swap")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            
+            Text("4 sample tracks • Single/Playlist repeat modes")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
         .padding(.top, 20)
     }
+}
+
+// MARK: - Preview
+
+#Preview {
+    @Previewable @State var viewModel = AudioPlayerViewModel(
+        audioService: AudioPlayerService(
+            configuration: AudioConfiguration()
+        )
+    )
+    
+    ContentView(viewModel: viewModel)
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import AudioServiceCore
+import AudioServiceKit
 
 /// Status display showing player state, position, and progress with crossfade zone
 struct StatusView: View {
