@@ -145,6 +145,14 @@ actor AudioEngineActor {
         // Get saved offset
         let offset = activePlayer == .a ? playbackOffsetA : playbackOffsetB
         
+        // ✅ SAFETY: Validate offset is within file bounds
+        // Prevents crash when offset >= file.length (negative remainingFrames)
+        guard offset < file.length else {
+            Logger.audio.error("Cannot play: offset (\(offset)) >= file.length (\(file.length))")
+            Logger.audio.error("This may indicate corrupted test file or invalid state")
+            return
+        }
+        
         // ✅ FIX: Always check if we need to reschedule after pause
         // AVFoundation quirk: isPlaying may be unreliable after pause()
         // Strategy: If player is not playing AND we have an offset, it's a resume
