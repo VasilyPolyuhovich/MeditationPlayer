@@ -181,20 +181,3 @@ public enum ConfigurationError: Error, LocalizedError {
     }
 }
 
-// MARK: - Migration Helper (Deprecated)
-
-extension PlayerConfiguration {
-    /// Create from legacy AudioConfiguration
-    /// - Parameter audioConfig: Legacy configuration
-    /// - Returns: New PlayerConfiguration
-    @available(*, deprecated, message: "Use PlayerConfiguration directly")
-    public static func fromAudioConfiguration(_ audioConfig: AudioConfiguration) -> PlayerConfiguration {
-        PlayerConfiguration(
-            crossfadeDuration: audioConfig.crossfadeDuration,
-            fadeCurve: audioConfig.fadeCurve,
-            repeatMode: .playlist,  // Legacy behavior
-            repeatCount: audioConfig.repeatCount,
-            volume: Int(audioConfig.volume * 100)
-        )
-    }
-}

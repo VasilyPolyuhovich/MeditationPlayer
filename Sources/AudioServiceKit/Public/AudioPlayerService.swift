@@ -40,7 +40,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // SSOT: State managed exclusively by state machine
     private var _state: PlayerState
     public var state: PlayerState { _state }
-    public internal(set) var configuration: AudioConfiguration  // Public read, internal write for playlist API
+    public internal(set) var configuration: PlayerConfiguration  // Public read, internal write for playlist API
     public internal(set) var currentTrack: TrackInfo?  // Public read, internal write for playlist API
     public private(set) var playbackPosition: PlaybackPosition?
     
@@ -73,7 +73,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Initialization
     
-    public init(configuration: AudioConfiguration = AudioConfiguration()) {
+    public init(configuration: PlayerConfiguration = PlayerConfiguration()) {
         self._state = .finished
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
@@ -87,7 +87,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 repeatCount: configuration.repeatCount,
                 singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
                 singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
-                volume: Int(configuration.volume * 100),
+                volume: configuration.volume,
                 stopFadeDuration: configuration.stopFadeDuration
             )
         )
@@ -159,7 +159,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - AudioPlayerProtocol Implementation
     
-    public func startPlaying(url: URL, configuration: AudioConfiguration) async throws {
+    public func startPlaying(url: URL, configuration: PlayerConfiguration) async throws {
         // Validate configuration
         try configuration.validate()
         self.configuration = configuration
@@ -297,7 +297,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let clampedDuration = max(0.0, min(10.0, duration))
         
         // Get current volume before fade
-        let currentVolume = configuration.volume
+        let currentVolume = configuration.volumeFloat
         
         // Fade out active mixer
         await audioEngine.fadeActiveMixer(
@@ -352,7 +352,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func finish(fadeDuration: TimeInterval?) async throws {
-        let duration = fadeDuration ?? configuration.fadeOutDuration
+        let duration = fadeDuration ?? configuration.stopFadeDuration
         
         let success = await stateMachine.enterFadingOut(duration: duration)
         Logger.state.assertTransition(
@@ -432,7 +432,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 1. Fade out if playing (eliminates click from buffer discontinuity)
         if wasPlaying {
             await audioEngine.fadeActiveMixer(
-                from: configuration.volume,
+                from: configuration.volumeFloat,
                 to: 0.0,
                 duration: fadeDuration,
                 curve: .linear
@@ -446,7 +446,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if wasPlaying {
             await audioEngine.fadeActiveMixer(
                 from: 0.0,
-                to: configuration.volume,
+                to: configuration.volumeFloat,
                 duration: fadeDuration,
                 curve: .linear
             )
@@ -478,18 +478,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - SeeAlso: `getRepeatMode()`, `setSingleTrackFadeDurations(fadeIn:fadeOut:)`
     public func setRepeatMode(_ mode: RepeatMode) async {
         // Update configuration with new repeat mode
-        configuration = AudioConfiguration(
+        configuration = PlayerConfiguration(
             crossfadeDuration: configuration.crossfadeDuration,
-            fadeInDuration: configuration.fadeInDuration,
-            fadeOutDuration: configuration.fadeOutDuration,
-            volume: configuration.volume,
-            repeatCount: configuration.repeatCount,
-            enableLooping: mode == .playlist, // Backward compatibility
             fadeCurve: configuration.fadeCurve,
-            stopFadeDuration: configuration.stopFadeDuration,
             repeatMode: mode,
+            repeatCount: configuration.repeatCount,
             singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
             singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+            volume: configuration.volume,
+            stopFadeDuration: configuration.stopFadeDuration,
             mixWithOthers: configuration.mixWithOthers
         )
         
@@ -552,18 +549,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // ✅ Update configuration (values stored, dynamic adaptation happens at loop time)
-        configuration = AudioConfiguration(
+        configuration = PlayerConfiguration(
             crossfadeDuration: configuration.crossfadeDuration,
-            fadeInDuration: configuration.fadeInDuration,
-            fadeOutDuration: configuration.fadeOutDuration,
-            volume: configuration.volume,
-            repeatCount: configuration.repeatCount,
-            enableLooping: configuration.enableLooping,
             fadeCurve: configuration.fadeCurve,
-            stopFadeDuration: configuration.stopFadeDuration,
             repeatMode: configuration.repeatMode,
+            repeatCount: configuration.repeatCount,
             singleTrackFadeInDuration: fadeIn,
             singleTrackFadeOutDuration: fadeOut,
+            volume: configuration.volume,
+            stopFadeDuration: configuration.stopFadeDuration,
             mixWithOthers: configuration.mixWithOthers
         )
         
@@ -586,7 +580,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         try? await sessionManager.deactivate()
         
         // Reset configuration
-        configuration = AudioConfiguration()
+        configuration = PlayerConfiguration()
         
         // Clear playlist
         await playlistManager.clear()
@@ -1070,7 +1064,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         switch configuration.repeatMode {
         case .off:
             // Finish playback with fade out
-            try? await finish(fadeDuration: configuration.fadeOutDuration)
+            try? await finish(fadeDuration: configuration.stopFadeDuration)
             isLoopCrossfadeInProgress = false
             
         case .singleTrack:
@@ -1209,7 +1203,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 1. Get next track from playlist manager
         guard let nextURL = await playlistManager.getNextTrack() else {
             // No more tracks - finish playback
-            try? await finish(fadeDuration: configuration.fadeOutDuration)
+            try? await finish(fadeDuration: configuration.stopFadeDuration)
             return
         }
         
@@ -1269,7 +1263,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             repeatCount: configuration.repeatCount,
             singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
             singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
-            volume: Int(configuration.volume * 100),
+            volume: configuration.volume,
             stopFadeDuration: configuration.stopFadeDuration
         )
         await playlistManager.updateConfiguration(playerConfig)

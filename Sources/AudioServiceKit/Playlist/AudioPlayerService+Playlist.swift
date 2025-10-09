@@ -32,7 +32,7 @@ extension AudioPlayerService {
         // Update configuration if provided
         if let newConfig = configuration {
             try newConfig.validate()
-            await updatePlayerConfiguration(newConfig)
+            self.configuration = newConfig
         }
         
         // Load playlist
@@ -48,7 +48,7 @@ extension AudioPlayerService {
         // Start playback with fade in
         try await startPlayingTrack(
             url: firstTrack,
-            fadeIn: (configuration ?? convertToPlayerConfiguration()).fadeInDuration
+            fadeIn: (configuration ?? self.configuration).fadeInDuration
         )
     }
     
@@ -246,36 +246,5 @@ extension AudioPlayerService {
         try await replaceTrack(url: url, crossfadeDuration: crossfadeDuration)
     }
     
-    /// Update player configuration from PlayerConfiguration
-    private func updatePlayerConfiguration(_ config: PlayerConfiguration) async {
-        // Convert to legacy AudioConfiguration for now
-        // TODO: Replace AudioConfiguration with PlayerConfiguration throughout
-        self.configuration = AudioConfiguration(
-            crossfadeDuration: config.crossfadeDuration,
-            fadeInDuration: config.fadeInDuration,
-            fadeOutDuration: 0, // Not used in new API
-            volume: config.volumeFloat,
-            repeatCount: config.repeatCount,
-            enableLooping: config.repeatMode == .playlist, // Convert repeatMode to enableLooping
-            fadeCurve: config.fadeCurve,
-            stopFadeDuration: config.stopFadeDuration,
-            repeatMode: config.repeatMode,
-            singleTrackFadeInDuration: config.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: config.singleTrackFadeOutDuration
-        )
-    }
-    
-    /// Convert current AudioConfiguration to PlayerConfiguration
-    private func convertToPlayerConfiguration() -> PlayerConfiguration {
-        PlayerConfiguration(
-            crossfadeDuration: configuration.crossfadeDuration,
-            fadeCurve: configuration.fadeCurve,
-            repeatMode: configuration.repeatMode,
-            repeatCount: configuration.repeatCount,
-            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
-            volume: Int(configuration.volume * 100),
-            stopFadeDuration: configuration.stopFadeDuration
-        )
-    }
+
 }

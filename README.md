@@ -13,7 +13,7 @@ await service.setup()
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
     volume: 100,
-    enableLooping: true
+    repeatMode: .playlist
 )
 
 // Start playlist playback
@@ -144,7 +144,7 @@ await service.setup()
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
     fadeCurve: .equalPower,
-    enableLooping: true,
+    repeatMode: .playlist,
     volume: 100
 )
 
@@ -164,7 +164,7 @@ try await service.jumpToTrack(at: 2)
 ```swift
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
-    enableLooping: true,
+    repeatMode: .playlist,
     repeatCount: 5  // Loop 5 times
 )
 
