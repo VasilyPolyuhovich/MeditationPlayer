@@ -324,7 +324,7 @@ struct PlaylistManagerView: View {
 #Preview {
     @Previewable @State var viewModel = AudioPlayerViewModel(
         audioService: AudioPlayerService(
-            configuration: AudioConfiguration()
+            configuration: PlayerConfiguration()
         )
     )
     

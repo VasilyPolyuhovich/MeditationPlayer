@@ -55,7 +55,7 @@ public func loadPlaylist(
 ```swift
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
-    enableLooping: true
+    repeatMode: .playlist
 )
 
 try await service.loadPlaylist(
@@ -252,7 +252,7 @@ if await service.isPlaylistEmpty() {
 ```swift
 public func startPlaying(
     url: URL,
-    configuration: AudioConfiguration
+    configuration: PlayerConfiguration
 ) async throws
 ```
 
@@ -260,7 +260,7 @@ public func startPlaying(
 
 **Parameters:**
 - `url`: Local audio file URL
-- `configuration`: Legacy AudioConfiguration
+- `configuration`: Player configuration
 
 **Throws:**
 - `AudioPlayerError.invalidConfiguration`
@@ -537,18 +537,332 @@ await service.addObserver(MyObserver())
 public struct PlayerConfiguration: Sendable {
     public var crossfadeDuration: TimeInterval  // 1.0-30.0s
     public var fadeCurve: FadeCurve            // Algorithm
-    public var enableLooping: Bool              // Playlist cycle
+    public var repeatMode: RepeatMode           // .off, .singleTrack, .playlist
     public var repeatCount: Int?                // nil = infinite
     public var volume: Int                      // 0-100
+    public var stopFadeDuration: TimeInterval   // 0.0-10.0s
+    public var mixWithOthers: Bool              // Mix with other audio
     
-    // Auto-calculated:
+    // Computed properties:
     public var fadeInDuration: TimeInterval {
         crossfadeDuration * 0.3
+    }
+    
+    public var volumeFloat: Float {
+        Float(volume) / 100.0
     }
 }
 ```
 
 **See:** `06_Configuration.md` for complete reference
+
+---
+
+## Overlay Player Control
+
+### Overview
+
+The overlay player provides an independent audio layer for ambient sounds, background music, or atmospheric effects that play alongside the main audio track. The overlay has its own volume control and can loop independently.
+
+**Use Cases:**
+- Meditation apps: Rain sounds with guided meditation
+- Fitness apps: Background music during workout instructions
+- Sleep apps: White noise alongside sleep stories
+- Games: Ambient soundscapes with dialogue/effects
+
+**Key Features:**
+- Independent of main player state
+- Main track crossfades don't affect overlay
+- Playlist swaps don't affect overlay
+- Separate volume control
+- Independent loop configuration
+
+---
+
+### startOverlay(url:configuration:)
+
+```swift
+public func startOverlay(
+    url: URL,
+    configuration: OverlayConfiguration
+) async throws
+```
+
+**Parameters:**
+- `url`: Local file URL for overlay audio
+- `configuration`: Overlay playback configuration
+
+**Throws:**
+- `AudioPlayerError.fileNotFound` - File doesn't exist
+- `AudioPlayerError.invalidAudioFile` - Unsupported format
+- `AudioPlayerError.audioSessionError` - Session setup failed
+
+**Behavior:**
+- Loads overlay audio file
+- Starts playback with fade-in
+- Loops according to configuration
+- Independent volume control
+
+**Example:**
+```swift
+let config = OverlayConfiguration(
+    volume: 0.3,
+    loopMode: .infinite,
+    fadeInDuration: 2.0,
+    fadeOutDuration: 2.0
+)
+
+try await player.startOverlay(url: rainURL, configuration: config)
+```
+
+---
+
+### stopOverlay()
+
+```swift
+public func stopOverlay() async
+```
+
+**Behavior:**
+- Stops overlay with fade-out
+- Uses fade-out duration from configuration
+- Safe to call when no overlay is playing
+
+**Example:**
+```swift
+await player.stopOverlay()
+```
+
+---
+
+### pauseOverlay() / resumeOverlay()
+
+```swift
+public func pauseOverlay() async
+public func resumeOverlay() async
+```
+
+**Behavior:**
+- `pauseOverlay()`: Pause at current position
+- `resumeOverlay()`: Continue from paused position
+- Only affects overlay player
+- Safe to call when not playing/paused
+
+**Example:**
+```swift
+await player.pauseOverlay()
+// ... later ...
+await player.resumeOverlay()
+```
+
+---
+
+### replaceOverlay(url:)
+
+```swift
+public func replaceOverlay(url: URL) async throws
+```
+
+**Parameters:**
+- `url`: New audio file URL
+
+**Throws:**
+- `AudioPlayerError.invalidState` - No overlay active
+- `AudioPlayerError.fileNotFound` - File not found
+- `AudioPlayerError.invalidAudioFile` - Unsupported format
+
+**Behavior:**
+- Crossfades from current to new overlay file
+- Uses crossfade duration from configuration
+- Maintains playback state
+
+**Example:**
+```swift
+// Switch from rain to ocean sounds
+try await player.replaceOverlay(url: oceanURL)
+```
+
+---
+
+### setOverlayVolume(_:)
+
+```swift
+public func setOverlayVolume(_ volume: Float) async
+```
+
+**Parameters:**
+- `volume`: Volume level (0.0 = silent, 1.0 = full)
+
+**Behavior:**
+- Changes overlay volume independently
+- Does not affect main player volume
+- Applied immediately without fading
+- Clamped to [0.0, 1.0] range
+
+**Example:**
+```swift
+// Reduce overlay to 20%
+await player.setOverlayVolume(0.2)
+```
+
+---
+
+### getOverlayState()
+
+```swift
+public func getOverlayState() async -> OverlayState
+```
+
+**Returns:** Current overlay state
+
+**States:**
+```swift
+enum OverlayState: Sendable {
+    case idle
+    case playing
+    case paused
+    case stopping
+    case crossfading
+    
+    var isPlaying: Bool { self == .playing }
+    var isPaused: Bool { self == .paused }
+    var isIdle: Bool { self == .idle }
+}
+```
+
+**Example:**
+```swift
+let state = await player.getOverlayState()
+if state.isPlaying {
+    print("Overlay is playing")
+}
+```
+
+---
+
+## Global Control
+
+Control both main player and overlay simultaneously.
+
+### pauseAll()
+
+```swift
+public func pauseAll() async
+```
+
+**Behavior:**
+- Pauses main player
+- Pauses overlay (if playing)
+- Useful for interruptions (phone calls, alarms)
+
+**Example:**
+```swift
+// Handle phone call interruption
+await player.pauseAll()
+```
+
+---
+
+### resumeAll()
+
+```swift
+public func resumeAll() async
+```
+
+**Behavior:**
+- Resumes main player
+- Resumes overlay (if paused)
+- Restores playback after interruption
+
+**Example:**
+```swift
+// Resume after interruption ends
+await player.resumeAll()
+```
+
+---
+
+### stopAll()
+
+```swift
+public func stopAll() async
+```
+
+**Behavior:**
+- Stops main player
+- Stops overlay
+- Emergency stop / full reset
+- Both systems reset to idle
+
+**Example:**
+```swift
+// Emergency stop
+await player.stopAll()
+```
+
+---
+
+## OverlayConfiguration
+
+### Structure
+
+```swift
+public struct OverlayConfiguration: Sendable {
+    public var volume: Float              // 0.0-1.0
+    public var loopMode: LoopMode         // .once, .count(n), .infinite
+    public var loopDelay: TimeInterval    // 0.0-600.0s
+    public var fadeInDuration: TimeInterval   // 0.1-10.0s
+    public var fadeOutDuration: TimeInterval  // 0.1-10.0s
+    public var applyFadeOnEachLoop: Bool  // Fade on every iteration
+}
+```
+
+### Loop Modes
+
+```swift
+public enum LoopMode: Sendable {
+    case once          // Play once, then stop
+    case count(Int)    // Play N times (1-1000)
+    case infinite      // Loop forever
+}
+```
+
+### Presets
+
+```swift
+// Ambient background sounds
+OverlayConfiguration.ambient
+// volume: 0.3, loopMode: .infinite, fade: 2.0s each
+
+// Periodic bell/chime sounds
+OverlayConfiguration.bell(times: 3, interval: 300)
+// volume: 0.5, loopMode: .count(3), delay: 300s, fade: 0.5s each
+
+// Short notification sounds
+OverlayConfiguration.notification
+// volume: 0.7, loopMode: .once, fade: 0.3s each
+```
+
+### Validation
+
+**Automatic clamping:**
+- `volume`: [0.0, 1.0]
+- `fadeInDuration`: [0.1, 10.0]
+- `fadeOutDuration`: [0.1, 10.0]
+- `loopDelay`: [0.0, 600.0]
+- `loopMode.count`: [1, 1000]
+
+**Example:**
+```swift
+var config = OverlayConfiguration()
+config.volume = 0.4
+config.loopMode = .count(5)
+config.fadeInDuration = 1.5
+config.fadeOutDuration = 1.5
+config.applyFadeOnEachLoop = true
+
+try await player.startOverlay(url: ambientURL, configuration: config)
+```
 
 ---
 
@@ -592,7 +906,7 @@ await service.setup()
 
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
-    enableLooping: true,
+    repeatMode: .playlist,
     volume: 80
 )
 

@@ -14,13 +14,28 @@ PlayerConfiguration provides a simplified, intuitive API for audio playback conf
 public struct PlayerConfiguration: Sendable {
     public var crossfadeDuration: TimeInterval  // 1.0-30.0s
     public var fadeCurve: FadeCurve            // Algorithm
-    public var enableLooping: Bool              // Playlist cycle
+    public var repeatMode: RepeatMode           // .off, .singleTrack, .playlist
     public var repeatCount: Int?                // nil = infinite
+    public var singleTrackFadeInDuration: TimeInterval   // 0.5-10.0s
+    public var singleTrackFadeOutDuration: TimeInterval  // 0.5-10.0s
     public var volume: Int                      // 0-100
+    public var stopFadeDuration: TimeInterval   // 0.0-10.0s
+    public var mixWithOthers: Bool              // Mix with other audio
     
-    // Auto-calculated:
+    // Computed properties:
     public var fadeInDuration: TimeInterval {
         crossfadeDuration * 0.3  // 30% of crossfade
+    }
+    
+    public var volumeFloat: Float {
+        Float(volume) / 100.0
+    }
+    
+    // Deprecated:
+    @available(*, deprecated, message: "Use repeatMode instead")
+    public var enableLooping: Bool {
+        get { repeatMode == .playlist }
+        set { repeatMode = newValue ? .playlist : .off }
     }
 }
 ```
@@ -91,30 +106,154 @@ PlayerConfiguration(
 
 ---
 
-### enableLooping
+### repeatMode
 
-**Type:** `Bool`  
-**Default:** `true`
+**Type:** `RepeatMode` enum  
+**Options:** `.off`, `.singleTrack`, `.playlist`  
+**Default:** `.off`
 
-**Purpose:** Enable automatic playlist cycling.
+**Purpose:** Control playback repeat behavior.
+
+**Options:**
+```swift
+public enum RepeatMode: Sendable {
+    case off          // Play once, no repeat
+    case singleTrack  // Loop current track with fade in/out
+    case playlist     // Loop entire playlist
+}
+```
 
 **Behavior:**
-- `true` → Playlist cycles with crossfades
-- `false` → Play once and stop
+- `.off` → Play once and stop
+- `.singleTrack` → Loop current track with configurable fades
+- `.playlist` → Cycle through playlist with crossfades
 
-**Loop mechanics:**
+**Examples:**
 ```swift
-// Infinite playlist loop
+// No repeat
+PlayerConfiguration(repeatMode: .off)
+
+// Single track loop (meditation)
 PlayerConfiguration(
-    enableLooping: true,
-    repeatCount: nil  // Loop forever
+    repeatMode: .singleTrack,
+    singleTrackFadeInDuration: 3.0,
+    singleTrackFadeOutDuration: 3.0
 )
 
-// Limited repeats
+// Playlist loop
 PlayerConfiguration(
-    enableLooping: true,
+    repeatMode: .playlist,
+    repeatCount: nil  // Infinite
+)
+
+// Limited playlist repeats
+PlayerConfiguration(
+    repeatMode: .playlist,
     repeatCount: 5  // Cycle 5 times
 )
+```
+
+---
+
+### enableLooping (Deprecated)
+
+**Type:** `Bool`  
+**Status:** ⚠️ Deprecated - use `repeatMode` instead
+
+**Migration:**
+```swift
+// Old
+PlayerConfiguration(enableLooping: true)
+
+// New
+PlayerConfiguration(repeatMode: .playlist)
+```
+
+---
+
+### singleTrackFadeInDuration
+
+**Type:** `TimeInterval`  
+**Range:** [0.5, 10.0] seconds  
+**Default:** 3.0
+
+**Purpose:** Fade in duration when looping a single track (repeatMode = .singleTrack).
+
+**Validation:**
+```swift
+guard duration >= 0.5 && duration <= 10.0 else {
+    throw ConfigurationError.invalidSingleTrackFadeInDuration(duration)
+}
+```
+
+**Dynamic Adaptation:**
+- Auto-scaled to max 40% of track duration
+- Combined with fadeOut limited to 80% total
+- Prevents overlap issues on short tracks
+
+**Example:**
+```swift
+PlayerConfiguration(
+    repeatMode: .singleTrack,
+    singleTrackFadeInDuration: 2.0,
+    singleTrackFadeOutDuration: 2.0
+)
+```
+
+---
+
+### singleTrackFadeOutDuration
+
+**Type:** `TimeInterval`  
+**Range:** [0.5, 10.0] seconds  
+**Default:** 3.0
+
+**Purpose:** Fade out duration when looping a single track (repeatMode = .singleTrack).
+
+**Same validation and adaptation rules as fadeInDuration.**
+
+---
+
+### stopFadeDuration
+
+**Type:** `TimeInterval`  
+**Range:** [0.0, 10.0] seconds  
+**Default:** 3.0
+
+**Purpose:** Fade duration when stopping playback gracefully.
+
+**Usage:**
+```swift
+// Stop with default fade
+await service.stopWithDefaultFade()
+
+// Stop with custom fade
+await service.stop(fadeDuration: 5.0)
+
+// Instant stop
+await service.stop(fadeDuration: 0.0)
+```
+
+---
+
+### mixWithOthers
+
+**Type:** `Bool`  
+**Default:** `false`
+
+**Purpose:** Control audio session mixing behavior.
+
+**Behavior:**
+- `false` → Interrupts other audio (exclusive playback)
+- `true` → Plays alongside other audio sources
+
+**Use Cases:**
+```swift
+// Exclusive (meditation app)
+PlayerConfiguration(mixWithOthers: false)
+
+// Mixed (ambient sounds with music)
+PlayerConfiguration(mixWithOthers: true)
 ```
 
 ---
@@ -254,10 +393,12 @@ PlayerConfiguration()
 **Values:**
 - crossfadeDuration: 10.0
 - fadeCurve: .equalPower
-- enableLooping: true
+- repeatMode: .off
 - repeatCount: nil
 - volume: 100
 - fadeInDuration: 3.0 (auto)
+- stopFadeDuration: 3.0
+- mixWithOthers: false
 
 ---
 
@@ -269,8 +410,10 @@ extension PlayerConfiguration {
         PlayerConfiguration(
             crossfadeDuration: 15.0,
             fadeCurve: .equalPower,
-            enableLooping: true,
+            repeatMode: .singleTrack,
             repeatCount: nil,
+            singleTrackFadeInDuration: 4.0,
+            singleTrackFadeOutDuration: 4.0,
             volume: 80
         )
         // fadeInDuration = 4.5s (auto)
@@ -288,7 +431,7 @@ extension PlayerConfiguration {
         PlayerConfiguration(
             crossfadeDuration: 2.0,
             fadeCurve: .sCurve,
-            enableLooping: false,
+            repeatMode: .off,
             repeatCount: nil,
             volume: 100
         )
@@ -304,7 +447,7 @@ extension PlayerConfiguration {
 ### Old API (v2.10.1)
 
 ```swift
-// AudioConfiguration (deprecated)
+// AudioConfiguration (deprecated - REMOVED in v3.1)
 AudioConfiguration(
     crossfadeDuration: 10.0,
     fadeInDuration: 3.0,      // Manual
@@ -322,13 +465,14 @@ AudioConfiguration(
 // PlayerConfiguration (current)
 PlayerConfiguration(
     crossfadeDuration: 10.0,
-    // fadeIn auto = 3.0s (30%)
-    // fadeOut removed (not used)
-    volume: 80,               // Int 0-100
-    enableLooping: true,
+    fadeCurve: .equalPower,
+    repeatMode: .playlist,    // Instead of enableLooping
     repeatCount: nil,
-    fadeCurve: .equalPower
+    volume: 80,               // Int 0-100
+    stopFadeDuration: 3.0,
+    mixWithOthers: false
 )
+// fadeIn auto = 3.0s (30%)
 ```
 
 **Benefits:**
@@ -483,7 +627,7 @@ PlayerConfiguration(volume: 80)
 
 // Infinite looping
 PlayerConfiguration(
-    enableLooping: true,
+    repeatMode: .playlist,
     repeatCount: nil
 )
 ```
@@ -519,9 +663,11 @@ PlayerConfiguration(repeatCount: -1)  // ❌ Invalid!
 PlayerConfiguration(
     crossfadeDuration: 10.0,
     fadeCurve: .equalPower,
-    enableLooping: true,
+    repeatMode: .playlist,
     repeatCount: nil,
-    volume: 100
+    volume: 100,
+    stopFadeDuration: 3.0,
+    mixWithOthers: false
 )
 // fadeInDuration = 3.0s (auto)
 ```
