@@ -240,7 +240,7 @@ actor AudioEngineActor {
         }
         
         // 5. Stop inactive player and reset
-        stopInactivePlayer()
+        await stopInactivePlayer()
         inactiveMixer.volume = 0.0
         
         return currentActiveVolume
