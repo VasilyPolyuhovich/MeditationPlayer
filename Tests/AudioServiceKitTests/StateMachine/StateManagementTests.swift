@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 @testable import AudioServiceKit
 @testable import AudioServiceCore
 
@@ -7,6 +8,44 @@ import Foundation
 /// Validates invariant: ∀t: service.state ≡ stateMachine.currentState
 @Suite("State Management - SSOT")
 struct StateManagementTests {
+    
+    // MARK: - Helper Methods
+    
+    /// Creates a test audio file programmatically
+    /// - Parameter duration: Duration in seconds (default: 2.0s)
+    /// - Returns: URL of created test file in temp directory
+    private func createTestAudioFile(duration: TimeInterval = 2.0) -> URL {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
+        
+        // Create audio format (44.1kHz, stereo)
+        let format = AVAudioFormat(
+            standardFormatWithSampleRate: 44100,
+            channels: 2
+        )!
+        
+        do {
+            let audioFile = try AVAudioFile(
+                forWriting: fileURL,
+                settings: format.settings
+            )
+            
+            // Create silence of specified duration
+            let frameCount = AVAudioFrameCount(44100 * duration)
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: frameCount
+            )!
+            buffer.frameLength = frameCount
+            
+            // Write silence
+            try audioFile.write(from: buffer)
+            
+            return fileURL
+        } catch {
+            fatalError("Failed to create test audio file: \(error)")
+        }
+    }
     
     // MARK: - SSOT Invariant Tests
     
@@ -28,7 +67,8 @@ struct StateManagementTests {
         await service.setup()
         
         // Start playback
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Pause
@@ -46,7 +86,8 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         try await service.pause()
         try await service.resume()
@@ -63,7 +104,8 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         await service.stop()
         
@@ -79,7 +121,8 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         await service.reset()
         
@@ -98,7 +141,8 @@ struct StateManagementTests {
         await service.setup()
         
         // Rapid state queries during transition should never see intermediate states
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         Task {
             try? await service.startPlaying(url: url, configuration: AudioConfiguration())
@@ -119,7 +163,8 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         // Play → Reset cycle
         try await service.startPlaying(url: url, configuration: AudioConfiguration())

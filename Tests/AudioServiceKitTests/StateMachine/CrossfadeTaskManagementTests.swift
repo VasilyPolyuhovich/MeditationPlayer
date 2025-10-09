@@ -1,11 +1,31 @@
 import Testing
 import Foundation
+import AVFoundation
 @testable import AudioServiceKit
 @testable import AudioServiceCore
 
 /// Test suite: Crossfade Task Management & Cancellation
 @Suite("Crossfade Task Management")
 struct CrossfadeTaskManagementTests {
+    
+    // MARK: - Helper Methods
+    
+    private func createTestAudioFile() -> URL {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+        
+        do {
+            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
+            let frameCount = AVAudioFrameCount(44100 * 2.0)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+            buffer.frameLength = frameCount
+            try audioFile.write(from: buffer)
+            return fileURL
+        } catch {
+            fatalError("Failed to create test audio file: \(error)")
+        }
+    }
     
     // MARK: - Dual Pause Implementation
     
@@ -14,8 +34,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -42,7 +66,8 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Pause should work fine
@@ -57,8 +82,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -86,8 +115,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -111,8 +144,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -138,8 +175,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -182,8 +223,12 @@ struct CrossfadeTaskManagementTests {
         let initialProgress = await service.currentCrossfadeProgress
         #expect(initialProgress == .idle)
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
@@ -210,8 +255,12 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
