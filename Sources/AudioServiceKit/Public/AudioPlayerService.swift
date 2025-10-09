@@ -296,8 +296,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Clamp duration to safe range
         let clampedDuration = max(0.0, min(10.0, duration))
         
-        // Get current volume before fade
-        let currentVolume = configuration.volumeFloat
+        // configuration.volumeFloat may be outdated if setVolume() was called
+        let currentVolume = await audioEngine.getTargetVolume()
         
         // Fade out active mixer
         await audioEngine.fadeActiveMixer(
@@ -429,10 +429,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         let wasPlaying = state == .playing
         
+        let currentVolume = await audioEngine.getTargetVolume()
+        
         // 1. Fade out if playing (eliminates click from buffer discontinuity)
         if wasPlaying {
             await audioEngine.fadeActiveMixer(
-                from: configuration.volumeFloat,
+                from: currentVolume,
                 to: 0.0,
                 duration: fadeDuration,
                 curve: .linear
@@ -446,7 +448,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if wasPlaying {
             await audioEngine.fadeActiveMixer(
                 from: 0.0,
-                to: configuration.volumeFloat,
+                to: currentVolume,
                 duration: fadeDuration,
                 curve: .linear
             )
@@ -455,7 +457,24 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     public func setVolume(_ volume: Float) async {
         let clampedVolume = max(0.0, min(1.0, volume))
+        
+        // Update audio engine
         await audioEngine.setVolume(clampedVolume)
+        
+        // Convert Float (0.0-1.0) back to Int (0-100) for configuration
+        let volumeInt = Int(clampedVolume * 100)
+        
+        configuration = PlayerConfiguration(
+            crossfadeDuration: configuration.crossfadeDuration,
+            fadeCurve: configuration.fadeCurve,
+            repeatMode: configuration.repeatMode,
+            repeatCount: configuration.repeatCount,
+            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+            volume: volumeInt,
+            stopFadeDuration: configuration.stopFadeDuration,
+            mixWithOthers: configuration.mixWithOthers
+        )
     }
     
     /// Get current repeat count (number of loop iterations completed)

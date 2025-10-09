@@ -436,6 +436,12 @@ actor AudioEngineActor {
         }
     }
     
+    /// Get current target volume
+    /// - Returns: Target volume level (0.0-1.0)
+    func getTargetVolume() -> Float {
+        return targetVolume
+    }
+    
     func fadeVolume(
         mixer: AVAudioMixerNode,
         from: Float,
