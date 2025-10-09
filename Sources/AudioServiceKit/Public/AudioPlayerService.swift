@@ -1275,6 +1275,188 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await playlistManager.updateConfiguration(playerConfig)
     }
     
+    // MARK: - Overlay Player Control
+    
+    /// Start overlay audio playback with specified configuration
+    /// 
+    /// Overlay player provides an independent audio layer for ambient sounds, background music,
+    /// or atmospheric effects that play alongside the main audio track. The overlay player
+    /// has its own volume control and can loop independently.
+    ///
+    /// **Use Cases:**
+    /// - Meditation apps: Rain sounds while playing guided meditation
+    /// - Fitness apps: Background music during workout instructions
+    /// - Sleep apps: White noise alongside sleep stories
+    /// - Games: Ambient soundscapes with dialogue/effects
+    ///
+    /// **Important Notes:**
+    /// - Overlay player is independent of main player state
+    /// - Main track crossfades do NOT affect overlay playback
+    /// - Playlist swaps do NOT affect overlay playback
+    /// - Use global control methods (pauseAll/resumeAll/stopAll) to control both systems
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Start rain sounds with infinite loop
+    /// let config = OverlayConfiguration(
+    ///     volume: 0.3,
+    ///     loopMode: .infinite,
+    ///     fadeInDuration: 2.0,
+    ///     fadeOutDuration: 2.0
+    /// )
+    /// try await player.startOverlay(url: rainURL, configuration: config)
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - url: Local file URL for overlay audio (remote URLs not supported)
+    ///   - configuration: Playback configuration (volume, loop mode, fade durations)
+    /// - Throws: 
+    ///   - `AudioPlayerError.fileNotFound` if file doesn't exist
+    ///   - `AudioPlayerError.invalidAudioFile` if file format is unsupported
+    ///   - `AudioPlayerError.audioSessionError` if audio session setup fails
+    public func startOverlay(url: URL, configuration: OverlayConfiguration) async throws {
+        try await audioEngine.startOverlay(url: url, configuration: configuration)
+    }
+    
+    /// Stop overlay playback with fade-out
+    ///
+    /// Stops the overlay player using the fade-out duration specified in its configuration.
+    /// If no overlay is currently playing, this method does nothing.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// await player.stopOverlay()
+    /// ```
+    public func stopOverlay() async {
+        await audioEngine.stopOverlay()
+    }
+    
+    /// Pause overlay playback
+    ///
+    /// Pauses the overlay player at its current position. Use `resumeOverlay()` to continue.
+    /// If no overlay is playing, this method does nothing.
+    ///
+    /// **Note:** This only affects the overlay player. To pause both main and overlay,
+    /// use `pauseAll()` instead.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// await player.pauseOverlay()
+    /// ```
+    public func pauseOverlay() async {
+        await audioEngine.pauseOverlay()
+    }
+    
+    /// Resume overlay playback
+    ///
+    /// Resumes overlay playback from the paused position. If overlay is not paused
+    /// or no overlay is loaded, this method does nothing.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// await player.resumeOverlay()
+    /// ```
+    public func resumeOverlay() async {
+        await audioEngine.resumeOverlay()
+    }
+    
+    /// Replace current overlay file with crossfade
+    ///
+    /// Replaces the currently playing overlay audio with a new file, using a smooth
+    /// crossfade transition. The crossfade duration is determined by the overlay's
+    /// configuration.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Switch from rain to ocean sounds
+    /// try await player.replaceOverlay(url: oceanURL)
+    /// ```
+    ///
+    /// - Parameter url: New audio file URL
+    /// - Throws: 
+    ///   - `AudioPlayerError.invalidState` if no overlay is currently active
+    ///   - `AudioPlayerError.fileNotFound` if new file doesn't exist
+    ///   - `AudioPlayerError.invalidAudioFile` if new file format is unsupported
+    public func replaceOverlay(url: URL) async throws {
+        try await audioEngine.replaceOverlay(url: url)
+    }
+    
+    /// Set overlay volume independently
+    ///
+    /// Adjusts the overlay player's volume without affecting the main player.
+    /// Volume changes are applied immediately without fading.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Reduce overlay volume to 20%
+    /// await player.setOverlayVolume(0.2)
+    /// ```
+    ///
+    /// - Parameter volume: Volume level (0.0 = silent, 1.0 = full volume)
+    public func setOverlayVolume(_ volume: Float) async {
+        await audioEngine.setOverlayVolume(volume)
+    }
+    
+    /// Get current overlay player state
+    ///
+    /// Returns the current state of the overlay player for UI updates and state tracking.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// let state = await player.getOverlayState()
+    /// if state.isPlaying {
+    ///     print("Overlay is playing")
+    /// }
+    /// ```
+    ///
+    /// - Returns: Current overlay state, or `.idle` if no overlay is loaded
+    public func getOverlayState() async -> OverlayState {
+        return await audioEngine.getOverlayState()
+    }
+    
+    // MARK: - Global Control
+    
+    /// Pause both main player and overlay
+    ///
+    /// Pauses both the main audio player and overlay player simultaneously.
+    /// Useful for handling interruptions (phone calls, alarms) or user pause action.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Handle phone call interruption
+    /// await player.pauseAll()
+    /// ```
+    public func pauseAll() async {
+        await audioEngine.pauseAll()
+    }
+    
+    /// Resume both main player and overlay
+    ///
+    /// Resumes playback of both main player and overlay after a pause.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Resume after interruption
+    /// await player.resumeAll()
+    /// ```
+    public func resumeAll() async {
+        await audioEngine.resumeAll()
+    }
+    
+    /// Stop both main player and overlay completely
+    ///
+    /// Emergency stop that halts all audio playback immediately.
+    /// Both players are stopped and reset to idle state.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Emergency stop
+    /// await player.stopAll()
+    /// ```
+    public func stopAll() async {
+        await audioEngine.stopAll()
+    }
+    
     // MARK: - Crossfade Progress
     
     /// Rollback active crossfade transaction to stable state

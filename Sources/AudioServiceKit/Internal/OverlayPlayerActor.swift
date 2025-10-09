@@ -126,7 +126,7 @@ actor OverlayPlayerActor {
       state = .idle  // Ready to play
     } catch {
       state = .idle
-      throw AudioPlayerError.fileLoadError(url)
+      throw AudioPlayerError.fileLoadFailed(reason: "Failed to load file at \(url.path): \(error.localizedDescription)")
     }
   }
   
@@ -282,7 +282,7 @@ actor OverlayPlayerActor {
       state = .idle
     } catch {
       state = .idle
-      throw AudioPlayerError.fileLoadError(url)
+      throw AudioPlayerError.fileLoadFailed(reason: "Failed to load file at \(url.path): \(error.localizedDescription)")
     }
     
     // Start playback

@@ -39,6 +39,21 @@ actor AudioEngineActor {
     /// Crossfade curves are scaled to this target for smooth volume changes
     private var targetVolume: Float = 1.0
     
+    // MARK: - Overlay Player
+    
+    /// Overlay player for independent ambient audio
+    /// 
+    /// **Architecture Note:**
+    /// Overlay system follows clean actor separation (OverlayPlayerActor receives nodes from outside).
+    /// Main player system (playerA/B, mixerA/B) is embedded directly in AudioEngineActor for:
+    /// - Zero await overhead on position tracking (60 FPS)
+    /// - Simpler state management for complex crossfade logic
+    /// - Historical reasons (evolved from v1.0 monolithic design)
+    /// 
+    /// This creates architectural inconsistency (technical debt) but maintains performance.
+    /// **Future v4.0:** Consider extracting MainPlayerActor if position tracking can tolerate async overhead.
+    internal var overlayPlayer: OverlayPlayerActor?
+    
     // MARK: - Initialization
     
     init() {
@@ -250,6 +265,11 @@ actor AudioEngineActor {
     func fullReset() {
         // Stop everything
         stopBothPlayers()
+        
+        // Stop overlay
+        Task {
+            await stopOverlay()
+        }
         
         // Clear files
         audioFileA = nil
@@ -878,6 +898,126 @@ actor AudioEngineActor {
         } else {
             audioFileA = nil
         }
+    }
+    
+    // MARK: - Overlay Player Control
+    
+    /// Start overlay playback with specified configuration
+    /// - Parameters:
+    ///   - url: Local file URL for overlay audio
+    ///   - configuration: Overlay playback configuration
+    /// - Throws: AudioPlayerError if file invalid or playback fails
+    func startOverlay(url: URL, configuration: OverlayConfiguration) async throws {
+        // 1. Stop existing overlay if any
+        if overlayPlayer != nil {
+            await stopOverlay()
+        }
+        
+        // 2. Create overlay player nodes
+        // These nodes are created locally and immediately transferred to OverlayPlayerActor
+        // where they will be actor-isolated. This is safe despite the non-Sendable types.
+        nonisolated(unsafe) let playerNode = AVAudioPlayerNode()
+        nonisolated(unsafe) let mixerNode = AVAudioMixerNode()
+        
+        // 3. Attach nodes to engine
+        engine.attach(playerNode)
+        engine.attach(mixerNode)
+        
+        // 4. Connect: PlayerC → MixerC → MainMixer
+        let format = engine.outputNode.outputFormat(forBus: 0)
+        engine.connect(playerNode, to: mixerNode, format: format)
+        engine.connect(mixerNode, to: engine.mainMixerNode, format: format)
+        
+        // 5. Create overlay player actor
+        overlayPlayer = OverlayPlayerActor(
+            player: playerNode,
+            mixer: mixerNode,
+            configuration: configuration
+        )
+        
+        // 6. Load file and start playback
+        try await overlayPlayer?.load(url: url)
+        try await overlayPlayer?.play()
+    }
+    
+    /// Stop overlay playback with fade-out
+    func stopOverlay() async {
+        guard let player = overlayPlayer else { return }
+        
+        await player.stop()
+        overlayPlayer = nil
+    }
+    
+    /// Pause overlay playback
+    func pauseOverlay() async {
+        await overlayPlayer?.pause()
+    }
+    
+    /// Resume overlay playback
+    func resumeOverlay() async {
+        guard let player = overlayPlayer else { return }
+        try? await player.resume()
+    }
+    
+    /// Replace current overlay file with crossfade
+    /// - Parameter url: New audio file URL
+    /// - Throws: AudioPlayerError if no overlay is active
+    func replaceOverlay(url: URL) async throws {
+        guard let player = overlayPlayer else {
+            throw AudioPlayerError.invalidState(
+                current: "no overlay",
+                attempted: "replace"
+            )
+        }
+        
+        try await player.replaceFile(url: url)
+    }
+    
+    /// Set overlay volume independently
+    /// - Parameter volume: Volume level (0.0-1.0)
+    func setOverlayVolume(_ volume: Float) async {
+        await overlayPlayer?.setVolume(volume)
+    }
+    
+    // MARK: - Global Control
+    
+    /// Pause both main player and overlay
+    /// Useful for phone call interruptions or user pause action
+    func pauseAll() async {
+        // Pause main player (synchronous)
+        pause()
+        
+        // Pause overlay if active
+        await pauseOverlay()
+    }
+    
+    /// Resume both main player and overlay
+    /// Restore playback after interruption
+    func resumeAll() async {
+        // Resume main player (synchronous)
+        play()
+        
+        // Resume overlay if active
+        await resumeOverlay()
+    }
+    
+    /// Stop both main player and overlay completely
+    /// Emergency stop or full reset scenario
+    func stopAll() async {
+        // Stop main player system
+        stopBothPlayers()
+        
+        // Stop overlay system
+        await stopOverlay()
+    }
+    
+    /// Get current overlay state
+    /// - Returns: Current overlay state, or `.idle` if no overlay loaded
+    func getOverlayState() async -> OverlayState {
+        guard let player = overlayPlayer else {
+            return .idle
+        }
+        return await player.getState()
     }
 }
 
