@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 @testable import AudioServiceKit
 @testable import AudioServiceCore
 
@@ -7,6 +8,25 @@ import Foundation
 /// Coverage: Bug #11A (track switch), Bug #11B (reset error)
 @Suite("Regression - Architecture Fixes")
 struct RegressionArchitectureTests {
+    
+    // MARK: - Helper Methods
+    
+    private func createTestAudioFile() -> URL {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+        
+        do {
+            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
+            let frameCount = AVAudioFrameCount(44100 * 2.0)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+            buffer.frameLength = frameCount
+            try audioFile.write(from: buffer)
+            return fileURL
+        } catch {
+            fatalError("Failed to create test audio file: \(error)")
+        }
+    }
     
     // MARK: - Bug #11A: Track Switch Cacophony
     
@@ -16,7 +36,12 @@ struct RegressionArchitectureTests {
         await service.setup()
         
         // Start playing track 1
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
         // Wait for playback to stabilize
@@ -26,7 +51,6 @@ struct RegressionArchitectureTests {
         #expect(initialState == .playing)
         
         // Replace with track 2
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
         try await service.replaceTrack(url: url2, crossfadeDuration: 1.0)
         
         // State should remain playing (no cacophony)
@@ -46,10 +70,14 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        let url1 = createTestAudioFile()
+        let url2 = createTestAudioFile()
+        defer {
+            try? FileManager.default.removeItem(at: url1)
+            try? FileManager.default.removeItem(at: url2)
+        }
         
-        let url2 = Bundle.module.url(forResource: "test_audio_2", withExtension: "mp3")!
+        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
         
         // Critical section: track replacement should be seamless
         let startTime = Date()
@@ -68,7 +96,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Reset while playing
@@ -84,7 +113,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         // Cycle: play → reset → play
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
@@ -102,7 +132,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Store state machine state
@@ -129,7 +160,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         // Full lifecycle
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
@@ -149,7 +181,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Verify playing state
@@ -168,7 +201,8 @@ struct RegressionArchitectureTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         // 5 cycles: play → reset
         for cycle in 0..<5 {

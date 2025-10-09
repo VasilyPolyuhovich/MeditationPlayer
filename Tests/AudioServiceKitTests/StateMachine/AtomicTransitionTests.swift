@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 @testable import AudioServiceKit
 @testable import AudioServiceCore
 
@@ -8,6 +9,25 @@ import Foundation
 @Suite("Atomic Transitions")
 struct AtomicTransitionTests {
     
+    // MARK: - Helper Methods
+    
+    private func createTestAudioFile() -> URL {
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
+        
+        do {
+            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
+            let frameCount = AVAudioFrameCount(44100 * 2.0)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+            buffer.frameLength = frameCount
+            try audioFile.write(from: buffer)
+            return fileURL
+        } catch {
+            fatalError("Failed to create test audio file: \(error)")
+        }
+    }
+    
     // MARK: - Sequential Consistency
     
     @Test("Sequential: pause() → resume() maintains consistency")
@@ -15,7 +35,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Sequential transitions
@@ -31,7 +52,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         for _ in 0..<5 {
@@ -50,7 +72,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         // Launch concurrent state readers
@@ -79,7 +102,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         let playingState = await service.state
@@ -94,7 +118,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         await service.reset()
@@ -120,7 +145,8 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = Bundle.module.url(forResource: "test_audio", withExtension: "mp3")!
+        let url = createTestAudioFile()
+        defer { try? FileManager.default.removeItem(at: url) }
         try await service.startPlaying(url: url, configuration: AudioConfiguration())
         
         try await service.pause()
