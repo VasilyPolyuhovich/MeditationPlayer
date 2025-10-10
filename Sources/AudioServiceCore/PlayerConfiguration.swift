@@ -50,11 +50,8 @@ public struct PlayerConfiguration: Sendable {
     /// - N: Loop N times then stop
     public var repeatCount: Int?
     
-    /// Fade in duration at track start when repeatMode = .singleTrack (0.5-10.0 seconds)
-    public var singleTrackFadeInDuration: TimeInterval
-    
-    /// Fade out duration at track end when repeatMode = .singleTrack (0.5-10.0 seconds)
-    public var singleTrackFadeOutDuration: TimeInterval
+    // DELETED (v4.0): singleTrackFadeInDuration and singleTrackFadeOutDuration
+    // Now using crossfadeDuration for all track transitions
     
     // MARK: - Audio Settings
     
@@ -64,10 +61,8 @@ public struct PlayerConfiguration: Sendable {
     
     // MARK: - Stop Settings
     
-    /// Default fade duration when stopping playback with fade (0.5-10.0 seconds)
-    /// Used by stopWithDefaultFade() method
-    /// - Note: Set to 0.0 for instant stop without fade
-    public var stopFadeDuration: TimeInterval
+    // DELETED (v4.0): stopFadeDuration
+    // Now always passed as method parameter in stop(fadeDuration:)
     
     // MARK: - Audio Session Settings
     
@@ -95,20 +90,14 @@ public struct PlayerConfiguration: Sendable {
         fadeCurve: FadeCurve = .equalPower,
         repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
-        singleTrackFadeInDuration: TimeInterval = 3.0,
-        singleTrackFadeOutDuration: TimeInterval = 3.0,
         volume: Int = 100,
-        stopFadeDuration: TimeInterval = 3.0,
         mixWithOthers: Bool = false
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.repeatMode = repeatMode
         self.repeatCount = repeatCount
-        self.singleTrackFadeInDuration = max(0.5, min(10.0, singleTrackFadeInDuration))
-        self.singleTrackFadeOutDuration = max(0.5, min(10.0, singleTrackFadeOutDuration))
         self.volume = max(0, min(100, volume))
-        self.stopFadeDuration = max(0.0, min(10.0, stopFadeDuration))
         self.mixWithOthers = mixWithOthers
     }
     
@@ -137,19 +126,7 @@ public struct PlayerConfiguration: Sendable {
             throw ConfigurationError.invalidRepeatCount(count)
         }
         
-        // StopFadeDuration validation
-        if stopFadeDuration < 0.0 || stopFadeDuration > 10.0 {
-            throw ConfigurationError.invalidStopFadeDuration(stopFadeDuration)
-        }
-        
-        // Single track fade durations validation
-        if singleTrackFadeInDuration < 0.5 || singleTrackFadeInDuration > 10.0 {
-            throw ConfigurationError.invalidSingleTrackFadeInDuration(singleTrackFadeInDuration)
-        }
-        
-        if singleTrackFadeOutDuration < 0.5 || singleTrackFadeOutDuration > 10.0 {
-            throw ConfigurationError.invalidSingleTrackFadeOutDuration(singleTrackFadeOutDuration)
-        }
+        // DELETED (v4.0): stopFadeDuration, singleTrackFadeInDuration, singleTrackFadeOutDuration validations
     }
 }
 
@@ -159,9 +136,7 @@ public enum ConfigurationError: Error, LocalizedError {
     case invalidCrossfadeDuration(TimeInterval)
     case invalidVolume(Int)
     case invalidRepeatCount(Int)
-    case invalidStopFadeDuration(TimeInterval)
-    case invalidSingleTrackFadeInDuration(TimeInterval)
-    case invalidSingleTrackFadeOutDuration(TimeInterval)
+    // DELETED (v4.0): invalidStopFadeDuration, invalidSingleTrackFadeInDuration, invalidSingleTrackFadeOutDuration
     
     public var errorDescription: String? {
         switch self {
@@ -171,12 +146,6 @@ public enum ConfigurationError: Error, LocalizedError {
             return "Volume must be between 0 and 100 (got \(volume))"
         case .invalidRepeatCount(let count):
             return "Repeat count must be >= 0 or nil for infinite (got \(count))"
-        case .invalidStopFadeDuration(let duration):
-            return "Stop fade duration must be between 0.0 and 10.0 seconds (got \(duration))"
-        case .invalidSingleTrackFadeInDuration(let duration):
-            return "Single track fade in duration must be between 0.5 and 10.0 seconds (got \(duration))"
-        case .invalidSingleTrackFadeOutDuration(let duration):
-            return "Single track fade out duration must be between 0.5 and 10.0 seconds (got \(duration))"
         }
     }
 }
