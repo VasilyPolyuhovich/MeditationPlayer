@@ -207,9 +207,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
-        // Rollback any active crossfade before pausing
+        // Cancel any active crossfade (without rollback)
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            await rollbackCrossfade()
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            isLoopCrossfadeInProgress = false
+            isTrackReplacementInProgress = false
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
         }
         
         // TODO v3.2: Handle pause during single track fade in/out
@@ -240,10 +247,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func resume() async throws {
-        // Rollback any active crossfade before resuming
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            await rollbackCrossfade()
-        }
+        // No rollback needed - crossfade already cancelled in pause()
         
         // Guard: only resume if paused or finished
         guard state == .paused || state == .finished else {
@@ -280,7 +284,23 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Parameter fadeDuration: Duration of fade out (nil = instant stop, 0.0-10.0 seconds)
     /// - Note: Use nil or 0.0 for instant stop (default behavior)
     /// - Note: Fade duration is clamped to 0.0-10.0 seconds range
+    /// - Note: If stop called during crossfade, crossfade is cancelled and fadeout is performed on active track
     public func stop(fadeDuration: TimeInterval? = nil) async {
+        // ✅ FIX: If crossfade in progress, cancel it and stop inactive player
+        // Active player will fade out naturally
+        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+            Self.logger.debug("[STOP] Cancel crossfade in progress")
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            isLoopCrossfadeInProgress = false
+            isTrackReplacementInProgress = false
+            
+            // Cancel progress observation
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
+        }
+        
         if let duration = fadeDuration, duration > 0 {
             // Stop with fade
             await stopWithFade(duration: duration)
@@ -296,8 +316,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Clamp duration to safe range
         let clampedDuration = max(0.0, min(10.0, duration))
         
-        // configuration.volumeFloat may be outdated if setVolume() was called
-        let currentVolume = await audioEngine.getTargetVolume()
+        // ✅ FIX #2: Get ACTUAL mixer volume, not target volume
+        // targetVolume is for mainMixer (global), we need activeMixer volume
+        let currentVolume = await audioEngine.getActiveMixerVolume()
+        
+        Self.logger.debug("[STOP_FADE] Starting fade: volume=\(currentVolume) → 0.0, duration=\(clampedDuration)s")
         
         // Fade out active mixer
         await audioEngine.fadeActiveMixer(
@@ -306,6 +329,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             duration: clampedDuration,
             curve: configuration.fadeCurve
         )
+        
+        Self.logger.debug("[STOP_FADE] Fade complete, performing instant stop")
         
         // Then perform instant stop
         await stopImmediately()
@@ -370,9 +395,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func skipForward(by interval: TimeInterval = 15.0) async throws {
-        // Rollback any active crossfade before skipping
+        // Cancel any active crossfade (without rollback)
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            await rollbackCrossfade()
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            isLoopCrossfadeInProgress = false
+            isTrackReplacementInProgress = false
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
         }
         
         // TODO v3.2: Enhanced skip logic during single track fade
@@ -395,9 +427,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func skipBackward(by interval: TimeInterval = 15.0) async throws {
-        // Rollback any active crossfade before skipping
+        // Cancel any active crossfade (without rollback)
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            await rollbackCrossfade()
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            isLoopCrossfadeInProgress = false
+            isTrackReplacementInProgress = false
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
         }
         
         // TODO v3.2: Enhanced skip logic during single track fade
@@ -420,11 +459,18 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///   - fadeDuration: Duration of fade in/out (default: 0.1s, imperceptible to users)
     /// - Throws: AudioPlayerError if seek fails
     /// - Note: Uses brief fade to avoid buffer discontinuity artifacts (clicking sounds)
-    /// - Note: Automatically rolls back any active crossfade before seeking
+    /// - Note: Automatically cancels any active crossfade before seeking
     public func seekWithFade(to time: TimeInterval, fadeDuration: TimeInterval = 0.1) async throws {
-        // Rollback any active crossfade before seeking
+        // Cancel any active crossfade (without rollback)
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
-            await rollbackCrossfade()
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            isLoopCrossfadeInProgress = false
+            isTrackReplacementInProgress = false
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
         }
         
         let wasPlaying = state == .playing
@@ -1038,11 +1084,39 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// Prevents precision errors in IEEE 754 arithmetic (e.g., 49.999999999 ≠ 50.0)
     private let triggerTolerance: TimeInterval = 0.1
     
+    /// Calculate adapted crossfade duration for single track loop
+    /// - Parameter trackDuration: Total track duration in seconds
+    /// - Returns: Adapted crossfade duration (max 40% each fade, 80% total)
+    /// - Note: Uses same adaptation logic as loopCurrentTrackWithFade() to ensure trigger point matches actual crossfade duration
+    private func calculateAdaptedCrossfadeDuration(trackDuration: TimeInterval) -> TimeInterval {
+        // Get configured fade durations
+        let configuredFadeIn = configuration.singleTrackFadeInDuration
+        let configuredFadeOut = configuration.singleTrackFadeOutDuration
+        
+        // Adaptive scaling to track duration (max 40% each = 80% total)
+        let maxFadeIn = min(configuredFadeIn, trackDuration * 0.4)
+        let maxFadeOut = min(configuredFadeOut, trackDuration * 0.4)
+        
+        var actualFadeIn = maxFadeIn
+        var actualFadeOut = maxFadeOut
+        
+        // Ensure total doesn't exceed 80%
+        if actualFadeIn + actualFadeOut > trackDuration * 0.8 {
+            let ratio = (trackDuration * 0.8) / (actualFadeIn + actualFadeOut)
+            actualFadeIn *= ratio
+            actualFadeOut *= ratio
+        }
+        
+        // Return max of adapted values (used as crossfade duration)
+        return max(actualFadeIn, actualFadeOut)
+    }
+    
     /// Check if we should trigger loop crossfade
     /// - Parameter position: Current playback position
     /// - Returns: True if crossfade should be triggered
     /// - Note: Uses epsilon tolerance to handle floating-point precision errors
     /// - Note: Now checks repeatMode instead of enableLooping (Phase 3)
+    /// - Note: For .singleTrack mode, uses adapted crossfade duration to match actual execution
     private func shouldTriggerLoopCrossfade(_ position: PlaybackPosition) -> Bool {
         // Only loop if repeat mode is not .off
         guard configuration.repeatMode != .off else { return false }
@@ -1054,23 +1128,30 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard state == .playing else { return false }
         
         // Calculate trigger point (crossfade duration before end)
-        // For .singleTrack mode, use max(fadeIn, fadeOut) as crossfade duration
+        // For .singleTrack mode, use ADAPTED values to match loopCurrentTrackWithFade()
         let crossfadeDuration: TimeInterval
         if configuration.repeatMode == .singleTrack {
-            crossfadeDuration = max(
-                configuration.singleTrackFadeInDuration,
-                configuration.singleTrackFadeOutDuration
-            )
+            // ✅ FIX: Use adapted duration (same as loopCurrentTrackWithFade)
+            crossfadeDuration = calculateAdaptedCrossfadeDuration(trackDuration: position.duration)
+            
+            // 🔍 DEBUG: Log trigger calculation
+            Self.logger.debug("[LOOP_TRIGGER] Adapted crossfade: \(crossfadeDuration)s for track: \(position.duration)s")
         } else {
             crossfadeDuration = configuration.crossfadeDuration
         }
         
         let triggerPoint = position.duration - crossfadeDuration
         
+        // 🔍 DEBUG: Log trigger point
+        let willTrigger = position.currentTime >= (triggerPoint - triggerTolerance) && 
+                         position.currentTime < position.duration
+        if willTrigger {
+            Self.logger.info("[LOOP_TRIGGER] Triggering at \(position.currentTime)s (trigger: \(triggerPoint)s, crossfade: \(crossfadeDuration)s)")
+        }
+        
         // FIXED Issue #8: Use epsilon tolerance for float precision
         // Trigger when: triggerPoint - tolerance ≤ currentTime < duration
-        return position.currentTime >= (triggerPoint - triggerTolerance) && 
-               position.currentTime < position.duration
+        return willTrigger
     }
     
     /// Start the loop crossfade process with support for all repeat modes
@@ -1121,30 +1202,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             return
         }
         
-        // 3. Get configured fade durations
+        // 3. ✅ FIX: Use shared adaptation logic
+        let crossfadeDuration = calculateAdaptedCrossfadeDuration(trackDuration: trackDuration)
+        
+        // 🔍 DEBUG: Log configuration
         let configuredFadeIn = configuration.singleTrackFadeInDuration
         let configuredFadeOut = configuration.singleTrackFadeOutDuration
-        
-        // 4. Adaptive scaling to track duration (max 40% each = 80% total)
-        let maxFadeIn = min(configuredFadeIn, trackDuration * 0.4)
-        let maxFadeOut = min(configuredFadeOut, trackDuration * 0.4)
-        
-        // 5. Ensure total doesn't exceed 80%
-        var actualFadeIn = maxFadeIn
-        var actualFadeOut = maxFadeOut
-        
-        if actualFadeIn + actualFadeOut > trackDuration * 0.8 {
-            let ratio = (trackDuration * 0.8) / (actualFadeIn + actualFadeOut)
-            actualFadeIn *= ratio
-            actualFadeOut *= ratio
-            Self.logger.info("Fade durations adapted to track: fadeIn=\(actualFadeIn)s, fadeOut=\(actualFadeOut)s")
-        }
-        
-        // 6. Calculate crossfade duration (max of adapted fade in/out)
-        let crossfadeDuration = max(actualFadeOut, actualFadeIn)
-        
-        Self.logger.debug("Single track loop: configured(\(configuredFadeIn)s,\(configuredFadeOut)s) → actual(\(actualFadeIn)s,\(actualFadeOut)s)")
-        Self.logger.debug("Track duration: \(trackDuration)s, crossfade: \(crossfadeDuration)s")
+        Self.logger.info("[LOOP_CROSSFADE] Starting loop crossfade: track=\(trackDuration)s, configured=(\(configuredFadeIn)s,\(configuredFadeOut)s), adapted=\(crossfadeDuration)s")
+        Self.logger.info("[LOOP_CROSSFADE] Repeat count: \(currentRepeatCount + 1)")
         
         // 7. Send .preparing state for instant UI feedback
         let prepareProgress = CrossfadeProgress(

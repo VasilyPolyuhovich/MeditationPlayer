@@ -11,21 +11,59 @@ struct Bug12CrossfadePauseRaceTests {
     
     // MARK: - Helper Methods
     
-    private func createTestAudioFile() -> URL {
+    /// Creates a test audio file programmatically
+    /// - Parameter duration: Duration in seconds (default: 2.0s)
+    /// - Returns: URL of created test file in temp directory
+    private func createTestAudioFile(duration: TimeInterval = 2.0) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
         
-        do {
-            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
-            let frameCount = AVAudioFrameCount(44100 * 2.0) // 2 seconds
-            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-            buffer.frameLength = frameCount
-            try audioFile.write(from: buffer)
-            return fileURL
-        } catch {
-            fatalError("Failed to create test audio file: \(error)")
+        // Create audio format (44.1kHz, stereo, Float32)
+        guard let format = AVAudioFormat(
+            standardFormatWithSampleRate: 44100,
+            channels: 2
+        ) else {
+            throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
         }
+        
+        // Create audio file for writing
+        let audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings
+        )
+        
+        // Calculate frame count
+        let frameCount = AVAudioFrameCount(format.sampleRate * duration)
+        
+        // Create buffer with proper capacity
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        ) else {
+            throw NSError(domain: "TestError", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+        
+        buffer.frameLength = frameCount
+        
+        // ✅ CRITICAL: Fill buffer with actual audio data (sine wave 440 Hz)
+        // Without this, file.length = 0 which causes crashes in play()
+        if let leftChannel = buffer.floatChannelData?[0],
+           let rightChannel = buffer.floatChannelData?[1] {
+            let frequency: Float = 440.0 // A note
+            let amplitude: Float = 0.5
+            let sampleRate = Float(format.sampleRate)
+            
+            for frame in 0..<Int(frameCount) {
+                let value = amplitude * sin(2.0 * .pi * frequency * Float(frame) / sampleRate)
+                leftChannel[frame] = value
+                rightChannel[frame] = value
+            }
+        }
+        
+        // Write buffer to file
+        try audioFile.write(from: buffer)
+        
+        return fileURL
     }
     
     // MARK: - Bug #12 Validation
@@ -35,14 +73,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Launch concurrent track replacement
         Task {
@@ -62,14 +100,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         try await service.pause()
         
         // Launch track replacement while paused
@@ -90,14 +128,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         #expect(await service.state == .playing)
         
         // Replace with short crossfade
@@ -112,14 +150,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         try await service.replaceTrack(url: url2, crossfadeDuration: 1.0)
         
         // After completion, pause should work
@@ -132,14 +170,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Launch replacement
         Task {
@@ -155,7 +193,7 @@ struct Bug12CrossfadePauseRaceTests {
         await service.stop()
         
         // New playback should work
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         #expect(await service.state == .playing)
     }
     
@@ -164,14 +202,14 @@ struct Bug12CrossfadePauseRaceTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Launch replacement
         Task {
@@ -187,7 +225,7 @@ struct Bug12CrossfadePauseRaceTests {
         await service.reset()
         
         // New playback should work
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         #expect(await service.state == .playing)
     }
 }

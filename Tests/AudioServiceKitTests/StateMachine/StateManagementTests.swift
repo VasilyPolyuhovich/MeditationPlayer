@@ -14,37 +14,56 @@ struct StateManagementTests {
     /// Creates a test audio file programmatically
     /// - Parameter duration: Duration in seconds (default: 2.0s)
     /// - Returns: URL of created test file in temp directory
-    private func createTestAudioFile(duration: TimeInterval = 2.0) -> URL {
+    private func createTestAudioFile(duration: TimeInterval = 2.0) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
         
-        // Create audio format (44.1kHz, stereo)
-        let format = AVAudioFormat(
+        // Create audio format (44.1kHz, stereo, Float32)
+        guard let format = AVAudioFormat(
             standardFormatWithSampleRate: 44100,
             channels: 2
-        )!
-        
-        do {
-            let audioFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: format.settings
-            )
-            
-            // Create silence of specified duration
-            let frameCount = AVAudioFrameCount(44100 * duration)
-            let buffer = AVAudioPCMBuffer(
-                pcmFormat: format,
-                frameCapacity: frameCount
-            )!
-            buffer.frameLength = frameCount
-            
-            // Write silence
-            try audioFile.write(from: buffer)
-            
-            return fileURL
-        } catch {
-            fatalError("Failed to create test audio file: \(error)")
+        ) else {
+            throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
         }
+        
+        // Create audio file for writing
+        let audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings
+        )
+        
+        // Calculate frame count
+        let frameCount = AVAudioFrameCount(format.sampleRate * duration)
+        
+        // Create buffer with proper capacity
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        ) else {
+            throw NSError(domain: "TestError", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+        
+        buffer.frameLength = frameCount
+        
+        // ✅ CRITICAL: Fill buffer with actual audio data (sine wave 440 Hz)
+        // Without this, file.length = 0 which causes crashes in play()
+        if let leftChannel = buffer.floatChannelData?[0],
+           let rightChannel = buffer.floatChannelData?[1] {
+            let frequency: Float = 440.0 // A note
+            let amplitude: Float = 0.5
+            let sampleRate = Float(format.sampleRate)
+            
+            for frame in 0..<Int(frameCount) {
+                let value = amplitude * sin(2.0 * .pi * frequency * Float(frame) / sampleRate)
+                leftChannel[frame] = value
+                rightChannel[frame] = value
+            }
+        }
+        
+        // Write buffer to file
+        try audioFile.write(from: buffer)
+        
+        return fileURL
     }
     
     // MARK: - SSOT Invariant Tests
@@ -67,9 +86,9 @@ struct StateManagementTests {
         await service.setup()
         
         // Start playback
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         // Pause
         try await service.pause()
@@ -86,9 +105,9 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         try await service.pause()
         try await service.resume()
         
@@ -104,9 +123,9 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         await service.stop()
         
         let serviceState = await service.state
@@ -121,9 +140,9 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         await service.reset()
         
         let serviceState = await service.state
@@ -141,11 +160,11 @@ struct StateManagementTests {
         await service.setup()
         
         // Rapid state queries during transition should never see intermediate states
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
         
         Task {
-            try? await service.startPlaying(url: url, configuration: AudioConfiguration())
+            try? await service.startPlaying(url: url, configuration: PlayerConfiguration())
         }
         
         // Sample state during transition
@@ -163,15 +182,15 @@ struct StateManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
         
         // Play → Reset cycle
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         await service.reset()
         
         // Should be able to play again without Error 4
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         let state = await service.state
         #expect([.preparing, .playing].contains(state))

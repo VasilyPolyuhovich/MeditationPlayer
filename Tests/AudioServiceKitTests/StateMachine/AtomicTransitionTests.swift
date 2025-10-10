@@ -11,21 +11,59 @@ struct AtomicTransitionTests {
     
     // MARK: - Helper Methods
     
-    private func createTestAudioFile() -> URL {
+    /// Creates a test audio file programmatically with actual audio data
+    /// - Parameter duration: Duration in seconds (default: 2.0s)
+    /// - Returns: URL of created test file in temp directory
+    private func createTestAudioFile(duration: TimeInterval = 2.0) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
         
-        do {
-            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
-            let frameCount = AVAudioFrameCount(44100 * 2.0)
-            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-            buffer.frameLength = frameCount
-            try audioFile.write(from: buffer)
-            return fileURL
-        } catch {
-            fatalError("Failed to create test audio file: \(error)")
+        // Create audio format (44.1kHz, stereo, Float32)
+        guard let format = AVAudioFormat(
+            standardFormatWithSampleRate: 44100,
+            channels: 2
+        ) else {
+            throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
         }
+        
+        // Create audio file for writing
+        let audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings
+        )
+        
+        // Calculate frame count
+        let frameCount = AVAudioFrameCount(format.sampleRate * duration)
+        
+        // Create buffer with proper capacity
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        ) else {
+            throw NSError(domain: "TestError", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+        
+        buffer.frameLength = frameCount
+        
+        // ✅ CRITICAL: Fill buffer with actual audio data (sine wave 440 Hz)
+        // Without this, file.length = 0 which causes crash: "offset >= file.length"
+        if let leftChannel = buffer.floatChannelData?[0],
+           let rightChannel = buffer.floatChannelData?[1] {
+            let frequency: Float = 440.0 // A note
+            let amplitude: Float = 0.5
+            let sampleRate = Float(format.sampleRate)
+            
+            for frame in 0..<Int(frameCount) {
+                let value = amplitude * sin(2.0 * .pi * frequency * Float(frame) / sampleRate)
+                leftChannel[frame] = value
+                rightChannel[frame] = value
+            }
+        }
+        
+        // Write buffer to file
+        try audioFile.write(from: buffer)
+        
+        return fileURL
     }
     
     // MARK: - Sequential Consistency
@@ -35,9 +73,9 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         // Sequential transitions
         try await service.pause()
@@ -52,9 +90,9 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         for _ in 0..<5 {
             try await service.pause()
@@ -72,9 +110,9 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         // Launch concurrent state readers
         await withTaskGroup(of: PlayerState.self) { group in
@@ -102,10 +140,10 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
         
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         let playingState = await service.state
         #expect([.preparing, .playing].contains(playingState))
         
@@ -118,9 +156,9 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         await service.reset()
         
@@ -145,9 +183,9 @@ struct AtomicTransitionTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         try await service.pause()
         

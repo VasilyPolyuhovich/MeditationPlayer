@@ -216,6 +216,32 @@ actor AudioEngineActor {
         mixerNodeB.volume = 0.0
     }
     
+    /// Cancel crossfade and stop inactive player
+    /// - Note: Used when stop() is called during crossfade
+    /// - Note: Leaves active mixer volume unchanged for subsequent fadeout
+    func cancelCrossfadeAndStopInactive() async {
+        // 1. Cancel crossfade task
+        guard let task = activeCrossfadeTask else { return }
+        
+        task.cancel()
+        activeCrossfadeTask = nil
+        
+        // Report cancellation
+        crossfadeProgressContinuation?.yield(.idle)
+        crossfadeProgressContinuation?.finish()
+        crossfadeProgressContinuation = nil
+        
+        // 2. Stop inactive player (was fading in, no longer needed)
+        let inactivePlayer = getInactivePlayerNode()
+        inactivePlayer.stop()
+        
+        // 3. Reset inactive mixer to 0
+        getInactiveMixerNode().volume = 0.0
+        
+        // 4. Active mixer volume is LEFT UNCHANGED
+        // stopWithFade() will fade it out from current volume to 0
+    }
+    
     /// Rollback crossfade transaction - restore active player to normal state
     /// - Parameter rollbackDuration: Duration to restore active volume (default: 0.5s)
     /// - Returns: Current volume of active mixer before rollback (for smooth transition)
@@ -442,6 +468,14 @@ actor AudioEngineActor {
         return targetVolume
     }
     
+    /// Get current active mixer volume
+    /// - Returns: Actual volume of active mixer node (0.0-1.0)
+    /// - Note: This is different from targetVolume (mainMixer.volume)
+    /// - Note: During crossfade, active mixer may have different volume than target
+    func getActiveMixerVolume() -> Float {
+        return getActiveMixerNode().volume
+    }
+    
     func fadeVolume(
         mixer: AVAudioMixerNode,
         from: Float,
@@ -449,6 +483,10 @@ actor AudioEngineActor {
         duration: TimeInterval,
         curve: FadeCurve = .equalPower
     ) async {
+        // ✅ DEBUG: Log fade parameters
+        let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
+        print("[FADE_DEBUG] \(mixerName): from=\(from) → to=\(to), duration=\(duration)s, curve=\(curve)")
+        
         // FIXED Issue #9: Adaptive step sizing for efficient fading
         // Short fades need high frequency updates for smoothness
         // Long fades can use lower frequency to reduce CPU usage
@@ -466,10 +504,20 @@ actor AudioEngineActor {
         let steps = Int(duration * Double(stepsPerSecond))
         let stepTime = duration / Double(steps)
         
+        print("[FADE_DEBUG] \(mixerName): steps=\(steps), stepTime=\(stepTime*1000)ms, stepsPerSecond=\(stepsPerSecond)")
+        
+        // ✅ DEBUG: Log first 5 and last 5 steps
+        var loggedSteps: Set<Int> = []
+        for i in 0..<5 {
+            loggedSteps.insert(i)
+            loggedSteps.insert(steps - i)
+        }
+        
         for i in 0...steps {
             // FIXED Issue #10A: Check for task cancellation on every step
             // If fade is interrupted (pause/stop) → abort gracefully
             guard !Task.isCancelled else {
+                print("[FADE_DEBUG] \(mixerName): CANCELLED at step \(i)/\(steps)")
                 return // Exit immediately without throwing
             }
             
@@ -489,12 +537,20 @@ actor AudioEngineActor {
             let newVolume = from + (to - from) * curveValue
             mixer.volume = newVolume
             
+            // ✅ DEBUG: Log critical steps
+            if loggedSteps.contains(i) {
+                print("[FADE_DEBUG] \(mixerName): step[\(i)/\(steps)] progress=\(progress) curveValue=\(curveValue) volume=\(newVolume)")
+            }
+            
             try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
         }
         
         // Ensure final volume is exact (only if not cancelled)
         if !Task.isCancelled {
             mixer.volume = to
+            print("[FADE_DEBUG] \(mixerName): COMPLETE - final volume=\(to)")
+        } else {
+            print("[FADE_DEBUG] \(mixerName): CANCELLED before completion")
         }
     }
     

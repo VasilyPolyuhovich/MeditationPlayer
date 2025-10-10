@@ -177,7 +177,7 @@ final class FadeCurveTests: XCTestCase {
     // MARK: - Configuration Tests
     
     func testConfigurationWithFadeCurve() {
-        let config = AudioConfiguration(
+        let config = PlayerConfiguration(
             crossfadeDuration: 10.0,
             fadeCurve: .equalPower
         )
@@ -186,7 +186,7 @@ final class FadeCurveTests: XCTestCase {
     }
     
     func testConfigurationDefaultFadeCurve() {
-        let config = AudioConfiguration()
+        let config = PlayerConfiguration()
         
         // Should default to equal-power
         XCTAssertEqual(config.fadeCurve, .equalPower)

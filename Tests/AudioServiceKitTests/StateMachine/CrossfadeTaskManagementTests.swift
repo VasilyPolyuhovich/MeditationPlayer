@@ -10,21 +10,59 @@ struct CrossfadeTaskManagementTests {
     
     // MARK: - Helper Methods
     
-    private func createTestAudioFile() -> URL {
+    /// Creates a test audio file programmatically with actual audio data
+    /// - Parameter duration: Duration in seconds (default: 2.0s)
+    /// - Returns: URL of created test file in temp directory
+    private func createTestAudioFile(duration: TimeInterval = 2.0) throws -> URL {
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent("test_\(UUID().uuidString).caf")
-        let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
         
-        do {
-            let audioFile = try AVAudioFile(forWriting: fileURL, settings: format.settings)
-            let frameCount = AVAudioFrameCount(44100 * 2.0)
-            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
-            buffer.frameLength = frameCount
-            try audioFile.write(from: buffer)
-            return fileURL
-        } catch {
-            fatalError("Failed to create test audio file: \(error)")
+        // Create audio format (44.1kHz, stereo, Float32)
+        guard let format = AVAudioFormat(
+            standardFormatWithSampleRate: 44100,
+            channels: 2
+        ) else {
+            throw NSError(domain: "TestError", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio format"])
         }
+        
+        // Create audio file for writing
+        let audioFile = try AVAudioFile(
+            forWriting: fileURL,
+            settings: format.settings
+        )
+        
+        // Calculate frame count
+        let frameCount = AVAudioFrameCount(format.sampleRate * duration)
+        
+        // Create buffer with proper capacity
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            frameCapacity: frameCount
+        ) else {
+            throw NSError(domain: "TestError", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+        }
+        
+        buffer.frameLength = frameCount
+        
+        // ✅ CRITICAL: Fill buffer with actual audio data (sine wave 440 Hz)
+        // Without this, file.length = 0 which causes crash: "offset >= file.length"
+        if let leftChannel = buffer.floatChannelData?[0],
+           let rightChannel = buffer.floatChannelData?[1] {
+            let frequency: Float = 440.0 // A note
+            let amplitude: Float = 0.5
+            let sampleRate = Float(format.sampleRate)
+            
+            for frame in 0..<Int(frameCount) {
+                let value = amplitude * sin(2.0 * .pi * frequency * Float(frame) / sampleRate)
+                leftChannel[frame] = value
+                rightChannel[frame] = value
+            }
+        }
+        
+        // Write buffer to file
+        try audioFile.write(from: buffer)
+        
+        return fileURL
     }
     
     // MARK: - Dual Pause Implementation
@@ -34,14 +72,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Start track replacement
         Task {
@@ -66,9 +104,9 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url = createTestAudioFile()
+        let url = try createTestAudioFile()
         defer { try? FileManager.default.removeItem(at: url) }
-        try await service.startPlaying(url: url, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url, configuration: PlayerConfiguration())
         
         // Pause should work fine
         try await service.pause()
@@ -82,14 +120,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Start long crossfade
         Task {
@@ -115,14 +153,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Start crossfade
         Task {
@@ -144,14 +182,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Start crossfade
         Task {
@@ -175,14 +213,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Collect progress updates
         var phases: [CrossfadeProgress.Phase] = []
@@ -223,14 +261,14 @@ struct CrossfadeTaskManagementTests {
         let initialProgress = await service.currentCrossfadeProgress
         #expect(initialProgress == .idle)
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Start crossfade
         Task {
@@ -255,14 +293,14 @@ struct CrossfadeTaskManagementTests {
         let service = AudioPlayerService()
         await service.setup()
         
-        let url1 = createTestAudioFile()
-        let url2 = createTestAudioFile()
+        let url1 = try createTestAudioFile()
+        let url2 = try createTestAudioFile()
         defer {
             try? FileManager.default.removeItem(at: url1)
             try? FileManager.default.removeItem(at: url2)
         }
         
-        try await service.startPlaying(url: url1, configuration: AudioConfiguration())
+        try await service.startPlaying(url: url1, configuration: PlayerConfiguration())
         
         // Track phase order
         actor PhaseTracker: CrossfadeProgressObserver {
