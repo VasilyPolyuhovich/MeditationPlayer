@@ -1,0 +1,4 @@
+# Session v2.0
+*.json
+*.md
+!archive/
