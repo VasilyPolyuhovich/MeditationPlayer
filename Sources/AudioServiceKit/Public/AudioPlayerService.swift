@@ -1023,27 +1023,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Returns: Adapted crossfade duration (max 40% each fade, 80% total)
     /// - Note: Uses same adaptation logic as loopCurrentTrackWithFade() to ensure trigger point matches actual crossfade duration
     private func calculateAdaptedCrossfadeDuration(trackDuration: TimeInterval) -> TimeInterval {
-        // Get configured fade durations
-        let configuredFadeIn = configuration.fadeInDuration
-        let configuredFadeOut = configuration.crossfadeDuration * 0.7
+        // v4.0: Use full crossfadeDuration for loop
+        let configuredCrossfade = configuration.crossfadeDuration
+        let maxCrossfade = trackDuration * 0.4
+        let adaptedCrossfade = min(configuredCrossfade, maxCrossfade)
         
-        // Adaptive scaling to track duration (max 40% each = 80% total)
-        let maxFadeIn = min(configuredFadeIn, trackDuration * 0.4)
-        let maxFadeOut = min(configuredFadeOut, trackDuration * 0.4)
+        Self.logger.debug("Adapted loop crossfade: configured=\(configuredCrossfade)s, track=\(trackDuration)s, adapted=\(adaptedCrossfade)s")
         
-        var actualFadeIn = maxFadeIn
-        var actualFadeOut = maxFadeOut
-        
-        // Ensure total doesn't exceed 80%
-        if actualFadeIn + actualFadeOut > trackDuration * 0.8 {
-            let ratio = (trackDuration * 0.8) / (actualFadeIn + actualFadeOut)
-            actualFadeIn *= ratio
-            actualFadeOut *= ratio
-        }
-        
-        // Return max of adapted values (used as crossfade duration)
-        return max(actualFadeIn, actualFadeOut)
+        return adaptedCrossfade
     }
+
     
     /// Check if we should trigger loop crossfade
     /// - Parameter position: Current playback position
@@ -1140,9 +1129,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let crossfadeDuration = calculateAdaptedCrossfadeDuration(trackDuration: trackDuration)
         
         // 🔍 DEBUG: Log configuration
-        let configuredFadeIn = configuration.fadeInDuration
-        let configuredFadeOut = configuration.crossfadeDuration * 0.7
-        Self.logger.info("[LOOP_CROSSFADE] Starting loop crossfade: track=\(trackDuration)s, configured=(\(configuredFadeIn)s,\(configuredFadeOut)s), adapted=\(crossfadeDuration)s")
+        let configuredCrossfade = configuration.crossfadeDuration
+        Self.logger.info("[LOOP_CROSSFADE] Starting loop crossfade: track=\(trackDuration)s, configured=\(configuredCrossfade)s, adapted=\(crossfadeDuration)s")
         Self.logger.info("[LOOP_CROSSFADE] Repeat count: \(currentRepeatCount + 1)")
         
         // 7. Send .preparing state for instant UI feedback
