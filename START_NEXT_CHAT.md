@@ -18,10 +18,13 @@ current_project()
 # 3. Check git
 git_status()
 
-# 4. Read key docs
-read_file({ path: "FEATURE_OVERVIEW_v4.0.md" })  # ⭐ COMPLETE REFERENCE
+# 4. Read MAIN reference doc
+read_file({ path: "FEATURE_OVERVIEW_v4.0.md" })  # ⭐ COMPLETE SPEC
+
+# 5. Read additional context (if needed)
 read_file({ path: "HANDOFF_v4.0_SESSION.md" })
-read_file({ path: "Temp/KEY_INSIGHTS_v4.0.md" })
+read_file({ path: "LEGACY/v4.0_docs/KEY_INSIGHTS_v4.0.md" })
+read_file({ path: "LEGACY/v4.0_docs/TODO_v4.0.md" })
 ```
 
 ---
@@ -36,35 +39,35 @@ read_file({ path: "Temp/KEY_INSIGHTS_v4.0.md" })
 3. Add `getVolume()` method
 4. Remove deprecated methods
 
-### ⭐ NEW: Verify Overlay Delay Feature
-**Critical addition:** `delayBetweenLoops` in OverlayConfiguration
+### ⭐ Verify Features:
 
-**What it does:**
-- Natural pause between overlay repeats
-- wave → silence → wave (природність)
-- Prevents audio overwhelm
+**1. Overlay Delay Between Loops**
+- Check: `OverlayConfiguration.delayBetweenLoops` exists
+- Check: `OverlayPlayerActor` implements delay timer
+- Natural pauses: wave → silence → wave
 
-**Check:**
-- [ ] OverlayConfiguration has `delayBetweenLoops` field
-- [ ] OverlayPlayerActor implements delay timer
-- [ ] Works with `.infinite` and `.count(N)` modes
+**2. Queue Management**
+- Check: `PlaylistManager.playNext(url:)` exists
+- Check: `PlaylistManager.getUpcomingQueue()` exists
 
 ---
 
-## 📚 Key Files
+## 📚 Documentation Structure
 
-**Must Read:**
-- `FEATURE_OVERVIEW_v4.0.md` - ⭐ **COMPLETE** функціонал (9 категорій)
-- `HANDOFF_v4.0_SESSION.md` - Full context with decisions
-- `Temp/KEY_INSIGHTS_v4.0.md` - Critical insights
-- `Temp/TODO_v4.0.md` - Phase checklist
+### ⭐ PRIMARY (корінь):
+- **`FEATURE_OVERVIEW_v4.0.md`** - Complete functional spec (9 categories)
+- `HANDOFF_v4.0_SESSION.md` - Session handoff
+- `QUICK_START_v4.0.md` - Quick start
+- `START_NEXT_CHAT.md` - This file
+- `.claude_instructions` - Project instructions
 
-**Code:**
-- `Sources/AudioServiceKit/Public/AudioPlayerService.swift`
-- `Sources/AudioServiceKit/Internal/AudioEngineActor.swift`
-- `Sources/AudioServiceKit/Internal/OverlayPlayerActor.swift` ← check delay
-- `Sources/AudioServiceCore/PlayerConfiguration.swift`
-- `Sources/AudioServiceCore/OverlayConfiguration.swift` ← check field
+### 📦 ARCHIVED (LEGACY/):
+- `v4.0_docs/` - Important v4.0 docs to keep
+  - `KEY_INSIGHTS_v4.0.md` - Critical user insights
+  - `SESSION_v4.0_ANALYSIS.md` - Full v4.0 analysis
+  - `TODO_v4.0.md` - Phase checklist
+- `Temp/` - Old session docs (can delete)
+- `.claude/` - Old instructions (can delete)
 
 ---
 
@@ -89,23 +92,6 @@ mixerB.volume = crossfadeVolB * globalVolume
 ```swift
 @MainActor class ViewModel {
     @Published var volume: Float = 1.0
-}
-```
-
-### 2. Queue Management
-
-**Check PlaylistManager has:**
-- [ ] `playNext(url:)` - insert after current
-- [ ] `getUpcomingQueue()` - show next tracks
-
-**If missing** → add wrapper methods
-
-### 3. Overlay Delay (verify implementation)
-
-**Check OverlayConfiguration:**
-```swift
-struct OverlayConfiguration {
-    let delayBetweenLoops: TimeInterval  // Should exist!
 }
 ```
 
@@ -150,17 +136,22 @@ struct OverlayConfiguration {
 
 ---
 
-## ✅ Feature Overview Complete!
+## ✅ Cleanup Complete!
 
-**FEATURE_OVERVIEW_v4.0.md** містить:
-- 9 категорій features
-- Overlay with delayBetweenLoops ⭐
-- Complete API reference
-- Use cases для meditation
-- Same page checklist
+**Archived:**
+- LEGACY/Temp/ - 62 old session docs
+- LEGACY/.claude/ - 100+ old files
+- LEGACY/v4.0_docs/ - 3 important docs saved
 
-**User каже:** "майже ідеальне розуміння!" 🎯
+**Kept in root:**
+- FEATURE_OVERVIEW_v4.0.md ⭐ (main reference)
+- HANDOFF_v4.0_SESSION.md
+- QUICK_START_v4.0.md
+- START_NEXT_CHAT.md
+- .claude_instructions
+
+**Clean project structure!** 🎯
 
 ---
 
-**Start with:** `load_session()` → Verify overlay delay → Begin Phase 3 🚀
+**Start with:** `load_session()` → Read FEATURE_OVERVIEW → Verify overlay delay → Begin Phase 3 🚀

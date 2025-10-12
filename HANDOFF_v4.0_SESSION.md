@@ -315,7 +315,10 @@ func resume() async {
 **Docs:**
 - `CHANGELOG.md` - version 2.10.0 (transactional crossfade pattern)
 - `README.md` - current v2.11.0 status
-- `Temp/` - ЗАСТАРІЛО (ігнорувати, v2.x-v3.x docs)
+- `LEGACY/` - Архівні документи (v2.x-v3.x)
+  - `v4.0_docs/` - Important v4.0 docs (KEY_INSIGHTS, SESSION_ANALYSIS, TODO)
+  - `Temp/` - Old session docs
+  - `.claude/` - Old instructions
 
 ---
 
