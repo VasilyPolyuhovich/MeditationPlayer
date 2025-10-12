@@ -10,25 +10,6 @@ import AudioServiceCore
 ///
 /// Proposed API:
 /// ```swift
-/// struct ValidationFeedback {
-///     let isValid: Bool
-///     let warnings: [ValidationWarning]
-///     let errors: [ValidationError]
-/// }
-///
-/// enum ValidationWarning {
-///     case totalFadeExceedsRecommended(total: TimeInterval, track: TimeInterval)
-///     case fadeOutConflictsWithCrossfade(fadeOut: TimeInterval, crossfade: TimeInterval)
-///     case trackTooShortForFade(duration: TimeInterval)
-/// }
-///
-/// func setSingleTrackFadeDurations(...) async throws -> ValidationFeedback
-/// ```
-///
-/// Benefits:
-/// - UI can show warnings before applying
-/// - Programmer can handle conflicts proactively
-/// - Better UX (inform user about auto-adjustments)
 
 /// Main audio player service implementing the AudioPlayerProtocol
 public actor AudioPlayerService: AudioPlayerProtocol {
@@ -85,10 +66,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 fadeCurve: configuration.fadeCurve,
                 repeatMode: configuration.repeatMode,
                 repeatCount: configuration.repeatCount,
-                singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-                singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
                 volume: configuration.volume,
-                stopFadeDuration: configuration.stopFadeDuration
+                mixWithOthers: configuration.mixWithOthers
             )
         )
         // remoteCommandManager will be created in setup() on MainActor
@@ -365,9 +344,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     /// Stop playback with default fade duration from configuration
-    /// - Note: Uses stopFadeDuration from AudioConfiguration (default: 3.0 seconds)
+    /// - Note: Default fade duration is 3.0 seconds
     public func stopWithDefaultFade() async {
-        await stop(fadeDuration: configuration.stopFadeDuration)
+        await stop(fadeDuration: 3.0)
     }
     
     /// Stop playback immediately without any fade
@@ -377,7 +356,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func finish(fadeDuration: TimeInterval?) async throws {
-        let duration = fadeDuration ?? configuration.stopFadeDuration
+        let duration = fadeDuration ?? 3.0
         
         let success = await stateMachine.enterFadingOut(duration: duration)
         Logger.state.assertTransition(
@@ -515,10 +494,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             fadeCurve: configuration.fadeCurve,
             repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
-            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
             volume: volumeInt,
-            stopFadeDuration: configuration.stopFadeDuration,
             mixWithOthers: configuration.mixWithOthers
         )
     }
@@ -539,8 +515,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// - Parameter mode: The repeat mode to set
     /// - Note: Changes apply immediately without restarting playback
-    /// - Note: For `.singleTrack` mode, use `setSingleTrackFadeDurations()` to configure fade behavior
-    /// - SeeAlso: `getRepeatMode()`, `setSingleTrackFadeDurations(fadeIn:fadeOut:)`
     public func setRepeatMode(_ mode: RepeatMode) async {
         // Update configuration with new repeat mode
         configuration = PlayerConfiguration(
@@ -548,11 +522,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             fadeCurve: configuration.fadeCurve,
             repeatMode: mode,
             repeatCount: configuration.repeatCount,
-            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
             volume: configuration.volume,
-            stopFadeDuration: configuration.stopFadeDuration,
-            mixWithOthers: configuration.mixWithOthers
+                mixWithOthers: configuration.mixWithOthers
         )
         
         // Sync to PlaylistManager
@@ -567,71 +538,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         return configuration.repeatMode
     }
     
-    /// Sets fade durations for single track repeat mode
-    ///
-    /// Configures fade in/out durations used when `repeatMode = .singleTrack`.
-    /// These values are validated statically and adapted dynamically per track at runtime.
-    ///
-    /// - Parameters:
-    ///   - fadeIn: Fade in duration at track start (0.5-10.0 seconds)
-    ///   - fadeOut: Fade out duration at track end (0.5-10.0 seconds)
-    /// - Throws: ConfigurationError if durations are outside valid range
-    /// - Note: **Static Validation**: Range checked against 0.5-10.0 seconds
-    /// - Note: **Dynamic Validation**: Auto-adapted per track at loop time (max 40% each, 80% total)
-    /// - Note: **Crossfade Overlap**: For `.playlist` mode, fadeOut may be auto-adjusted to prevent overlap
-    /// - Warning: Total fade duration \u003E 15s may not work well for short tracks (\u003c20s)
-    /// - Warning: Changes apply to **next loop iteration** (current loop unaffected)
-    /// - TODO: v3.2 - Add ValidationFeedback system to return warnings/errors
-    public func setSingleTrackFadeDurations(
-        fadeIn: TimeInterval,
-        fadeOut: TimeInterval
-    ) async throws {
-        // ✅ Level 1: Static Validation (Range Check)
-        guard fadeIn >= 0.5 && fadeIn <= 10.0 else {
-            throw ConfigurationError.invalidSingleTrackFadeInDuration(fadeIn)
-        }
-        
-        guard fadeOut >= 0.5 && fadeOut <= 10.0 else {
-            throw ConfigurationError.invalidSingleTrackFadeOutDuration(fadeOut)
-        }
-        
-        // ⚠️ Level 2: Warning for large total (may not fit short tracks)
-        let totalFade = fadeIn + fadeOut
-        if totalFade > 15.0 {
-            // TODO v3.2: Return ValidationWarning instead of logger
-            Self.logger.warning("Total fade duration (\(totalFade)s) may not work for short tracks (<20s)")
-        }
-        
-        // ⚠️ Level 3: Crossfade Overlap Check (only for .playlist mode)
-        // Note: .singleTrack mode has no crossfade overlap (loops same track)
-        if configuration.repeatMode == .playlist {
-            let crossfadeDuration = configuration.crossfadeDuration
-            if fadeOut > crossfadeDuration {
-                // TODO v3.2: Return ValidationWarning with conflicting values
-                Self.logger.warning("fadeOut (\(fadeOut)s) exceeds crossfade (\(crossfadeDuration)s) in .playlist mode")
-                Self.logger.info("fadeOut will be auto-adjusted at runtime to prevent overlap")
-            }
-        }
-        
-        // ✅ Update configuration (values stored, dynamic adaptation happens at loop time)
-        configuration = PlayerConfiguration(
-            crossfadeDuration: configuration.crossfadeDuration,
-            fadeCurve: configuration.fadeCurve,
-            repeatMode: configuration.repeatMode,
-            repeatCount: configuration.repeatCount,
-            singleTrackFadeInDuration: fadeIn,
-            singleTrackFadeOutDuration: fadeOut,
-            volume: configuration.volume,
-            stopFadeDuration: configuration.stopFadeDuration,
-            mixWithOthers: configuration.mixWithOthers
-        )
-        
-        // ✅ Sync to PlaylistManager
-        await syncConfigurationToPlaylistManager()
-        
-        Self.logger.info("Single track fade durations set: fadeIn=\(fadeIn)s, fadeOut=\(fadeOut)s")
-        Self.logger.debug("Changes apply to NEXT loop iteration (current loop unaffected)")
-    }
     
     /// Reset player to initial state with default configuration
     public func reset() async {
@@ -1090,8 +996,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Uses same adaptation logic as loopCurrentTrackWithFade() to ensure trigger point matches actual crossfade duration
     private func calculateAdaptedCrossfadeDuration(trackDuration: TimeInterval) -> TimeInterval {
         // Get configured fade durations
-        let configuredFadeIn = configuration.singleTrackFadeInDuration
-        let configuredFadeOut = configuration.singleTrackFadeOutDuration
+        let configuredFadeIn = configuration.fadeInDuration
+        let configuredFadeOut = configuration.crossfadeDuration * 0.7
         
         // Adaptive scaling to track duration (max 40% each = 80% total)
         let maxFadeIn = min(configuredFadeIn, trackDuration * 0.4)
@@ -1164,7 +1070,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         switch configuration.repeatMode {
         case .off:
             // Finish playback with fade out
-            try? await finish(fadeDuration: configuration.stopFadeDuration)
+            try? await finish(fadeDuration: 3.0)
             isLoopCrossfadeInProgress = false
             
         case .singleTrack:
@@ -1181,7 +1087,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     /// Loop current track with fade out at end and fade in at start
     /// - Note: Used only when repeatMode = .singleTrack
-    /// - Note: Respects singleTrackFadeInDuration and singleTrackFadeOutDuration
+    /// - Note: Uses computed fadeInDuration (30% of crossfade) and fadeOutDuration (70% of crossfade)
     /// - Note: Dynamically adapts fade durations to track duration (max 40% each, 80% total)
     private func loopCurrentTrackWithFade() async {
         // 1. Validation
@@ -1206,8 +1112,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let crossfadeDuration = calculateAdaptedCrossfadeDuration(trackDuration: trackDuration)
         
         // 🔍 DEBUG: Log configuration
-        let configuredFadeIn = configuration.singleTrackFadeInDuration
-        let configuredFadeOut = configuration.singleTrackFadeOutDuration
+        let configuredFadeIn = configuration.fadeInDuration
+        let configuredFadeOut = configuration.crossfadeDuration * 0.7
         Self.logger.info("[LOOP_CROSSFADE] Starting loop crossfade: track=\(trackDuration)s, configured=(\(configuredFadeIn)s,\(configuredFadeOut)s), adapted=\(crossfadeDuration)s")
         Self.logger.info("[LOOP_CROSSFADE] Repeat count: \(currentRepeatCount + 1)")
         
@@ -1287,7 +1193,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 1. Get next track from playlist manager
         guard let nextURL = await playlistManager.getNextTrack() else {
             // No more tracks - finish playback
-            try? await finish(fadeDuration: configuration.stopFadeDuration)
+            try? await finish(fadeDuration: 3.0)
             return
         }
         
@@ -1345,10 +1251,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             fadeCurve: configuration.fadeCurve,
             repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
-            singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
-            singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
             volume: configuration.volume,
-            stopFadeDuration: configuration.stopFadeDuration
+                mixWithOthers: configuration.mixWithOthers
         )
         await playlistManager.updateConfiguration(playerConfig)
     }
