@@ -736,14 +736,62 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await updateNowPlayingInfo()
     }
     
-    /// Replace entire playlist with smooth crossfade to first track
-    /// - Parameters:
-    ///   - tracks: New playlist track URLs
-    ///   - crossfadeDuration: Duration of crossfade (default: 5.0s, range: 1.0-30.0s)
-    /// - Throws: AudioPlayerError if playlist is empty or swap fails
-    /// - Note: Preserves playback state (playing → crossfade, paused → silent switch)
+
+    // MARK: - Playlist Management
+    
+    /// Load initial playlist before playback
+    ///
+    /// Loads tracks into playlist manager without starting playback.
+    /// Use this method to prepare the player before calling `startPlaying()`.
+    ///
+    /// - Parameter tracks: Array of track URLs (must not be empty)
+    /// - Throws:
+    ///   - `AudioPlayerError.emptyPlaylist` if tracks array is empty
+    ///
+    /// - Note: This is a lightweight operation - no audio loading or playback
+    /// - Note: For replacing playlist during playback, use `replacePlaylist(_:)`
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Load meditation session
+    /// try await player.loadPlaylist([intro, meditation, outro])
+    ///
+    /// // Start when user is ready
+    /// try await player.startPlaying(fadeDuration: 2.0)
+    /// ```
+    public func loadPlaylist(_ tracks: [URL]) async throws {
+        guard !tracks.isEmpty else {
+            throw AudioPlayerError.emptyPlaylist
+        }
+        
+        // Simple load - no audio operations
+        await playlistManager.load(tracks: tracks)
+        
+        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
+    }
+
+    /// Replace current playlist with crossfade
+    ///
+    /// Replaces the current playlist with new tracks. If playing, performs
+    /// smooth crossfade to first track of new playlist. If paused/stopped,
+    /// performs silent switch.
+    ///
+    /// - Parameter tracks: New playlist tracks (must not be empty)
+    /// - Throws:
+    ///   - `AudioPlayerError.invalidConfiguration` if tracks array is empty
+    ///   - Other errors from audio engine
+    ///
+    /// - Note: Uses `configuration.crossfadeDuration` for crossfade
+    /// - Note: For initial playlist load before playback, use `loadPlaylist(_:)`
     /// - Note: Resets playlist index to 0 and repeat count to 0
     /// - Note: If crossfade in progress, performs rollback and retries after 1.5s delay
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Switch to different session during playback
+    /// try await player.replacePlaylist(advancedSession)
+    /// // → Smooth crossfade to new session
+    /// ```
     public func replacePlaylist(_ tracks: [URL]) async throws {
         // 1. Validation
         guard !tracks.isEmpty else {
