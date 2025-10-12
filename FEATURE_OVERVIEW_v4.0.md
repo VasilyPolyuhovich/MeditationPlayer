@@ -506,8 +506,9 @@ func moveTrack(from: Int, to: Int) async throws
 
 **Replace Playlist:**
 ```swift
-func replacePlaylist(_ tracks: [URL], crossfadeDuration: TimeInterval = 5.0) async throws
+func replacePlaylist(_ tracks: [URL]) async throws
 // Замінює весь список з crossfade до першого треку
+// Використовує configuration.crossfadeDuration (не передається параметром!)
 ```
 
 ---

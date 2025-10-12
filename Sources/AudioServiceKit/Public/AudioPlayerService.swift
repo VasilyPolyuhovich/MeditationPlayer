@@ -720,10 +720,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Preserves playback state (playing → crossfade, paused → silent switch)
     /// - Note: Resets playlist index to 0 and repeat count to 0
     /// - Note: If crossfade in progress, performs rollback and retries after 1.5s delay
-    public func swapPlaylist(
-        tracks: [URL],
-        crossfadeDuration: TimeInterval = 5.0
-    ) async throws {
+    public func replacePlaylist(_ tracks: [URL]) async throws {
         // 1. Validation
         guard !tracks.isEmpty else {
             throw AudioPlayerError.invalidConfiguration(
@@ -731,8 +728,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // Validate and clamp crossfade duration
-        let validDuration = max(1.0, min(30.0, crossfadeDuration))
+        // Use crossfade duration from configuration
+        let validDuration = configuration.crossfadeDuration
         
         // 2. Rollback if crossfade in progress
         if isTrackReplacementInProgress || isLoopCrossfadeInProgress {
@@ -814,7 +811,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 10. Update UI
         await updateNowPlayingInfo()
         
-        Self.logger.info("Playlist swapped successfully (\(tracks.count) tracks)")
+        Self.logger.info("Playlist replaced successfully (\(tracks.count) tracks)")
     }
     
     /// Get current playlist track URLs
