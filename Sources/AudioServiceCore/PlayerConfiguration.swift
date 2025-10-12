@@ -18,15 +18,18 @@ public struct PlayerConfiguration: Sendable {
     
     // MARK: - Crossfade Settings
     
-    /// Duration of crossfade transitions between tracks (1.0-30.0 seconds)
-    /// This value is used for:
-    /// - Auto-advance: Full crossfade at track end
-    /// - Manual switch: Adaptive based on remaining time
-    /// - Track start: fadeIn = crossfadeDuration * 0.3
-    public var crossfadeDuration: TimeInterval
+    /// Crossfade duration between tracks (Spotify-style)
+    ///
+    /// Both tracks fade simultaneously over the full duration:
+    /// - Outgoing track: fade OUT from 1.0 to 0.0 over `crossfadeDuration`
+    /// - Incoming track: fade IN from 0.0 to 1.0 over `crossfadeDuration`
+    /// - Total overlap: equals `crossfadeDuration`
+    ///
+    /// Valid range: 1.0-30.0 seconds
+    public let crossfadeDuration: TimeInterval
     
     /// Fade curve algorithm
-    public var fadeCurve: FadeCurve
+    public let fadeCurve: FadeCurve
     
     // MARK: - Playback Mode
     
@@ -34,7 +37,7 @@ public struct PlayerConfiguration: Sendable {
     /// - .off: Play once, no repeat
     /// - .singleTrack: Loop current track with fade in/out
     /// - .playlist: Loop entire playlist
-    public var repeatMode: RepeatMode
+    public let repeatMode: RepeatMode
     
     /// Enable looping (true = cycle playlist, false = play once and stop)
     /// @deprecated Use repeatMode instead
@@ -48,16 +51,16 @@ public struct PlayerConfiguration: Sendable {
     /// - nil: Infinite repeats (loop forever)
     /// - 0: Play once (same as repeatMode = .off)
     /// - N: Loop N times then stop
-    public var repeatCount: Int?
+    public let repeatCount: Int?
     
     // DELETED (v4.0): singleTrackFadeInDuration and singleTrackFadeOutDuration
     // Now using crossfadeDuration for all track transitions
     
     // MARK: - Audio Settings
     
-    /// Volume level (0-100, where 100 is maximum)
-    /// Internally converted to Float 0.0-1.0
-    public var volume: Int
+    /// Volume level (0.0 = silent, 1.0 = maximum)
+    /// Standard AVFoundation audio range
+    public let volume: Float
     
     // MARK: - Stop Settings
     
@@ -69,19 +72,11 @@ public struct PlayerConfiguration: Sendable {
     /// Mix with other audio apps (default: false - interrupts other audio)
     /// When true, allows playing alongside other audio sources (music, podcasts, etc.)
     /// When false, interrupts other audio sources (exclusive playback)
-    public var mixWithOthers: Bool
+    public let mixWithOthers: Bool
     
     // MARK: - Computed Properties
     
-    /// Fade in duration at track start (30% of crossfade)
-    public var fadeInDuration: TimeInterval {
-        crossfadeDuration * 0.3
-    }
     
-    /// Volume as Float (0.0-1.0) for internal use
-    public var volumeFloat: Float {  // Made public for AudioPlayerService extension
-        Float(max(0, min(100, volume))) / 100.0
-    }
     
     // MARK: - Initialization
     
@@ -90,14 +85,14 @@ public struct PlayerConfiguration: Sendable {
         fadeCurve: FadeCurve = .equalPower,
         repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
-        volume: Int = 100,
+        volume: Float = 1.0,
         mixWithOthers: Bool = false
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.repeatMode = repeatMode
         self.repeatCount = repeatCount
-        self.volume = max(0, min(100, volume))
+        self.volume = max(0.0, min(1.0, volume))
         self.mixWithOthers = mixWithOthers
     }
     
@@ -117,7 +112,7 @@ public struct PlayerConfiguration: Sendable {
         }
         
         // Volume range check
-        if volume < 0 || volume > 100 {
+        if volume < 0.0 || volume > 1.0 {
             throw ConfigurationError.invalidVolume(volume)
         }
         
@@ -134,7 +129,7 @@ public struct PlayerConfiguration: Sendable {
 
 public enum ConfigurationError: Error, LocalizedError {
     case invalidCrossfadeDuration(TimeInterval)
-    case invalidVolume(Int)
+    case invalidVolume(Float)
     case invalidRepeatCount(Int)
     // DELETED (v4.0): invalidStopFadeDuration, invalidSingleTrackFadeInDuration, invalidSingleTrackFadeOutDuration
     
@@ -143,7 +138,7 @@ public enum ConfigurationError: Error, LocalizedError {
         case .invalidCrossfadeDuration(let duration):
             return "Crossfade duration must be between 1.0 and 30.0 seconds (got \(duration))"
         case .invalidVolume(let volume):
-            return "Volume must be between 0 and 100 (got \(volume))"
+            return "Volume must be between 0.0 and 1.0 (got \(volume))"
         case .invalidRepeatCount(let count):
             return "Repeat count must be >= 0 or nil for infinite (got \(count))"
         }
