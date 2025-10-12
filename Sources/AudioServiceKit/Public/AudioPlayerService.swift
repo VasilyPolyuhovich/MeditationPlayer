@@ -51,6 +51,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Playlist manager (NEW)
     internal var playlistManager: PlaylistManager  // Allow internal access for playlist API
+
+    /// Pending fade-in duration for next startPlaying call
+    /// Allows per-call fade-in override without changing configuration
+    private var pendingFadeInDuration: TimeInterval?
     
     // MARK: - Initialization
     
@@ -138,10 +142,30 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - AudioPlayerProtocol Implementation
     
-    public func startPlaying(url: URL, configuration: PlayerConfiguration) async throws {
+    /// Start playback with optional fade-in
+    ///
+    /// Plays the current track from playlist with configurable fade-in.
+    /// Uses track from `playlistManager.getCurrentTrack()`.
+    ///
+    /// - Parameter fadeDuration: Fade-in duration in seconds (0.0 = no fade, instant start)
+    /// - Throws:
+    ///   - `AudioPlayerError.noTrackLoaded` if playlist is empty
+    ///   - `AudioPlayerError.invalidState` if cannot transition to playing
+    ///   - `AudioPlayerError.fileNotFound` if track file doesn't exist
+    ///
+    /// - Note: Configuration must be set via initializer or `updateConfiguration()`
+    /// - Note: fadeDuration is independent from crossfade between tracks
+    public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
+        // Get current track from playlist
+        guard let url = await playlistManager.getCurrentTrack() else {
+            throw AudioPlayerError.noTrackLoaded
+        }
+        
+        // Store fade-in duration for startEngine()
+        pendingFadeInDuration = fadeDuration > 0 ? fadeDuration : nil
+        
         // Validate configuration
         try configuration.validate()
-        self.configuration = configuration
         
         // Sync configuration with playlist manager
         await syncConfigurationToPlaylistManager()
@@ -1512,11 +1536,19 @@ extension AudioPlayerService: AudioStateMachineContext {
     
     func startEngine() async throws {
         try await audioEngine.start()
+        
+        // Use pending fade-in if set, otherwise no fade (instant start)
+        let fadeInDuration = pendingFadeInDuration ?? 0.0
+        let shouldFadeIn = fadeInDuration > 0
+        
         await audioEngine.scheduleFile(
-            fadeIn: true,
-            fadeInDuration: configuration.fadeInDuration,
+            fadeIn: shouldFadeIn,
+            fadeInDuration: fadeInDuration,
             fadeCurve: configuration.fadeCurve
         )
+        
+        // Clear pending fade after use
+        pendingFadeInDuration = nil
     }
     
     func stopEngine() async {
