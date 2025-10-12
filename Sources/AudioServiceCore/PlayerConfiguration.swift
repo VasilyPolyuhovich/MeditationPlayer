@@ -39,13 +39,6 @@ public struct PlayerConfiguration: Sendable {
     /// - .playlist: Loop entire playlist
     public let repeatMode: RepeatMode
     
-    /// Enable looping (true = cycle playlist, false = play once and stop)
-    /// @deprecated Use repeatMode instead
-    @available(*, deprecated, message: "Use repeatMode instead. Set to .playlist for looping, .off for no repeat")
-    public var enableLooping: Bool {
-        get { repeatMode == .playlist }
-        set { repeatMode = newValue ? .playlist : .off }
-    }
     
     /// Number of times to repeat playlist
     /// - nil: Infinite repeats (loop forever)

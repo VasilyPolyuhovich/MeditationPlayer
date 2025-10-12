@@ -14,12 +14,20 @@ public protocol AudioPlayerProtocol: Actor {
     /// Current playback position
     var playbackPosition: PlaybackPosition? { get }
     
-    /// Start playing audio from URL
-    /// - Parameters:
-    ///   - url: URL of local audio file
-    ///   - configuration: Playback configuration
-    /// - Throws: AudioPlayerError if playback cannot start
-    func startPlaying(url: URL, configuration: PlayerConfiguration) async throws
+    /// Start playback with optional fade-in
+    ///
+    /// Plays the current track from playlist with configurable fade-in.
+    /// Uses track from playlist manager's current track.
+    ///
+    /// - Parameter fadeDuration: Fade-in duration in seconds (0.0 = no fade, instant start)
+    /// - Throws:
+    ///   - `AudioPlayerError.noTrackLoaded` if playlist is empty
+    ///   - `AudioPlayerError.invalidState` if cannot transition to playing
+    ///   - `AudioPlayerError.fileNotFound` if track file doesn't exist
+    ///
+    /// - Note: Configuration must be set via initializer or `updateConfiguration()`
+    /// - Note: fadeDuration is independent from crossfade between tracks
+    func startPlaying(fadeDuration: TimeInterval) async throws
     
     /// Pause playback
     /// - Throws: AudioPlayerError if cannot pause in current state
