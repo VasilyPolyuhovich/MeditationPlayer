@@ -19,6 +19,7 @@ current_project()
 git_status()
 
 # 4. Read key docs
+read_file({ path: "FEATURE_OVERVIEW_v4.0.md" })  # ⭐ COMPLETE REFERENCE
 read_file({ path: "HANDOFF_v4.0_SESSION.md" })
 read_file({ path: "Temp/KEY_INSIGHTS_v4.0.md" })
 ```
@@ -35,17 +36,25 @@ read_file({ path: "Temp/KEY_INSIGHTS_v4.0.md" })
 3. Add `getVolume()` method
 4. Remove deprecated methods
 
-### Critical Context:
-- **Meditation focus** - seamless transitions mandatory
-- **NO shuffle** - structured sessions only
-- **seekWithFade** - prevents click (keep it!)
-- **Volume** - dual-mixer architecture (global + crossfade)
+### ⭐ NEW: Verify Overlay Delay Feature
+**Critical addition:** `delayBetweenLoops` in OverlayConfiguration
+
+**What it does:**
+- Natural pause between overlay repeats
+- wave → silence → wave (природність)
+- Prevents audio overwhelm
+
+**Check:**
+- [ ] OverlayConfiguration has `delayBetweenLoops` field
+- [ ] OverlayPlayerActor implements delay timer
+- [ ] Works with `.infinite` and `.count(N)` modes
 
 ---
 
 ## 📚 Key Files
 
 **Must Read:**
+- `FEATURE_OVERVIEW_v4.0.md` - ⭐ **COMPLETE** функціонал (9 категорій)
 - `HANDOFF_v4.0_SESSION.md` - Full context with decisions
 - `Temp/KEY_INSIGHTS_v4.0.md` - Critical insights
 - `Temp/TODO_v4.0.md` - Phase checklist
@@ -53,7 +62,9 @@ read_file({ path: "Temp/KEY_INSIGHTS_v4.0.md" })
 **Code:**
 - `Sources/AudioServiceKit/Public/AudioPlayerService.swift`
 - `Sources/AudioServiceKit/Internal/AudioEngineActor.swift`
+- `Sources/AudioServiceKit/Internal/OverlayPlayerActor.swift` ← check delay
 - `Sources/AudioServiceCore/PlayerConfiguration.swift`
+- `Sources/AudioServiceCore/OverlayConfiguration.swift` ← check field
 
 ---
 
@@ -89,6 +100,15 @@ mixerB.volume = crossfadeVolB * globalVolume
 
 **If missing** → add wrapper methods
 
+### 3. Overlay Delay (verify implementation)
+
+**Check OverlayConfiguration:**
+```swift
+struct OverlayConfiguration {
+    let delayBetweenLoops: TimeInterval  // Should exist!
+}
+```
+
 ---
 
 ## 💡 Remember
@@ -98,26 +118,49 @@ mixerB.volume = crossfadeVolB * globalVolume
 2. Long crossfades OK (5-15s normal)
 3. Seamless loops critical
 4. Overlay = killer feature
-5. NO shuffle needed
+5. **Overlay delay** = natural pauses ⭐
+6. NO shuffle needed
 
 **Technical:**
 - Dual-player for seamless
 - Actor isolation (Swift 6)
 - Volume coordination needed
 - Crossfade auto-adapt (Phase 4)
+- **Overlay delay timer** (verify!)
 
 ---
 
 ## 📋 Next Steps
 
-1. **Verify PlaylistManager** - check queue methods
-2. **Choose Volume option** - A/B/C
-3. **Implement Phase 3** - update API
-4. **Test** - seamless transitions, no clicks
-5. **Continue** - Phases 4-8
+1. **Verify Overlay Delay** ← START HERE
+   - Check OverlayConfiguration.delayBetweenLoops
+   - Check OverlayPlayerActor implementation
+   
+2. **Verify PlaylistManager** - check queue methods
+
+3. **Choose Volume option** - A/B/C
+
+4. **Implement Phase 3** - update API
+
+5. **Test** - seamless transitions, no clicks
+
+6. **Continue** - Phases 4-8
 
 **Timeline:** 2-3h this phase, 12-18h total
 
 ---
 
-**Start with:** `load_session()` → Review handoff → Begin Phase 3 🚀
+## ✅ Feature Overview Complete!
+
+**FEATURE_OVERVIEW_v4.0.md** містить:
+- 9 категорій features
+- Overlay with delayBetweenLoops ⭐
+- Complete API reference
+- Use cases для meditation
+- Same page checklist
+
+**User каже:** "майже ідеальне розуміння!" 🎯
+
+---
+
+**Start with:** `load_session()` → Verify overlay delay → Begin Phase 3 🚀
