@@ -821,6 +821,37 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         return await playlistManager.getPlaylist()
     }
     
+    // MARK: - Playlist Navigation
+    
+    /// Skip to next track in playlist
+    /// - Throws: AudioPlayerError.noNextTrack if no next track available
+    /// - Note: Uses configuration.crossfadeDuration for crossfade
+    /// - Note: If crossfade in progress, performs rollback and retries
+    public func skipToNext() async throws {
+        guard let nextURL = await playlistManager.skipToNext() else {
+            throw AudioPlayerError.noNextTrack
+        }
+        try await replaceTrack(
+            url: nextURL,
+            crossfadeDuration: configuration.crossfadeDuration
+        )
+    }
+    
+    /// Skip to previous track in playlist
+    /// - Throws: AudioPlayerError.noPreviousTrack if no previous track available
+    /// - Note: Uses configuration.crossfadeDuration for crossfade
+    /// - Note: If crossfade in progress, performs rollback and retries
+    public func skipToPrevious() async throws {
+        guard let prevURL = await playlistManager.skipToPrevious() else {
+            throw AudioPlayerError.noPreviousTrack
+        }
+        try await replaceTrack(
+            url: prevURL,
+            crossfadeDuration: configuration.crossfadeDuration
+        )
+    }
+
+    
     // MARK: - Observers
     
     public func addObserver(_ observer: AudioPlayerObserver) {
