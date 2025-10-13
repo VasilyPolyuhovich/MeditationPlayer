@@ -149,7 +149,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// - Parameter fadeDuration: Fade-in duration in seconds (0.0 = no fade, instant start)
     /// - Throws:
-    ///   - `AudioPlayerError.noTrackLoaded` if playlist is empty
+    ///   - `AudioPlayerError.emptyPlaylist` if playlist is empty
     ///   - `AudioPlayerError.invalidState` if cannot transition to playing
     ///   - `AudioPlayerError.fileNotFound` if track file doesn't exist
     ///
@@ -158,7 +158,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
         // Get current track from playlist
         guard let url = await playlistManager.getCurrentTrack() else {
-            throw AudioPlayerError.noTrackLoaded
+            throw AudioPlayerError.emptyPlaylist
         }
         
         // Store fade-in duration for startEngine()
@@ -510,15 +510,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Update audio engine
         await audioEngine.setVolume(clampedVolume)
         
-        // Convert Float (0.0-1.0) back to Int (0-100) for configuration
-        let volumeInt = Int(clampedVolume * 100)
-        
+        // Update configuration with new volume
         configuration = PlayerConfiguration(
             crossfadeDuration: configuration.crossfadeDuration,
             fadeCurve: configuration.fadeCurve,
             repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
-            volume: volumeInt,
+            volume: clampedVolume,
             mixWithOthers: configuration.mixWithOthers
         )
     }

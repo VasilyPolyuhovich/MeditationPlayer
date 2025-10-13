@@ -21,7 +21,7 @@ public protocol AudioPlayerProtocol: Actor {
     ///
     /// - Parameter fadeDuration: Fade-in duration in seconds (0.0 = no fade, instant start)
     /// - Throws:
-    ///   - `AudioPlayerError.noTrackLoaded` if playlist is empty
+    ///   - `AudioPlayerError.emptyPlaylist` if playlist is empty
     ///   - `AudioPlayerError.invalidState` if cannot transition to playing
     ///   - `AudioPlayerError.fileNotFound` if track file doesn't exist
     ///
