@@ -1,4 +1,4 @@
-# 🚀 Start Next Chat - ProsperPlayer v4.0 Phase 3
+# 🚀 Start Next Chat - ProsperPlayer v4.0
 
 **Project:** `/Users/vasily/Projects/Helpful/ProsperPlayer`  
 **Branch:** `v4-dev`  
@@ -15,53 +15,49 @@ load_session()
 # 2. Verify project
 current_project()
 
-# 3. Check git
+# 3. Check git status
 git_status()
 
-# 4. Read MAIN reference doc
-read_file({ path: "FEATURE_OVERVIEW_v4.0.md" })  # ⭐ COMPLETE SPEC
+# 4. Read current phase status
+read_file({ path: "V4_FINAL_ACTION_PLAN.md" })  # ⭐ CURRENT STATUS
 
 # 5. Read additional context (if needed)
-read_file({ path: "HANDOFF_v4.0_SESSION.md" })
-read_file({ path: "LEGACY/v4.0_docs/KEY_INSIGHTS_v4.0.md" })
-read_file({ path: "LEGACY/v4.0_docs/TODO_v4.0.md" })
+read_file({ path: "V4_MASTER_PLAN.md" })       # Concepts & philosophy
+read_file({ path: "FEATURE_OVERVIEW_v4.0.md" }) # Complete spec
+read_file({ path: "HANDOFF_v4.0_SESSION.md" })  # Decisions & architecture
 ```
 
 ---
 
-## 🎯 What We're Doing
+## 📊 Current Status
 
-**Phase 3: Update API Methods (2-3h)**
+**Phase Status:** See [V4_FINAL_ACTION_PLAN.md](V4_FINAL_ACTION_PLAN.md) for up-to-date progress
 
-### Changes:
-1. `startPlaying()` - remove URL param (from PlaylistManager)
-2. `stop()` - change to non-optional fade param
-3. Add `getVolume()` method
-4. Remove deprecated methods
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase 1-6 | Core API implementation | ✅ DONE |
+| Phase 7 | Cleanup demo/tests | 📋 TODO |
+| Phase 8 | Final documentation | 📋 TODO |
 
-### ⭐ Verify Features:
-
-**1. Overlay Delay Between Loops**
-- Check: `OverlayConfiguration.delayBetweenLoops` exists
-- Check: `OverlayPlayerActor` implements delay timer
-- Natural pauses: wave → silence → wave
-
-**2. Queue Management**
-- Check: `PlaylistManager.playNext(url:)` exists
-- Check: `PlaylistManager.getUpcomingQueue()` exists
+**Last Updates:**
+- ✅ Phase 6: `loadPlaylist()` API added
+- ✅ Docs cleanup: archived working docs to LEGACY/
 
 ---
 
 ## 📚 Documentation Structure
 
 ### ⭐ PRIMARY (корінь):
-- **`FEATURE_OVERVIEW_v4.0.md`** - Complete functional spec (9 categories)
-- `HANDOFF_v4.0_SESSION.md` - Session handoff
-- `QUICK_START_v4.0.md` - Quick start
-- `START_NEXT_CHAT.md` - This file
-- `.claude_instructions` - Project instructions
+
+1. **[V4_FINAL_ACTION_PLAN.md](V4_FINAL_ACTION_PLAN.md)** - Current phase status & execution plan
+2. **[V4_MASTER_PLAN.md](V4_MASTER_PLAN.md)** - Concepts & philosophy ("WHY v4.0 works this way")
+3. **[FEATURE_OVERVIEW_v4.0.md](FEATURE_OVERVIEW_v4.0.md)** - Complete functional spec
+4. **[HANDOFF_v4.0_SESSION.md](HANDOFF_v4.0_SESSION.md)** - Session context & decisions
+5. **[START_NEXT_CHAT.md](START_NEXT_CHAT.md)** - This file (quick start)
 
 ### 📦 ARCHIVED (LEGACY/):
+
+- `v4.0_working_docs/` - Working analysis docs (archived 2025-10-13)
 - `v4.0_docs/` - Important v4.0 docs to keep
   - `KEY_INSIGHTS_v4.0.md` - Critical user insights
   - `SESSION_v4.0_ANALYSIS.md` - Full v4.0 analysis
@@ -71,87 +67,109 @@ read_file({ path: "LEGACY/v4.0_docs/TODO_v4.0.md" })
 
 ---
 
-## 🚨 Critical Decisions Needed
+## 🎯 v4.0 API Overview
 
-### 1. Volume Architecture (choose one):
-
-**Option A: mainMixer only** ✅ RECOMMENDED
+### Configuration (Immutable):
 ```swift
-mainMixerNode.volume = globalVolume
-mixerA.volume = crossfadeVolA  // independent
-mixerB.volume = crossfadeVolB  // independent
+let config = PlayerConfiguration(
+    crossfadeDuration: 10.0,  // Spotify-style (100%+100%)
+    fadeCurve: .equalPower,
+    repeatMode: .playlist,    // NO enableLooping!
+    volume: 0.8,              // Float 0.0-1.0
+    mixWithOthers: false
+)
 ```
 
-**Option B: multiply each mixer**
+### Playlist Loading:
 ```swift
-mixerA.volume = crossfadeVolA * globalVolume
-mixerB.volume = crossfadeVolB * globalVolume
+// 1. Load initial playlist
+try await player.loadPlaylist(tracks)
+
+// 2. Start playback
+try await player.startPlaying(fadeDuration: 2.0)
+
+// 3. Replace if needed (with crossfade)
+try await player.replacePlaylist(newTracks)
 ```
 
-**Option C: @Published wrapper**
+### Playback Control:
 ```swift
-@MainActor class ViewModel {
-    @Published var volume: Float = 1.0
-}
+await player.skipToNext()           // config.crossfadeDuration
+await player.skipToPrevious()       // config.crossfadeDuration  
+await player.stop(fadeDuration: 3.0)
 ```
 
 ---
 
-## 💡 Remember
+## 🚨 Critical Architectural Details
 
-**Meditation App Principles:**
+### Crossfade ≠ Fade
+📖 See [V4_MASTER_PLAN.md](V4_MASTER_PLAN.md) for detailed explanation
+
+**Quick Summary:**
+- **CROSSFADE** = track-to-track (dual-player, 5-15s)
+- **FADE** = start/stop (single-player, 1-5s)
+
+### Volume Architecture
+📖 See [HANDOFF_v4.0_SESSION.md](HANDOFF_v4.0_SESSION.md) - "Volume Architecture" section for detailed options (A/B/C)
+
+### Queue Management
+📖 See [HANDOFF_v4.0_SESSION.md](HANDOFF_v4.0_SESSION.md) - "PlaylistManager Аналіз" section
+
+---
+
+## 💡 Meditation App Principles
+
+**Remember:**
 1. Zero glitches (any click = meditation broken)
-2. Long crossfades OK (5-15s normal)
+2. Long crossfades OK (5-15s normal for meditation)
 3. Seamless loops critical
 4. Overlay = killer feature
-5. **Overlay delay** = natural pauses ⭐
-6. NO shuffle needed
+5. NO shuffle needed (structured meditation flow)
 
 **Technical:**
-- Dual-player for seamless
-- Actor isolation (Swift 6)
-- Volume coordination needed
-- Crossfade auto-adapt (Phase 4)
-- **Overlay delay timer** (verify!)
+- Dual-player for seamless crossfades
+- Actor isolation (Swift 6 safety)
+- Immutable configuration (thread-safe)
+- Crossfade auto-adapt for short tracks
 
 ---
 
 ## 📋 Next Steps
 
-1. **Verify Overlay Delay** ← START HERE
-   - Check OverlayConfiguration.delayBetweenLoops
-   - Check OverlayPlayerActor implementation
-   
-2. **Verify PlaylistManager** - check queue methods
+### If Continuing from Phase 6:
 
-3. **Choose Volume option** - A/B/C
+1. **Phase 7: Cleanup demo/tests** (1-2h)
+   - Update demo app (enableLooping → repeatMode, volume Int → Float)
+   - Fix broken tests
+   - Update to use v4.0 API
 
-4. **Implement Phase 3** - update API
+2. **Phase 8: Final documentation** (1-2h)
+   - Update all docs with Phase 6 changes
+   - Create migration guide v3 → v4
+   - Verify API reference is complete
 
-5. **Test** - seamless transitions, no clicks
+### If Starting New Feature:
 
-6. **Continue** - Phases 4-8
-
-**Timeline:** 2-3h this phase, 12-18h total
-
----
-
-## ✅ Cleanup Complete!
-
-**Archived:**
-- LEGACY/Temp/ - 62 old session docs
-- LEGACY/.claude/ - 100+ old files
-- LEGACY/v4.0_docs/ - 3 important docs saved
-
-**Kept in root:**
-- FEATURE_OVERVIEW_v4.0.md ⭐ (main reference)
-- HANDOFF_v4.0_SESSION.md
-- QUICK_START_v4.0.md
-- START_NEXT_CHAT.md
-- .claude_instructions
-
-**Clean project structure!** 🎯
+1. Read [V4_FINAL_ACTION_PLAN.md](V4_FINAL_ACTION_PLAN.md) for current status
+2. Check which phase is next
+3. Review relevant docs before implementation
 
 ---
 
-**Start with:** `load_session()` → Read FEATURE_OVERVIEW → Verify overlay delay → Begin Phase 3 🚀
+## ✅ Recent Cleanup (2025-10-13)
+
+**Archived 10 working docs to LEGACY/v4.0_working_docs/:**
+- Analysis files (ARCHITECTURE_ANALYSIS, CODE_VS_FEATURE, etc.)
+- Planning iterations (V4_ACTION_PLAN, V4_REFACTOR_COMPLETE_PLAN, etc.)
+- Progress reports (V4_ANALYSIS_PROGRESS_1/2, V4_COMPLETE_ANALYSIS, etc.)
+
+**Kept 5 active docs in root:**
+- Current plans and specifications
+- Cross-linked for easy navigation
+
+**Project structure is clean!** 🎯
+
+---
+
+**Quick Start:** `load_session()` → Read V4_FINAL_ACTION_PLAN.md → Continue with next phase 🚀
