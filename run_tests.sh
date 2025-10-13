@@ -35,11 +35,11 @@ echo ""
 echo "🚀 Running tests..."
 xcodebuild test \
   -scheme ProsperPlayer-Package \
-  -destination "id=$DEVICE_ID" \
+  -destination "platform=iOS Simulator,id=$DEVICE_ID" \
   -enableCodeCoverage YES \
   | xcpretty 2>/dev/null || xcodebuild test \
   -scheme ProsperPlayer-Package \
-  -destination "id=$DEVICE_ID" \
+  -destination "platform=iOS Simulator,id=$DEVICE_ID" \
   -enableCodeCoverage YES
 
 # Check exit code
