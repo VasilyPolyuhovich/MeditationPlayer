@@ -11,35 +11,33 @@ NC='\033[0m' # No Color
 
 # Find first available iOS iPhone Simulator and get its ID
 echo "🔍 Finding available iOS Simulator..."
-DEVICE_ID=$(xcrun simctl list devices available | \
-  grep "iPhone" | \
-  grep -v "Shutdown" | \
-  head -1 | \
-  sed 's/.*(\([^)]*\)).*/\1/' || \
-  xcrun simctl list devices available | \
+
+# Get first iPhone simulator ID (Shutdown is OK - xcodebuild will boot it)
+DEVICE_ID=$(xcrun simctl list devices | \
   grep "iPhone" | \
   head -1 | \
-  sed 's/.*(\([^)]*\)).*/\1/')
+  sed 's/.*(\([A-F0-9-]*\)).*/\1/')
 
 if [ -z "$DEVICE_ID" ]; then
   echo -e "${RED}❌ No iOS Simulator found!${NC}"
+  echo "Please install Xcode and iOS Simulator"
   exit 1
 fi
 
 # Get device name for display
-DEVICE_NAME=$(xcrun simctl list devices | grep "$DEVICE_ID" | sed 's/[[:space:]]*\(.*\) (\(.*\)) (.*)/\1/')
+DEVICE_NAME=$(xcrun simctl list devices | grep "$DEVICE_ID" | sed 's/^[[:space:]]*\(.*\) ([A-F0-9-]*).*/\1/')
 
 echo "📱 Using: $DEVICE_NAME"
 echo "🆔 ID: $DEVICE_ID"
 echo ""
 
-# Run tests with device ID (no OS:latest bug!)
+# Run tests with device ID (xcodebuild will boot simulator if needed)
 echo "🚀 Running tests..."
 xcodebuild test \
   -scheme ProsperPlayer-Package \
   -destination "id=$DEVICE_ID" \
   -enableCodeCoverage YES \
-  | xcpretty || xcodebuild test \
+  | xcpretty 2>/dev/null || xcodebuild test \
   -scheme ProsperPlayer-Package \
   -destination "id=$DEVICE_ID" \
   -enableCodeCoverage YES
