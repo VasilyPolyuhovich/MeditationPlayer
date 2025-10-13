@@ -145,6 +145,49 @@ public struct PlayerConfiguration: Sendable {
 - Thread-safe by design
 - Зміни через `updateConfiguration()` - явні та контрольовані
 
+### 4. **Volume Architecture** (Hybrid Implementation)
+
+```
+PlayerA → MixerA (crossfade * targetVolume) ──┐
+                                              ├──→ MainMixer (targetVolume) → Output
+PlayerB → MixerB (crossfade * targetVolume) ──┘
+
+OverlayPlayer → OverlayMixer (independent) → Output
+```
+
+**Як працює:**
+
+1. **Master Volume (`targetVolume`)** - глобальне обмеження для основного плеєра
+   - Зберігається в `AudioEngineActor.targetVolume`
+   - Встановлюється через `setVolume(_ volume: Float)`
+   - Діапазон: 0.0 - 1.0
+
+2. **MainMixer.volume** - дублює targetVolume (backup layer)
+   ```swift
+   engine.mainMixerNode.volume = targetVolume
+   ```
+
+3. **MixerA/B volumes** - динамічні для crossfade/fade ефектів
+   ```swift
+   // Під час crossfade - скалюються до targetVolume:
+   activeMixer.volume = curve.inverseVolume(progress) * targetVolume  // fade out
+   inactiveMixer.volume = curve.volume(progress) * targetVolume       // fade in
+   
+   // Коли НЕ crossfading - дорівнюють targetVolume:
+   getActiveMixerNode().volume = targetVolume
+   ```
+
+4. **Overlay Volume** - повністю незалежний
+   ```swift
+   await audioEngine.setOverlayVolume(0.5)  // Окремий контроль
+   ```
+
+**Переваги архітектури:**
+- ✅ Crossfade завжди респектує user volume (множиться на targetVolume)
+- ✅ MainMixer як safety layer - гарантує обмеження навіть при багах
+- ✅ Overlay повністю незалежний - ambient звуки не впливають на основний плеєр
+- ✅ Один параметр (`targetVolume`) контролює весь основний плеєр
+
 ---
 
 ## 🔗 Meditation App Use Case
@@ -218,8 +261,8 @@ func stop(fadeDuration: TimeInterval = 0.0) async
 
 ## 🤔 Важливі Архітектурні Питання
 
-### 1. **Volume Architecture** 
-📖 Детальні опції в [HANDOFF_v4.0_SESSION.md](HANDOFF_v4.0_SESSION.md) - Volume Architecture
+### 1. **Volume Architecture** ✅ РЕАЛІЗОВАНО
+📖 Дивись секцію "Volume Architecture (Hybrid Implementation)" вище
 
 ### 2. **Queue Management**
 📖 Аналіз PlaylistManager в [HANDOFF_v4.0_SESSION.md](HANDOFF_v4.0_SESSION.md) - PlaylistManager Аналіз

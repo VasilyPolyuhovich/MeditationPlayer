@@ -51,52 +51,25 @@ func getUpcomingQueue() async -> [URL] {
 - Слайдер в UI немає в планах (skip ±15s кнопки)
 - **Рішення:** Залишити seekWithFade, може знадобиться
 
-### 6. **Volume Architecture** ⚠️ КРИТИЧНО
+### 6. **Volume Architecture** ✅ РЕАЛІЗОВАНО
 
-**Вимоги:**
-1. **Стартовий volume:** Розробник встановлює перед playback
-2. **Runtime volume:** Користувач змінює через UI (binding потрібен!)
-3. **Внутрішня логіка:** 2 mixers + 2 nodes працюють для crossfade
-4. **Global Volume:** Регулює ЗАГАЛЬНУ гучність (НЕ чіпає crossfade logic!)
-5. **Overlay Volume:** Окремий, незалежний від main player
+**Поточна реалізація:** Hybrid підхід (Option A + B)
 
-**Проблема v4.0:**
-```swift
-// Plan: async method
-await service.setVolume(0.8)  
+```
+PlayerA → MixerA (crossfade * targetVolume) ──┐
+                                              ├──→ MainMixer (targetVolume) → Output
+PlayerB → MixerB (crossfade * targetVolume) ──┘
 
-// SwiftUI needs: binding!
-@Published var volume: Float  
+OverlayPlayer → OverlayMixer (independent) → Output
 ```
 
-**Рішення (треба вибрати):**
+**Як працює:**
+1. **Master Volume (`targetVolume`)** - зберігається в `AudioEngineActor`
+2. **MainMixer.volume = targetVolume** - backup layer
+3. **MixerA/B volumes** - множаться на `targetVolume` під час crossfade
+4. **Overlay Volume** - повністю незалежний
 
-**Option A: Global через mainMixer**
-```swift
-// Simple approach
-mainMixerNode.volume = globalVolume  // 0.0-1.0
-mixerA.volume = crossfadeVolA        // crossfade logic
-mixerB.volume = crossfadeVolB        // crossfade logic
-```
-
-**Option B: Multiply на кожен mixer**
-```swift
-// Precise approach
-mixerA.volume = crossfadeVolA * globalVolume
-mixerB.volume = crossfadeVolB * globalVolume
-```
-
-**Option C: @Published wrapper + async sync**
-```swift
-@MainActor class AudioPlayerViewModel {
-    @Published var volume: Float = 1.0
-    
-    func setVolume(_ vol: Float) {
-        volume = vol
-        Task { await service.setVolume(vol) }
-    }
-}
-```
+📖 Детальний опис: [V4_MASTER_PLAN.md](V4_MASTER_PLAN.md) - Volume Architecture section
 
 ---
 
