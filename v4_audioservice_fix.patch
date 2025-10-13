@@ -1,0 +1,14 @@
+diff --git a/Sources/AudioServiceKit/Public/AudioPlayerService.swift b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+index 1234567..abcdefg 100644
+--- a/Sources/AudioServiceKit/Public/AudioPlayerService.swift
++++ b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+@@ -85,9 +85,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+                 fadeCurve: configuration.fadeCurve,
+                 repeatMode: configuration.repeatMode,
+                 repeatCount: configuration.repeatCount,
+-                singleTrackFadeInDuration: configuration.singleTrackFadeInDuration,
+-                singleTrackFadeOutDuration: configuration.singleTrackFadeOutDuration,
+                 volume: configuration.volume,
+-                stopFadeDuration: configuration.stopFadeDuration
++                mixWithOthers: configuration.mixWithOthers
+             )
