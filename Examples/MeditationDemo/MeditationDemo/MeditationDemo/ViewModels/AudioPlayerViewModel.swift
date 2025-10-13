@@ -345,10 +345,7 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         let trackURLs = tracks.map { trackURL(named: $0) }
         
         // Call SDK's swapPlaylist method
-        try await audioService.swapPlaylist(
-            tracks: trackURLs,
-            crossfadeDuration: crossfadeDuration
-        )
+        try await audioService.replacePlaylist(trackURLs)
         
         // Update UI state
         currentTrackIndex = await audioService.getCurrentTrackIndex()
