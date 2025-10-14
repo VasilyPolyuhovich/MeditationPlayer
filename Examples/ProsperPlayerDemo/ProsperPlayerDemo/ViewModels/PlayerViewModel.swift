@@ -28,12 +28,15 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     var crossfadeProgress: CrossfadeProgress?
     
+    // MARK: - Overlay State
+    
+    var isOverlayPlaying: Bool = false
+    var selectedOverlayTrack: String = "voiceover1"
+    
     // MARK: - Initialization
     
     init(audioService: AudioPlayerService) async {
         self.audioService = audioService
-        
-        // ✅ FIX: addObserver accepts both AudioPlayerObserver and CrossfadeProgressObserver
         await audioService.addObserver(self)
     }
     
@@ -41,54 +44,57 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     func loadPlaylist(_ tracks: [String]) async throws {
         let urls = tracks.map { trackURL(named: $0) }
-        
-        // ✅ FIX: loadPlaylist only accepts [URL], no configuration parameter
         try await audioService.loadPlaylist(urls)
     }
     
     func play() async throws {
-        // ✅ FIX: parameter name is fadeDuration, not fadeIn
-        try await audioService.startPlaying(fadeDuration: crossfadeDuration * 0.3)
+        try await audioService.startPlaying(fadeDuration: 0)
     }
     
     func pause() async throws {
-        // ✅ FIX: pause() throws
         try await audioService.pause()
     }
     
     func resume() async throws {
-        // ✅ FIX: resume() throws
         try await audioService.resume()
     }
     
     func stop() async {
-        // ✅ FIX: stop() accepts fadeDuration: TimeInterval?
         await audioService.stop(fadeDuration: nil)
     }
     
     func skipForward() async throws {
-        // ✅ FIX: use skipForward(by:), not skip(seconds:)
         try await audioService.skipForward(by: 15)
     }
     
     func skipBackward() async throws {
-        // ✅ FIX: use skipBackward(by:), not skip(seconds:)
         try await audioService.skipBackward(by: 15)
     }
     
     func nextTrack() async throws {
-        // ✅ FIX: use skipToNext(), not nextTrack()
         try await audioService.skipToNext()
     }
     
     func previousTrack() async throws {
-        // ✅ FIX: use skipToPrevious(), not previousTrack()
         try await audioService.skipToPrevious()
     }
     
     func replacePlaylist(_ tracks: [String]) async throws {
         let urls = tracks.map { trackURL(named: $0) }
         try await audioService.replacePlaylist(urls)
+    }
+    
+    func nextPlaylist() async throws {
+        let presetKeys = Self.presets.keys.sorted()
+        guard !presetKeys.isEmpty else { return }
+        
+        // Cycle to next playlist
+        let nextIndex = (currentTrackIndex + 1) % presetKeys.count
+        let nextPreset = presetKeys[nextIndex]
+        
+        if let tracks = Self.presets[nextPreset] {
+            try await replacePlaylist(tracks)
+        }
     }
     
     func setVolume(_ value: Float) async {
@@ -101,6 +107,26 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         repeatMode = mode
     }
     
+    // MARK: - Overlay Control
+    
+    func playOverlay(_ trackName: String) async throws {
+        let url = trackURL(named: trackName)
+        let config = OverlayConfiguration(
+            volume: 0.5,
+            loopMode: .off,
+            fadeInDuration: 1.0,
+            fadeOutDuration: 1.0
+        )
+        try await audioService.startOverlay(url: url, configuration: config)
+        isOverlayPlaying = true
+        selectedOverlayTrack = trackName
+    }
+    
+    func stopOverlay() async {
+        await audioService.stopOverlay()
+        isOverlayPlaying = false
+    }
+    
     // MARK: - AudioPlayerObserver
     
     func playerStateDidChange(_ state: PlayerState) async {
@@ -109,8 +135,6 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     func playbackPositionDidUpdate(_ position: PlaybackPosition) async {
         self.position = position
-        // ✅ FIX: getCurrentTrackIndex doesn't exist, manage index manually
-        // Track index is managed by playlist, we can infer from state
     }
     
     func playerDidEncounterError(_ error: AudioPlayerError) async {
@@ -138,18 +162,15 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     var formattedPosition: String {
         guard let pos = position else { return "--:--" }
-        // ✅ FIX: use currentTime, not .current
         return "\(formatTime(pos.currentTime)) / \(formatTime(pos.duration))"
     }
     
     var progressValue: Double {
         guard let pos = position, pos.duration > 0 else { return 0 }
-        // ✅ FIX: use currentTime, not .current
         return pos.currentTime / pos.duration
     }
     
     var isCrossfading: Bool {
-        // ✅ FIX: check if phase is not .idle
         guard let phase = crossfadeProgress?.phase else { return false }
         if case .idle = phase {
             return false
@@ -160,7 +181,6 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     var crossfadePhaseText: String? {
         guard let phase = crossfadeProgress?.phase else { return nil }
         
-        // ✅ FIX: use actual Phase cases
         switch phase {
         case .idle:
             return nil
@@ -182,13 +202,14 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
 }
 
-// MARK: - Preset Playlists
+// MARK: - Preset Playlists (Main Player - sample files)
 
 extension PlayerViewModel {
     static let presets: [String: [String]] = [
-        "Single Track": ["voiceover1"],
-        "Two Tracks": ["voiceover1", "voiceover2"],
-        "All Three": ["voiceover1", "voiceover2", "sample2"],
-        "Reverse Order": ["sample2", "voiceover2", "voiceover1"]
+        "Two Tracks": ["sample2", "sample3"],
+        "Three Tracks": ["sample2", "sample3", "sample4"],
+        "Reverse": ["sample4", "sample3", "sample2"]
     ]
+    
+    static let overlayTracks = ["voiceover1", "voiceover2"]
 }

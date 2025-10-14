@@ -16,7 +16,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Crossfade Configuration")
                 } footer: {
-                    Text("Changes take effect on next crossfade")
+                    Text("Spotify-style crossfade: both tracks fade simultaneously over the full crossfade duration (one fades out 1.0→0.0, other fades in 0.0→1.0)")
                 }
                 
                 // Repeat Mode Section
@@ -26,16 +26,6 @@ struct SettingsView: View {
                     Text("Repeat Mode")
                 } footer: {
                     Text("Single Track loops current track. Playlist advances and loops entire playlist.")
-                }
-                
-                // Auto-Calculated Fades Section
-                Section {
-                    fadeInInfo
-                    fadeOutInfo
-                } header: {
-                    Text("Auto-Calculated Fade Durations")
-                } footer: {
-                    Text("Fade in/out are calculated as 30% of crossfade duration")
                 }
                 
                 // SDK Information Section
@@ -105,28 +95,6 @@ struct SettingsView: View {
         .pickerStyle(.segmented)
     }
     
-    // MARK: - Fade Info
-    
-    private var fadeInInfo: some View {
-        HStack {
-            Text("Fade In")
-            Spacer()
-            Text(String(format: "%.1fs (30%%)", viewModel.crossfadeDuration * 0.3))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-    }
-    
-    private var fadeOutInfo: some View {
-        HStack {
-            Text("Fade Out")
-            Spacer()
-            Text(String(format: "%.1fs (30%%)", viewModel.crossfadeDuration * 0.3))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-        }
-    }
-    
     // MARK: - SDK Info
     
     private var sdkInfoRows: some View {
@@ -135,6 +103,7 @@ struct SettingsView: View {
             InfoRow(label: "Architecture", value: "Dual AVAudioPlayerNode")
             InfoRow(label: "Concurrency", value: "Swift 6 Actor Isolation")
             InfoRow(label: "Sync Method", value: "AVAudioTime (sample-accurate)")
+            InfoRow(label: "Crossfade Style", value: "Spotify-style (100% overlap)")
             InfoRow(label: "Fade Steps", value: "Adaptive (20-100 Hz)")
             InfoRow(label: "Buffer Delay", value: "2048 samples (~46ms)")
         }

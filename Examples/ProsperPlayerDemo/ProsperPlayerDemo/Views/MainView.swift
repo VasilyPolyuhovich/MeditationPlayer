@@ -7,12 +7,13 @@ struct MainView: View {
     
     @State private var showPlaylists = false
     @State private var showSettings = false
+    @State private var showOverlay = false
     @State private var showError = false
     
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 20) {
                     // State & Position Display
                     StatusCard(viewModel: viewModel)
                     
@@ -24,25 +25,38 @@ struct MainView: View {
                     // Player Controls
                     PlayerControls(viewModel: viewModel)
                     
-                    // ✅ FIX: pass position directly, not viewModel
                     // Position Tracker
                     PositionTracker(position: viewModel.position)
                     
                     // Quick Actions
                     QuickActions(
+                        onNextPlaylist: {
+                            Task {
+                                try? await viewModel.nextPlaylist()
+                            }
+                        },
                         onShowPlaylists: { showPlaylists = true },
+                        onShowOverlay: { showOverlay = true },
                         onShowSettings: { showSettings = true }
                     )
                     
-                    // SDK Info
-                    SDKInfoCard()
+                    Spacer()
+                    
+                    // Version only
+                    Text("Version 4.0.0")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
                 .padding()
             }
+            .frame(maxWidth: .infinity)
             .navigationTitle("ProsperPlayer SDK")
             .navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented: $showPlaylists) {
                 PlaylistsView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showOverlay) {
+                OverlayView(viewModel: viewModel)
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(viewModel: viewModel)
@@ -118,52 +132,50 @@ struct StatusCard: View {
 // MARK: - Quick Actions
 
 struct QuickActions: View {
+    let onNextPlaylist: () -> Void
     let onShowPlaylists: () -> Void
+    let onShowOverlay: () -> Void
     let onShowSettings: () -> Void
     
     var body: some View {
-        HStack(spacing: 16) {
-            Button {
-                onShowPlaylists()
-            } label: {
-                Label("Playlists", systemImage: "music.note.list")
-                    .frame(maxWidth: .infinity)
+        VStack(spacing: 12) {
+            // Main actions
+            HStack(spacing: 12) {
+                Button {
+                    onNextPlaylist()
+                } label: {
+                    Label("Next Playlist", systemImage: "arrow.triangle.2.circlepath")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                
+                Button {
+                    onShowPlaylists()
+                } label: {
+                    Label("Playlists", systemImage: "music.note.list")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
             
-            Button {
-                onShowSettings()
-            } label: {
-                Label("Settings", systemImage: "gearshape.fill")
-                    .frame(maxWidth: .infinity)
+            // Secondary actions
+            HStack(spacing: 12) {
+                Button {
+                    onShowOverlay()
+                } label: {
+                    Label("Overlay", systemImage: "waveform.badge.plus")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                
+                Button {
+                    onShowSettings()
+                } label: {
+                    Label("Settings", systemImage: "gearshape.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
-    }
-}
-
-// MARK: - SDK Info Card
-
-struct SDKInfoCard: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: "info.circle.fill")
-                    .foregroundStyle(.blue)
-                Text("SDK Information")
-                    .font(.headline)
-            }
-            
-            Divider()
-            
-            InfoRow(label: "Version", value: "4.0.0")
-            InfoRow(label: "Architecture", value: "Dual AVAudioPlayerNode")
-            InfoRow(label: "Concurrency", value: "Swift 6 Actor Isolation")
-            InfoRow(label: "Features", value: "Crossfade • Playlist • Background")
-        }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
