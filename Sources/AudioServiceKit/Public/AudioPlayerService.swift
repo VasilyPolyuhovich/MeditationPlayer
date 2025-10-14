@@ -1029,6 +1029,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         notifyObservers(positionUpdate: position)
         await updateNowPlayingPosition()
         
+        // Check for track end (auto-advance to next track or stop)
+        if shouldTriggerTrackEnd(position) {
+            await handleTrackEnd()
+            return  // Don't check loop crossfade if track ended
+        }
+        
         // Check for loop crossfade trigger (with race condition protection)
         if shouldTriggerLoopCrossfade(position) && !isLoopCrossfadeInProgress {
             await startLoopCrossfade()
@@ -1140,6 +1146,60 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         return adaptedCrossfade
     }
+    
+    // MARK: - Track End Handling (Auto-advance)
+    
+    /// Check if track has ended (needs auto-advance or stop)
+    /// - Parameter position: Current playback position
+    /// - Returns: True if track ended
+    private func shouldTriggerTrackEnd(_ position: PlaybackPosition) -> Bool {
+        // Only for .off or .playlist modes (not .singleTrack - it loops)
+        guard configuration.repeatMode != .singleTrack else { return false }
+        
+        // Don't trigger if already replacing track
+        guard !isTrackReplacementInProgress else { return false }
+        
+        // Only trigger when playing
+        guard state == .playing else { return false }
+        
+        // Track ended if we're within 0.5s of the end
+        let epsilon: TimeInterval = 0.5
+        return position.currentTime >= (position.duration - epsilon)
+    }
+    
+    /// Handle track end - either advance to next track or stop
+    private func handleTrackEnd() async {
+        Self.logger.debug("[AUTO-ADVANCE] Track ended, repeatMode: \\(configuration.repeatMode)")
+        
+        switch configuration.repeatMode {
+        case .off:
+            // Stop playback
+            Self.logger.debug("[AUTO-ADVANCE] Stopping (repeatMode = .off)")
+            await stop()
+            
+        case .playlist:
+            // Try to advance to next track
+            Self.logger.debug("[AUTO-ADVANCE] Advancing to next track (repeatMode = .playlist)")
+            do {
+                // Use existing skipToNext which has crossfade logic
+                try await skipToNext()
+            } catch AudioPlayerError.noNextTrack {
+                // No more tracks - loop back to first or stop
+                Self.logger.debug("[AUTO-ADVANCE] End of playlist, stopping playback")
+                await stop()
+            } catch {
+                Self.logger.error("[AUTO-ADVANCE] Failed to advance: \\(error)")
+                await stop()
+            }
+
+            }
+            
+        case .singleTrack:
+            // Should not reach here - handled by loop crossfade
+            break
+        }
+    }
+
 
     
     /// Check if we should trigger loop crossfade
