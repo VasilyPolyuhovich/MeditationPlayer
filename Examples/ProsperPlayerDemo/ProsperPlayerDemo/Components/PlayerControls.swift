@@ -37,9 +37,11 @@ struct PlayerControls: View {
                     Task {
                         do {
                             if viewModel.isPlaying {
-                                await viewModel.pause()
+                                // ✅ FIX: pause() throws
+                                try await viewModel.pause()
                             } else if viewModel.isPaused {
-                                await viewModel.resume()
+                                // ✅ FIX: resume() throws
+                                try await viewModel.resume()
                             } else {
                                 // Load default playlist if nothing loaded
                                 if viewModel.position == nil {

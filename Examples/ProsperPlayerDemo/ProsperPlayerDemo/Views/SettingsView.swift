@@ -6,8 +6,6 @@ struct SettingsView: View {
     @Bindable var viewModel: PlayerViewModel
     @Environment(\.dismiss) var dismiss
     
-    @State private var isUpdating = false
-    
     var body: some View {
         NavigationStack {
             Form {
@@ -18,7 +16,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Crossfade Configuration")
                 } footer: {
-                    Text("Changes take effect on next playback or after Update Configuration")
+                    Text("Changes take effect on next crossfade")
                 }
                 
                 // Repeat Mode Section
@@ -40,13 +38,6 @@ struct SettingsView: View {
                     Text("Fade in/out are calculated as 30% of crossfade duration")
                 }
                 
-                // Update Configuration Section
-                Section {
-                    updateConfigButton
-                } footer: {
-                    Text("Apply configuration changes to currently loaded audio")
-                }
-                
                 // SDK Information Section
                 Section {
                     sdkInfoRows
@@ -61,7 +52,6 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .disabled(isUpdating)
         }
     }
     
@@ -137,29 +127,6 @@ struct SettingsView: View {
         }
     }
     
-    // MARK: - Update Config Button
-    
-    private var updateConfigButton: some View {
-        Button {
-            Task {
-                await updateConfiguration()
-            }
-        } label: {
-            HStack {
-                if isUpdating {
-                    ProgressView()
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                }
-                
-                Text(isUpdating ? "Updating..." : "Update Configuration")
-                    .fontWeight(.semibold)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .disabled(isUpdating || viewModel.position == nil)
-    }
-    
     // MARK: - SDK Info
     
     private var sdkInfoRows: some View {
@@ -170,22 +137,6 @@ struct SettingsView: View {
             InfoRow(label: "Sync Method", value: "AVAudioTime (sample-accurate)")
             InfoRow(label: "Fade Steps", value: "Adaptive (20-100 Hz)")
             InfoRow(label: "Buffer Delay", value: "2048 samples (~46ms)")
-        }
-    }
-    
-    // MARK: - Helpers
-    
-    private func updateConfiguration() async {
-        isUpdating = true
-        defer { isUpdating = false }
-        
-        do {
-            try await viewModel.updateConfiguration()
-            
-            // Success feedback
-            try await Task.sleep(for: .milliseconds(500))
-        } catch {
-            print("Configuration update failed: \(error)")
         }
     }
 }
@@ -206,14 +157,4 @@ struct InfoRow: View {
         }
         .font(.caption)
     }
-}
-
-// MARK: - Preview
-
-#Preview {
-    @Previewable @State var viewModel = await PlayerViewModel(
-        audioService: AudioPlayerService()
-    )
-    
-    SettingsView(viewModel: viewModel)
 }

@@ -1,20 +1,12 @@
 import SwiftUI
+import AudioServiceCore
 
-/// Position tracker with visual progress bar
+/// Shows current playback position with progress bar
 struct PositionTracker: View {
-    let viewModel: PlayerViewModel
+    let position: PlaybackPosition?
     
     var body: some View {
-        VStack(spacing: 12) {
-            // Header
-            HStack {
-                Image(systemName: "waveform")
-                    .foregroundStyle(.blue)
-                Text("Playback Position")
-                    .font(.headline)
-                Spacer()
-            }
-            
+        VStack(spacing: 8) {
             // Progress Bar
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
@@ -23,49 +15,39 @@ struct PositionTracker: View {
                         .fill(.secondary.opacity(0.2))
                         .frame(height: 8)
                     
-                    // Progress
+                    // Progress Fill
                     RoundedRectangle(cornerRadius: 4)
                         .fill(
                             LinearGradient(
-                                colors: [.blue, .cyan],
+                                colors: [.blue, .purple],
                                 startPoint: .leading,
                                 endPoint: .trailing
                             )
                         )
                         .frame(
-                            width: geometry.size.width * viewModel.progressValue,
+                            width: geometry.size.width * (position?.progress ?? 0),
                             height: 8
                         )
-                        .animation(.linear(duration: 0.1), value: viewModel.progressValue)
                 }
             }
             .frame(height: 8)
             
             // Time Labels
-            if let position = viewModel.position {
-                HStack {
-                    Text(formatTime(position.current))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    
-                    Spacer()
-                    
-                    Text("-\(formatTime(position.duration - position.current))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
+            HStack {
+                // ✅ FIX: use currentTime instead of .current
+                Text(formatTime(position?.currentTime ?? 0))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                
+                Spacer()
+                
+                Text(formatTime(position?.duration ?? 0))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
-            
-            // Progress Percentage
-            Text("\(Int(viewModel.progressValue * 100))%")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
     
     private func formatTime(_ time: TimeInterval) -> String {

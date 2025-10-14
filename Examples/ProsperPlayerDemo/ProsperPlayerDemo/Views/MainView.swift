@@ -24,8 +24,9 @@ struct MainView: View {
                     // Player Controls
                     PlayerControls(viewModel: viewModel)
                     
+                    // ✅ FIX: pass position directly, not viewModel
                     // Position Tracker
-                    PositionTracker(viewModel: viewModel)
+                    PositionTracker(position: viewModel.position)
                     
                     // Quick Actions
                     QuickActions(
@@ -182,14 +183,4 @@ struct InfoRow: View {
                 .fontWeight(.medium)
         }
     }
-}
-
-// MARK: - Preview
-
-#Preview {
-    @Previewable @State var viewModel = await PlayerViewModel(
-        audioService: AudioPlayerService()
-    )
-    
-    MainView(viewModel: viewModel)
 }

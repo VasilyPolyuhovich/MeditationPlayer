@@ -21,12 +21,18 @@ struct CrossfadeVisualizer: View {
             }
             
             if let progress {
+                // ✅ FIX: Use actual Phase cases
                 // Phase Indicator
                 HStack(spacing: 4) {
                     PhaseIndicatorDot(
-                        isActive: progress.phase == .fadeOut,
-                        color: .red,
-                        label: "Fade Out"
+                        isActive: {
+                            if case .preparing = progress.phase {
+                                return true
+                            }
+                            return false
+                        }(),
+                        color: .blue,
+                        label: "Preparing"
                     )
                     
                     Image(systemName: "arrow.right")
@@ -34,9 +40,14 @@ struct CrossfadeVisualizer: View {
                         .foregroundStyle(.secondary)
                     
                     PhaseIndicatorDot(
-                        isActive: progress.phase == .overlap,
+                        isActive: {
+                            if case .fading = progress.phase {
+                                return true
+                            }
+                            return false
+                        }(),
                         color: .orange,
-                        label: "Overlap"
+                        label: "Fading"
                     )
                     
                     Image(systemName: "arrow.right")
@@ -44,49 +55,72 @@ struct CrossfadeVisualizer: View {
                         .foregroundStyle(.secondary)
                     
                     PhaseIndicatorDot(
-                        isActive: progress.phase == .fadeIn,
+                        isActive: {
+                            if case .switching = progress.phase {
+                                return true
+                            }
+                            return false
+                        }(),
                         color: .green,
-                        label: "Fade In"
+                        label: "Switching"
+                    )
+                    
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    PhaseIndicatorDot(
+                        isActive: {
+                            if case .cleanup = progress.phase {
+                                return true
+                            }
+                            return false
+                        }(),
+                        color: .purple,
+                        label: "Cleanup"
                     )
                 }
                 
-                // Visual Representation
-                HStack(spacing: 12) {
-                    // Outgoing Track Volume
-                    VStack(spacing: 4) {
-                        Text("Track \(progress.fromTrack + 1)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                // ✅ FIX: Show fading progress if in .fading phase
+                if case .fading(let fadeProgress) = progress.phase {
+                    // Visual Representation of fade
+                    HStack(spacing: 12) {
+                        // Outgoing Track Volume (decreasing)
+                        VStack(spacing: 4) {
+                            Text("Outgoing")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            
+                            VolumeBar(
+                                value: Float(1.0 - fadeProgress),
+                                color: .red
+                            )
+                            
+                            Text("\(Int((1.0 - fadeProgress) * 100))%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                         
-                        VolumeBar(
-                            value: progress.outgoingVolume,
-                            color: .red
-                        )
+                        Image(systemName: "arrow.left.arrow.right")
+                            .foregroundStyle(.orange)
                         
-                        Text("\(Int(progress.outgoingVolume * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    
-                    Image(systemName: "arrow.left.arrow.right")
-                        .foregroundStyle(.orange)
-                    
-                    // Incoming Track Volume
-                    VStack(spacing: 4) {
-                        Text("Track \(progress.toTrack + 1)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        
-                        VolumeBar(
-                            value: progress.incomingVolume,
-                            color: .green
-                        )
-                        
-                        Text("\(Int(progress.incomingVolume * 100))%")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        // Incoming Track Volume (increasing)
+                        VStack(spacing: 4) {
+                            Text("Incoming")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            
+                            VolumeBar(
+                                value: Float(fadeProgress),
+                                color: .green
+                            )
+                            
+                            Text("\(Int(fadeProgress * 100))%")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                 }
                 

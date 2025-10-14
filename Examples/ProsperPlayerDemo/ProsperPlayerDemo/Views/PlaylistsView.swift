@@ -193,13 +193,3 @@ struct PresetRow: View {
         .buttonStyle(.plain)
     }
 }
-
-// MARK: - Preview
-
-#Preview {
-    @Previewable @State var viewModel = await PlayerViewModel(
-        audioService: AudioPlayerService()
-    )
-    
-    PlaylistsView(viewModel: viewModel)
-}
