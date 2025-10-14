@@ -13,6 +13,9 @@ struct ProsperPlayerDemoApp: App {
             } else {
                 ProgressView("Initializing SDK...")
                     .task {
+                        // CRITICAL: Setup audioService FIRST
+                        await audioService.setup()
+                        
                         // Initialize ViewModel on MainActor
                         viewModel = await PlayerViewModel(audioService: audioService)
                     }
