@@ -140,21 +140,3 @@ struct SettingsView: View {
         }
     }
 }
-
-// MARK: - Info Row Component
-
-struct InfoRow: View {
-    let label: String
-    let value: String
-    
-    var body: some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.primary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-    }
-}
