@@ -991,29 +991,44 @@ actor AudioEngineActor {
             await stopOverlay()
         }
         
-        // 2. Create overlay player nodes
+        // 2. Check if engine is running
+        let wasRunning = isEngineRunning
+        
+        // 3. If engine is running, stop it temporarily to attach new nodes
+        if wasRunning {
+            engine.stop()
+            isEngineRunning = false
+        }
+        
+        // 4. Create overlay player nodes
         // These nodes are created locally and immediately transferred to OverlayPlayerActor
         // where they will be actor-isolated. This is safe despite the non-Sendable types.
         nonisolated(unsafe) let playerNode = AVAudioPlayerNode()
         nonisolated(unsafe) let mixerNode = AVAudioMixerNode()
         
-        // 3. Attach nodes to engine
+        // 5. Attach nodes to engine
         engine.attach(playerNode)
         engine.attach(mixerNode)
         
-        // 4. Connect: PlayerC → MixerC → MainMixer
+        // 6. Connect: PlayerC → MixerC → MainMixer
         let format = engine.outputNode.outputFormat(forBus: 0)
         engine.connect(playerNode, to: mixerNode, format: format)
         engine.connect(mixerNode, to: engine.mainMixerNode, format: format)
         
-        // 5. Create overlay player actor
+        // 7. Restart engine if it was running
+        if wasRunning {
+            try engine.start()
+            isEngineRunning = true
+        }
+        
+        // 8. Create overlay player actor
         overlayPlayer = OverlayPlayerActor(
             player: playerNode,
             mixer: mixerNode,
             configuration: configuration
         )
         
-        // 6. Load file and start playback
+        // 9. Load file and start playback
         try await overlayPlayer?.load(url: url)
         try await overlayPlayer?.play()
     }
