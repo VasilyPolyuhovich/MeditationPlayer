@@ -50,7 +50,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         let urls = tracks.compactMap { trackURL(named: $0) }
         guard !urls.isEmpty else {
             errorMessage = "No audio files found. Check Resources folder."
-            throw AudioPlayerError.fileNotFound("No valid audio files")
+            throw AudioPlayerError.fileLoadFailed(reason: "No valid audio files in bundle")
         }
         try await audioService.loadPlaylist(urls)
     }
@@ -91,7 +91,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         let urls = tracks.compactMap { trackURL(named: $0) }
         guard !urls.isEmpty else {
             errorMessage = "No audio files found. Check Resources folder."
-            throw AudioPlayerError.fileNotFound("No valid audio files")
+            throw AudioPlayerError.fileLoadFailed(reason: "No valid audio files in bundle")
         }
         try await audioService.replacePlaylist(urls)
     }
@@ -124,7 +124,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     func playOverlay(_ trackName: String) async throws {
         guard let url = trackURL(named: trackName) else {
             errorMessage = "Overlay file '\(trackName).mp3' not found"
-            throw AudioPlayerError.fileNotFound(trackName)
+            throw AudioPlayerError.fileLoadFailed(reason: "File not found: \(trackName).mp3")
         }
         let config = OverlayConfiguration(
             loopMode: .once,
