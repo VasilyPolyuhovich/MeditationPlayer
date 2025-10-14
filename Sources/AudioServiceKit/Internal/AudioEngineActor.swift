@@ -320,15 +320,16 @@ actor AudioEngineActor {
         return currentActiveVolume
     }
     
-    /// Complete reset - clears all state and files
-    func fullReset() {
-        // Stop everything
+    // MARK: - Cleanup & Reset
+    
+    /// Complete async reset - clears all state including overlay
+    func fullReset() async {
+        // Stop both players
         stopBothPlayers()
         
-        // Stop overlay
-        Task {
-            await stopOverlay()
-        }
+        // Stop engine
+        engine.stop()
+        isEngineRunning = false
         
         // Clear files
         audioFileA = nil
@@ -338,9 +339,18 @@ actor AudioEngineActor {
         playbackOffsetA = 0
         playbackOffsetB = 0
         
+        // Stop overlay
+        await stopOverlay()
+        
         // Reset to player A
         activePlayer = .a
     }
+    
+    // Note: No deinit needed - AVFoundation automatically cleans up engine and nodes
+    // when actor deinitializes. Explicit deinit would require nonisolated(unsafe)
+    // access to actor-isolated properties, which is unsafe in Swift 6 strict concurrency.
+    
+
     
     // MARK: - Audio File Loading
     

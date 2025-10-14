@@ -178,37 +178,30 @@ actor OverlayPlayerActor {
   /// - Adds micro-fade to prevent audio clicks
   /// - Cleans up player and mixer state
   func stop() async {
-    // Cancel loop task
+    // 1. Set state FIRST - loopCycle will exit
+    state = .stopping
+    
+    // 2. Cancel loop task
     loopTask?.cancel()
     loopTask = nil
     
-    // Fade out if configured and volume > 0
-    if configuration.fadeOutDuration > 0 && mixer.volume > 0 {
-      state = .stopping
+    // 3. Fade down mixer (general stop fade, NOT loop fade!)
+    if mixer.volume > 0 && configuration.fadeOutDuration > 0 {
       await fadeVolume(
         from: mixer.volume,
         to: 0.0,
         duration: configuration.fadeOutDuration
       )
+    } else {
+      // Instant stop without fade
+      mixer.volume = 0.0
     }
     
-    // Micro-fade to prevent clicks
-    if mixer.volume > 0.01 {
-      await fadeVolume(
-        from: mixer.volume,
-        to: 0.0,
-        duration: 0.02,
-        curve: .linear
-      )
-    }
-    
-    // Small delay for fade completion
-    try? await Task.sleep(nanoseconds: 25_000_000)  // 25ms
-    
-    // Stop and cleanup
+    // 4. Stop player (after fade!)
     player.stop()
     player.reset()
-    mixer.volume = 0.0
+    
+    // 5. Cleanup
     state = .idle
   }
   
@@ -327,8 +320,8 @@ actor OverlayPlayerActor {
   /// ```
   private func loopCycle() async {
     while shouldContinueLooping() {
-      // Check cancellation before each iteration
-      guard !Task.isCancelled else { break }
+      // Check cancellation and state before each iteration
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 1. Fade in (if configured)
       let shouldFadeIn = configuration.applyFadeOnEachLoop || loopCount == 0
@@ -343,7 +336,7 @@ actor OverlayPlayerActor {
         mixer.volume = configuration.volume
       }
       
-      guard !Task.isCancelled else { break }
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 2. Schedule and play buffer
       scheduleBuffer()
@@ -352,7 +345,7 @@ actor OverlayPlayerActor {
       // 3. Wait for playback to finish
       await waitForPlaybackEnd()
       
-      guard !Task.isCancelled else { break }
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 4. Fade out (if configured)
       let isLastIteration = isLastLoop()
@@ -375,9 +368,9 @@ actor OverlayPlayerActor {
       
       // 7. Apply loop delay (cancellable)
       if configuration.loopDelay > 0 {
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled && state == .playing else { break }
         try? await Task.sleep(nanoseconds: UInt64(configuration.loopDelay * 1_000_000_000))
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled && state == .playing else { break }
       }
     }
     

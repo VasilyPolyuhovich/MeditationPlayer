@@ -929,6 +929,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         return await playlistManager.getPlaylist()
     }
     
+    /// Get current track index in playlist
+    /// - Returns: Zero-based index of current track
+    public func getCurrentTrackIndex() async -> Int {
+        return await playlistManager.currentIndex
+    }
+    
     // MARK: - Playlist Navigation
     
     /// Skip to next track in playlist
