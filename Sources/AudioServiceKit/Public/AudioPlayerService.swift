@@ -1191,8 +1191,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 Self.logger.error("[AUTO-ADVANCE] Failed to advance: \\(error)")
                 await stop()
             }
-
-            }
             
         case .singleTrack:
             // Should not reach here - handled by loop crossfade
