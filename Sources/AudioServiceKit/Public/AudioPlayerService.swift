@@ -1172,10 +1172,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
     }
     
-    /// Loop current track with fade out at end and fade in at start
+    /// Loop current track with crossfade between iterations
     /// - Note: Used only when repeatMode = .singleTrack
-    /// - Note: Uses computed fadeInDuration (30% of crossfade) and fadeOutDuration (70% of crossfade)
-    /// - Note: Dynamically adapts fade durations to track duration (max 40% each, 80% total)
+    /// - Note: Uses Spotify-style crossfade (both tracks fade simultaneously over full duration)
+    /// - Note: Dynamically adapts crossfade duration to track duration (max 40% of track)
     private func loopCurrentTrackWithFade() async {
         // 1. Validation
         guard let currentURL = currentTrackURL,

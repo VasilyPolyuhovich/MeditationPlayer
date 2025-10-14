@@ -19,6 +19,16 @@ struct SettingsView: View {
                     Text("Spotify-style crossfade: both tracks fade simultaneously over the full crossfade duration (one fades out 1.0→0.0, other fades in 0.0→1.0)")
                 }
                 
+                // Volume Fade Settings Section
+                Section {
+                    startFadeInSlider
+                    stopFadeOutSlider
+                } header: {
+                    Text("Volume Fade Settings")
+                } footer: {
+                    Text("Fade-in applies when starting playback. Fade-out applies when stopping playback.")
+                }
+                
                 // Repeat Mode Section
                 Section {
                     repeatModePicker
@@ -60,6 +70,44 @@ struct SettingsView: View {
             Slider(
                 value: $viewModel.crossfadeDuration,
                 in: 1.0...30.0,
+                step: 0.5
+            )
+        }
+    }
+    
+    // MARK: - Volume Fade Settings
+    
+    private var startFadeInSlider: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Start Fade-In")
+                Spacer()
+                Text(String(format: "%.1fs", viewModel.startFadeInDuration))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            
+            Slider(
+                value: $viewModel.startFadeInDuration,
+                in: 0.0...10.0,
+                step: 0.5
+            )
+        }
+    }
+    
+    private var stopFadeOutSlider: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Stop Fade-Out")
+                Spacer()
+                Text(String(format: "%.1fs", viewModel.stopFadeOutDuration))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            
+            Slider(
+                value: $viewModel.stopFadeOutDuration,
+                in: 0.0...10.0,
                 step: 0.5
             )
         }

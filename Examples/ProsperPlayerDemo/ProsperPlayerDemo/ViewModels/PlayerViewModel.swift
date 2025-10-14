@@ -24,6 +24,10 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     var repeatMode: RepeatMode = .off
     var volume: Float = 1.0
     
+    // Volume Fade Settings
+    var startFadeInDuration: TimeInterval = 0.0  // No fade-in by default
+    var stopFadeOutDuration: TimeInterval = 3.0  // 3s fade-out by default
+    
     // MARK: - Crossfade Tracking
     
     var crossfadeProgress: CrossfadeProgress?
@@ -48,7 +52,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
     
     func play() async throws {
-        try await audioService.startPlaying(fadeDuration: 0)
+        try await audioService.startPlaying(fadeDuration: startFadeInDuration)
     }
     
     func pause() async throws {
@@ -60,7 +64,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
     
     func stop() async {
-        await audioService.stop(fadeDuration: nil)
+        await audioService.stop(fadeDuration: stopFadeOutDuration)
     }
     
     func skipForward() async throws {
