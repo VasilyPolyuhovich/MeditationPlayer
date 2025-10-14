@@ -116,8 +116,8 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     func playOverlay(_ trackName: String) async throws {
         let url = trackURL(named: trackName)
         let config = OverlayConfiguration(
+            loopMode: .once,
             volume: 0.5,
-            loopMode: .off,
             fadeInDuration: 1.0,
             fadeOutDuration: 1.0
         )
