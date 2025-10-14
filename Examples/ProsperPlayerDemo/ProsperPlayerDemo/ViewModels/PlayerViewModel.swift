@@ -47,7 +47,11 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     // MARK: - Playback Control
     
     func loadPlaylist(_ tracks: [String]) async throws {
-        let urls = tracks.map { trackURL(named: $0) }
+        let urls = tracks.compactMap { trackURL(named: $0) }
+        guard !urls.isEmpty else {
+            errorMessage = "No audio files found. Check Resources folder."
+            throw AudioPlayerError.fileNotFound("No valid audio files")
+        }
         try await audioService.loadPlaylist(urls)
     }
     
@@ -84,7 +88,11 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
     
     func replacePlaylist(_ tracks: [String]) async throws {
-        let urls = tracks.map { trackURL(named: $0) }
+        let urls = tracks.compactMap { trackURL(named: $0) }
+        guard !urls.isEmpty else {
+            errorMessage = "No audio files found. Check Resources folder."
+            throw AudioPlayerError.fileNotFound("No valid audio files")
+        }
         try await audioService.replacePlaylist(urls)
     }
     
@@ -114,7 +122,10 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     // MARK: - Overlay Control
     
     func playOverlay(_ trackName: String) async throws {
-        let url = trackURL(named: trackName)
+        guard let url = trackURL(named: trackName) else {
+            errorMessage = "Overlay file '\(trackName).mp3' not found"
+            throw AudioPlayerError.fileNotFound(trackName)
+        }
         let config = OverlayConfiguration(
             loopMode: .once,
             volume: 0.5,
@@ -153,9 +164,10 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     // MARK: - Helpers
     
-    private func trackURL(named name: String) -> URL {
+    private func trackURL(named name: String) -> URL? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
-            fatalError("Audio file '\(name).mp3' not found in Bundle.main. Check if file is added to Xcode project target.")
+            print("[ERROR] Audio file '\(name).mp3' not found in Bundle.main")
+            return nil
         }
         return url
     }
@@ -213,9 +225,9 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
 
 extension PlayerViewModel {
     static let presets: [String: [String]] = [
+        "Single Track": ["sample1"],
         "Two Tracks": ["sample2", "sample3"],
-        "Three Tracks": ["sample2", "sample3", "sample4"],
-        "Reverse": ["sample4", "sample3", "sample2"]
+        "Mixed Tracks": ["sample1", "sample4"]
     ]
     
     static let overlayTracks = ["voiceover1", "voiceover2", "voiceover3"]

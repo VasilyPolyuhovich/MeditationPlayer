@@ -54,7 +54,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
     /// Pending fade-in duration for next startPlaying call
     /// Allows per-call fade-in override without changing configuration
-    private var pendingFadeInDuration: TimeInterval?
+    private var pendingFadeInDuration: TimeInterval = 0.0
     
     // MARK: - Initialization
     
@@ -162,7 +162,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Store fade-in duration for startEngine()
-        pendingFadeInDuration = fadeDuration > 0 ? fadeDuration : nil
+        pendingFadeInDuration = fadeDuration
         
         // Validate configuration
         try configuration.validate()
@@ -1584,7 +1584,7 @@ extension AudioPlayerService: AudioStateMachineContext {
         try await audioEngine.start()
         
         // Use pending fade-in if set, otherwise no fade (instant start)
-        let fadeInDuration = pendingFadeInDuration ?? 0.0
+        let fadeInDuration = pendingFadeInDuration
         let shouldFadeIn = fadeInDuration > 0
         
         await audioEngine.scheduleFile(
@@ -1594,7 +1594,7 @@ extension AudioPlayerService: AudioStateMachineContext {
         )
         
         // Clear pending fade after use
-        pendingFadeInDuration = nil
+        pendingFadeInDuration = 0.0
     }
     
     func stopEngine() async {

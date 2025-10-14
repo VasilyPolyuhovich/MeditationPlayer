@@ -45,7 +45,12 @@ struct PlayerControls: View {
                             } else {
                                 // Load default playlist if nothing loaded
                                 if viewModel.position == nil {
-                                    try await viewModel.loadPlaylist(["sample2", "sample3"])
+                                    do {
+                                        try await viewModel.loadPlaylist(["sample2", "sample3"])
+                                    } catch {
+                                        print("Failed to load default playlist: \(error)")
+                                        return
+                                    }
                                 }
                                 try await viewModel.play()
                             }
