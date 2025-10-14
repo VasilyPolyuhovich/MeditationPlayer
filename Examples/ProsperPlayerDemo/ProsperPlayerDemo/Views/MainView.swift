@@ -47,7 +47,8 @@ struct MainView: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                .padding()
+                .padding(.horizontal, 20)
+                .padding(.vertical)
             }
             .frame(maxWidth: .infinity)
             .navigationTitle("ProsperPlayer SDK")

@@ -79,9 +79,22 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     /// Setup the service (must be called after initialization)
     public func setup() async {
-        // Initialize components
-        await audioEngine.setup()
+        // CRITICAL: Setup session FIRST (before engine accesses outputNode)
         await sessionManager.setup()
+        
+        // Configure and activate audio session BEFORE engine setup
+        // This prevents crashes when engine accesses outputNode
+        do {
+            try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
+            try await sessionManager.activate()
+            Self.logger.debug("Audio session activated in setup()")
+        } catch {
+            Self.logger.error("Failed to activate audio session in setup(): \(error)")
+            // Continue anyway - will retry in startPlaying()
+        }
+        
+        // Now safe to setup engine (accesses outputNode)
+        await audioEngine.setup()
         
         // FIXED: Create RemoteCommandManager on MainActor
         remoteCommandManager = await MainActor.run {
@@ -177,11 +190,36 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.isTrackReplacementInProgress = false
         
         // Configure audio session
-        try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
-        try await sessionManager.activate()
+        do {
+            try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
+            Self.logger.debug("Audio session configured successfully")
+        } catch {
+            Self.logger.error("Failed to configure audio session: \(error.localizedDescription)")
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Failed to configure: \(error.localizedDescription)"
+            )
+        }
         
-        // Prepare audio engine
-        try await audioEngine.prepare()
+        do {
+            try await sessionManager.activate()
+            Self.logger.debug("Audio session activated successfully")
+        } catch {
+            Self.logger.error("Failed to activate audio session: \(error.localizedDescription)")
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Failed to activate: \(error.localizedDescription)"
+            )
+        }
+        
+        // Prepare audio engine (MUST be after session activation)
+        do {
+            try await audioEngine.prepare()
+            Self.logger.debug("Audio engine prepared successfully")
+        } catch {
+            Self.logger.error("Failed to prepare audio engine: \(error.localizedDescription)")
+            throw AudioPlayerError.engineStartFailed(
+                reason: "Failed to prepare engine: \(error.localizedDescription)"
+            )
+        }
         
         // Load audio file
         let trackInfo = try await audioEngine.loadAudioFile(url: url)

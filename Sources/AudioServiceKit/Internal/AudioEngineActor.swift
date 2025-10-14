@@ -100,6 +100,14 @@ actor AudioEngineActor {
     // MARK: - Engine Control
     
     func prepare() throws {
+        // Ensure nodes are attached before preparing
+        guard engine.outputNode.engine != nil else {
+            throw AudioPlayerError.engineStartFailed(
+                reason: "Audio engine not properly initialized - nodes not attached"
+            )
+        }
+        
+        // CRITICAL: Must prepare AFTER nodes are connected and AFTER audio session is active
         engine.prepare()
     }
     
