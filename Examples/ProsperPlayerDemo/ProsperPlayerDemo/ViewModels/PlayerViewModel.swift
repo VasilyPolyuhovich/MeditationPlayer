@@ -154,7 +154,10 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     // MARK: - Helpers
     
     private func trackURL(named name: String) -> URL {
-        Bundle.main.url(forResource: name, withExtension: "mp3")!
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
+            fatalError("Audio file '\(name).mp3' not found in Bundle.main. Check if file is added to Xcode project target.")
+        }
+        return url
     }
     
     // MARK: - Computed Properties
@@ -215,5 +218,5 @@ extension PlayerViewModel {
         "Reverse": ["sample4", "sample3", "sample2"]
     ]
     
-    static let overlayTracks = ["voiceover1", "voiceover2"]
+    static let overlayTracks = ["voiceover1", "voiceover2", "voiceover3"]
 }
