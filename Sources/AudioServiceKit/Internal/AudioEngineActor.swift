@@ -14,8 +14,10 @@ actor AudioEngineActor {
     private let mixerNodeB: AVAudioMixerNode
     
     // Overlay player nodes (always attached, ready for use)
-    private let playerNodeC: AVAudioPlayerNode
-    private let mixerNodeC: AVAudioMixerNode
+    // nonisolated(unsafe): Safe because nodes are created once, attached once,
+    // then transferred to OverlayPlayerActor where they're exclusively accessed
+    private nonisolated(unsafe) let playerNodeC: AVAudioPlayerNode
+    private nonisolated(unsafe) let mixerNodeC: AVAudioMixerNode
     
     // Track which player is currently active
     private var activePlayer: PlayerNode = .a
