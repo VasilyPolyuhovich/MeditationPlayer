@@ -313,7 +313,7 @@ actor OverlayPlayerActor {
   /// ```
   ///
   /// - Parameter mode: New loop mode (`.once`, `.count(n)`, `.infinite`)
-  func setLoopMode(_ mode: LoopMode) {
+  func setLoopMode(_ mode: OverlayConfiguration.LoopMode) {
     configuration.loopMode = mode
   }
   

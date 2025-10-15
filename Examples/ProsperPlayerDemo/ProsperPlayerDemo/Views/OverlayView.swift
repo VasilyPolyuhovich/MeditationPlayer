@@ -1,6 +1,7 @@
 import SwiftUI
+import AudioServiceCore
 
-/// Overlay player view - voiceover tracks
+/// Overlay player view - voiceover tracks with dynamic controls
 struct OverlayView: View {
     @Bindable var viewModel: PlayerViewModel
     @Environment(\.dismiss) var dismiss
@@ -37,7 +38,64 @@ struct OverlayView: View {
                     Text("Select a voiceover to play as overlay on top of main playback")
                 }
                 
+                // MARK: - Overlay Controls (when playing)
                 if viewModel.isOverlayPlaying {
+                    Section {
+                        // Loop Toggle
+                        Toggle(isOn: $viewModel.overlayLoopEnabled) {
+                            HStack {
+                                Image(systemName: "repeat")
+                                    .foregroundStyle(.blue)
+                                Text("Loop Indefinitely")
+                            }
+                        }
+                        .onChange(of: viewModel.overlayLoopEnabled) { _, newValue in
+                            Task {
+                                await viewModel.setOverlayLoopMode(enabled: newValue)
+                            }
+                        }
+                        
+                        // Delay Slider
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "timer")
+                                    .foregroundStyle(.blue)
+                                Text("Delay Between Repeats")
+                                Spacer()
+                                Text("\(Int(viewModel.overlayLoopDelay))s")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                            
+                            Slider(
+                                value: $viewModel.overlayLoopDelay,
+                                in: 0...30,
+                                step: 1
+                            ) {
+                                Text("Delay")
+                            } minimumValueLabel: {
+                                Text("0s")
+                                    .font(.caption2)
+                            } maximumValueLabel: {
+                                Text("30s")
+                                    .font(.caption2)
+                            }
+                            .onChange(of: viewModel.overlayLoopDelay) { _, newValue in
+                                Task {
+                                    await viewModel.setOverlayLoopDelay(newValue)
+                                }
+                            }
+                            
+                            Text(viewModel.overlayLoopDelay == 0 ? "No delay - continuous playback" : "Wait \(Int(viewModel.overlayLoopDelay)) seconds between repeats")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Loop Settings")
+                    } footer: {
+                        Text("Changes take effect on the next loop iteration")
+                    }
+                    
                     Section {
                         Button(role: .destructive) {
                             Task {

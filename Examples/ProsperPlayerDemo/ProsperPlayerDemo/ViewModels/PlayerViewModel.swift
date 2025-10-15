@@ -37,6 +37,8 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     var isOverlayPlaying: Bool = false
     var selectedOverlayTrack: String = "voiceover1"
+    var overlayLoopEnabled: Bool = true  // Default: infinite loop
+    var overlayLoopDelay: Double = 0.0  // Default: no delay
     
     // MARK: - Initialization
     
@@ -137,11 +139,17 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             errorMessage = "Overlay file '\(trackName).mp3' not found"
             throw AudioPlayerError.fileLoadFailed(reason: "File not found: \(trackName).mp3")
         }
+        
+        // Use current loop settings
+        let loopMode: OverlayConfiguration.LoopMode = overlayLoopEnabled ? .infinite : .once
+        
         let config = OverlayConfiguration(
-            loopMode: .once,
+            loopMode: loopMode,
+            loopDelay: overlayLoopDelay,
             volume: 0.5,
             fadeInDuration: 1.0,
-            fadeOutDuration: 1.0
+            fadeOutDuration: 1.0,
+            applyFadeOnEachLoop: false  // Continuous ambient sound
         )
         try await audioService.startOverlay(url: url, configuration: config)
         isOverlayPlaying = true
@@ -151,6 +159,19 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     func stopOverlay() async {
         await audioService.stopOverlay()
         isOverlayPlaying = false
+    }
+    
+    /// Set overlay loop mode dynamically
+    func setOverlayLoopMode(enabled: Bool) async {
+        overlayLoopEnabled = enabled
+        let mode: OverlayConfiguration.LoopMode = enabled ? .infinite : .once
+        try? await audioService.setOverlayLoopMode(mode)
+    }
+    
+    /// Set overlay loop delay dynamically
+    func setOverlayLoopDelay(_ delay: TimeInterval) async {
+        overlayLoopDelay = delay
+        try? await audioService.setOverlayLoopDelay(delay)
     }
     
     // MARK: - AudioPlayerObserver
