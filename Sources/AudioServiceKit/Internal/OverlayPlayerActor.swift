@@ -296,6 +296,47 @@ actor OverlayPlayerActor {
     mixer.volume = clamped
   }
   
+  /// Set loop mode dynamically during playback.
+  ///
+  /// ## Behavior:
+  /// - Updates `configuration.loopMode`
+  /// - Takes effect on next loop iteration (current iteration completes)
+  /// - Can change `.once` to `.infinite` while playing
+  ///
+  /// ## Example:
+  /// ```swift
+  /// // Start with limited loops
+  /// try await overlay.play()  // plays 3 times
+  ///
+  /// // User toggles "infinite loop" in UI
+  /// await overlay.setLoopMode(.infinite)  // continues forever
+  /// ```
+  ///
+  /// - Parameter mode: New loop mode (`.once`, `.count(n)`, `.infinite`)
+  func setLoopMode(_ mode: LoopMode) {
+    configuration.loopMode = mode
+  }
+  
+  /// Set loop delay dynamically during playback.
+  ///
+  /// ## Behavior:
+  /// - Updates `configuration.loopDelay`
+  /// - Takes effect on next loop iteration (current delay completes if active)
+  /// - Useful for adjusting timer intervals in real-time
+  ///
+  /// ## Example:
+  /// ```swift
+  /// // User adjusts "delay between sounds" slider
+  /// await overlay.setLoopDelay(15.0)  // 15 seconds between iterations
+  /// ```
+  ///
+  /// - Parameter delay: Delay in seconds (must be >= 0.0)
+  func setLoopDelay(_ delay: TimeInterval) {
+    let clamped = max(0.0, delay)
+    configuration.loopDelay = clamped
+  }
+
+  
   /// Get current playback state.
   ///
   /// - Returns: Current `OverlayState`

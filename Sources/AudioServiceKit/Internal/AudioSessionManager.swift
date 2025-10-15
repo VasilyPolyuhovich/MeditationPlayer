@@ -29,7 +29,25 @@ actor AudioSessionManager {
         guard !isConfigured else { return }
         
         do {
-            // Set category to playback for background audio
+            // MARK: Advanced Configuration for Maximum Stability
+            
+            // 1. Set preferred buffer duration (larger = more stable, higher latency)
+            // 0.02s (20ms) provides excellent stability while keeping latency acceptable
+            // For meditation/ambient apps, latency is less critical than stability
+            let preferredBufferDuration: TimeInterval = 0.02
+            try session.setPreferredIOBufferDuration(preferredBufferDuration)
+            
+            // 2. Set preferred sample rate to avoid resampling
+            // 44100 Hz is standard for most audio files
+            let preferredSampleRate: Double = 44100.0
+            try session.setPreferredSampleRate(preferredSampleRate)
+            
+            // 3. Minimize interruptions from system alerts (iOS 14.5+)
+            if #available(iOS 14.5, *) {
+                try session.setPrefersNoInterruptionsFromSystemAlerts(true)
+            }
+            
+            // 4. Set category to playback for background audio
             // Add .mixWithOthers option if requested
             let options: AVAudioSession.CategoryOptions = mixWithOthers ? [.mixWithOthers] : []
             
@@ -39,10 +57,28 @@ actor AudioSessionManager {
                 options: options
             )
             
+            // 5. Validate actual vs preferred settings
+            let actualBufferDuration = session.ioBufferDuration
+            let actualSampleRate = session.sampleRate
+            
+            print("[AudioSession] Configuration:")
+            print("  Preferred buffer: \(preferredBufferDuration)s")
+            print("  Actual buffer: \(actualBufferDuration)s")
+            print("  Preferred sample rate: \(preferredSampleRate) Hz")
+            print("  Actual sample rate: \(actualSampleRate) Hz")
+            
+            if abs(actualBufferDuration - preferredBufferDuration) > 0.005 {
+                print("  ⚠️ WARNING: Buffer duration mismatch (difference > 5ms)")
+            }
+            
+            if abs(actualSampleRate - preferredSampleRate) > 100 {
+                print("  ⚠️ WARNING: Sample rate mismatch (difference > 100 Hz)")
+            }
+            
             isConfigured = true
         } catch {
             throw AudioPlayerError.sessionConfigurationFailed(
-                reason: "Failed to set audio session category: \(error.localizedDescription)"
+                reason: "Failed to configure audio session: \(error.localizedDescription)"
             )
         }
     }

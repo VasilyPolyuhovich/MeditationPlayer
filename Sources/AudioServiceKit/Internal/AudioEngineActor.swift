@@ -705,9 +705,12 @@ actor AudioEngineActor {
             return nil
         }
         
-        // ✅ FIX: Increased buffer for better synchronization (4096 samples ≈ 93ms at 44.1kHz)
+        // ✅ STABILITY: Increased buffer for maximum stability (8192 samples ≈ 186ms at 44.1kHz)
         // Prevents timing glitches with complex audio files or high system load
-        let bufferSamples: AVAudioFramePosition = 4096  // Was: 2048
+        // Larger buffer = more stable playback, especially with Bluetooth/AirPods
+        // Trade-off: Slightly higher latency, but critical for artifact-free audio
+        let bufferSamples: AVAudioFramePosition = 8192  // Was: 2048 → 4096 → 8192
+
         let startSampleTime = lastRenderTime.sampleTime + bufferSamples
         
         return AVAudioTime(

@@ -1581,6 +1581,59 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await audioEngine.setOverlayVolume(volume)
     }
     
+    /// Set overlay loop mode dynamically during playback
+    ///
+    /// Changes the loop behavior of the overlay player in real-time. The new mode takes effect
+    /// on the next loop iteration (current iteration completes first).
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // User toggles "infinite loop" in UI
+    /// await player.setOverlayLoopMode(.infinite)
+    ///
+    /// // User changes to play 5 times
+    /// await player.setOverlayLoopMode(.count(5))
+    /// ```
+    ///
+    /// - Parameter mode: New loop mode (`.once`, `.count(n)`, `.infinite`)
+    /// - Throws: `AudioPlayerError.invalidState` if no overlay is active
+    public func setOverlayLoopMode(_ mode: OverlayConfiguration.LoopMode) async throws {
+        guard let overlay = await audioEngine.overlayPlayer else {
+            throw AudioPlayerError.invalidState(
+                current: "no overlay",
+                attempted: "set loop mode"
+            )
+        }
+        await overlay.setLoopMode(mode)
+    }
+    
+    /// Set overlay loop delay dynamically during playback
+    ///
+    /// Changes the delay between loop iterations in real-time. The new delay takes effect
+    /// on the next loop iteration (current delay completes if active).
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // User adjusts "delay between sounds" slider to 10 seconds
+    /// await player.setOverlayLoopDelay(10.0)
+    ///
+    /// // Remove delay for continuous playback
+    /// await player.setOverlayLoopDelay(0.0)
+    /// ```
+    ///
+    /// - Parameter delay: Delay in seconds between iterations (must be >= 0.0)
+    /// - Throws: `AudioPlayerError.invalidState` if no overlay is active
+    public func setOverlayLoopDelay(_ delay: TimeInterval) async throws {
+        guard let overlay = await audioEngine.overlayPlayer else {
+            throw AudioPlayerError.invalidState(
+                current: "no overlay",
+                attempted: "set loop delay"
+            )
+        }
+        await overlay.setLoopDelay(delay)
+    }
+
+    
     /// Get current overlay player state
     ///
     /// Returns the current state of the overlay player for UI updates and state tracking.
