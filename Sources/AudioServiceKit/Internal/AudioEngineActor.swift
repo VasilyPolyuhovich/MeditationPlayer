@@ -209,6 +209,13 @@ actor AudioEngineActor {
     
     /// Stop both players completely and reset volumes
     func stopBothPlayers() {
+        // 🔍 DIAGNOSTIC: Log before stopping
+        let playerAPlaying = playerNodeA.isPlaying
+        let playerBPlaying = playerNodeB.isPlaying
+        let mixerAVol = mixerNodeA.volume
+        let mixerBVol = mixerNodeB.volume
+        print("[STOP_DIAGNOSTIC] stopBothPlayers: playerA.isPlaying=\(playerAPlaying), playerB.isPlaying=\(playerBPlaying), mixerA.vol=\(mixerAVol), mixerB.vol=\(mixerBVol)")
+        
         // Cancel active crossfade if running
         cancelActiveCrossfade()
         
@@ -216,6 +223,8 @@ actor AudioEngineActor {
         playerNodeB.stop()
         mixerNodeA.volume = 0.0
         mixerNodeB.volume = 0.0
+        print("[STOP_DIAGNOSTIC] stopBothPlayers: DONE - players stopped, mixers reset to 0")
+
         
         if isEngineRunning {
             engine.stop()
@@ -508,7 +517,11 @@ actor AudioEngineActor {
     /// - Note: This is different from targetVolume (mainMixer.volume)
     /// - Note: During crossfade, active mixer may have different volume than target
     func getActiveMixerVolume() -> Float {
-        return getActiveMixerNode().volume
+        let mixerNode = getActiveMixerNode()
+        let vol = mixerNode.volume
+        let mixerName = (mixerNode === mixerNodeA) ? "MixerA" : "MixerB"
+        print("[STOP_DIAGNOSTIC] getActiveMixerVolume: \(mixerName).volume = \(vol)")
+        return vol
     }
     
     func fadeVolume(
@@ -520,7 +533,10 @@ actor AudioEngineActor {
     ) async {
         // ✅ DEBUG: Log fade parameters
         let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
+        let playerNode = getActivePlayerNode()
+        let isPlayingStart = playerNode.isPlaying
         print("[FADE_DEBUG] \(mixerName): from=\(from) → to=\(to), duration=\(duration)s, curve=\(curve)")
+        print("[STOP_DIAGNOSTIC] fadeVolume START: mixer=\(mixerName), playerIsPlaying=\(isPlayingStart), currentMixerVol=\(mixer.volume)")
         
         // FIXED Issue #9: Adaptive step sizing for efficient fading
         // Short fades need high frequency updates for smoothness
@@ -541,11 +557,19 @@ actor AudioEngineActor {
         
         print("[FADE_DEBUG] \(mixerName): steps=\(steps), stepTime=\(stepTime*1000)ms, stepsPerSecond=\(stepsPerSecond)")
         
+        // 🔍 DIAGNOSTIC: Check if player stops during fade
+        var wasPlayingDuringFade = isPlayingStart
+        
         // ✅ DEBUG: Log first 5 and last 5 steps
         var loggedSteps: Set<Int> = []
         for i in 0..<5 {
             loggedSteps.insert(i)
             loggedSteps.insert(steps - i)
+        }
+        // 🔍 Also log every 10% progress for stop fade diagnostic
+        for percent in [10, 20, 30, 40, 50, 60, 70, 80, 90] {
+            let stepIndex = (steps * percent) / 100
+            loggedSteps.insert(stepIndex)
         }
         
         for i in 0...steps {
@@ -559,33 +583,38 @@ actor AudioEngineActor {
             let progress = Float(i) / Float(steps)
             
             // Calculate volume based on curve type
-            let curveValue: Float
-            if from < to {
-                // Fading in (0 -> 1)
-                curveValue = curve.volume(for: progress)
-            } else {
-                // Fading out (1 -> 0)
-                curveValue = curve.inverseVolume(for: progress)
-            }
+            // Formula: from + (to - from) * curve automatically handles direction
+            // No need for inverseVolume - it would double-invert for fade-out
+            let curveValue = curve.volume(for: progress)
             
             // Apply curve to the range [from, to]
             let newVolume = from + (to - from) * curveValue
             mixer.volume = newVolume
             
+            // 🔍 DIAGNOSTIC: Check if player is still playing
+            let isPlayingNow = playerNode.isPlaying
+            if !isPlayingNow && wasPlayingDuringFade {
+                print("[STOP_DIAGNOSTIC] ⚠️ Player STOPPED during fade at step \(i)/\(steps), progress=\(progress)")
+                wasPlayingDuringFade = false
+            }
+            
             // ✅ DEBUG: Log critical steps
             if loggedSteps.contains(i) {
-                print("[FADE_DEBUG] \(mixerName): step[\(i)/\(steps)] progress=\(progress) curveValue=\(curveValue) volume=\(newVolume)")
+                print("[FADE_DEBUG] \(mixerName): step[\(i)/\(steps)] progress=\(progress) curveValue=\(curveValue) volume=\(newVolume), playerPlaying=\(isPlayingNow)")
             }
             
             try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
         }
         
         // Ensure final volume is exact (only if not cancelled)
+        let isPlayingEnd = playerNode.isPlaying
         if !Task.isCancelled {
             mixer.volume = to
             print("[FADE_DEBUG] \(mixerName): COMPLETE - final volume=\(to)")
+            print("[STOP_DIAGNOSTIC] fadeVolume END: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd), finalMixerVol=\(mixer.volume)")
         } else {
             print("[FADE_DEBUG] \(mixerName): CANCELLED before completion")
+            print("[STOP_DIAGNOSTIC] fadeVolume CANCELLED: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd)")
         }
     }
     
@@ -868,8 +897,13 @@ actor AudioEngineActor {
     
     // MARK: - Helper Methods
     
-    private func getActivePlayerNode() -> AVAudioPlayerNode {
+    func getActivePlayerNode() -> AVAudioPlayerNode {
         return activePlayer == .a ? playerNodeA : playerNodeB
+    }
+    
+    /// Get active player's playing state (Sendable)
+    func isActivePlayerPlaying() -> Bool {
+        return getActivePlayerNode().isPlaying
     }
     
     private func getActiveMixerNode() -> AVAudioMixerNode {
@@ -902,6 +936,8 @@ actor AudioEngineActor {
         curve: FadeCurve = .equalPower
     ) async {
         let mixer = getActiveMixerNode()
+        let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
+        print("[STOP_DIAGNOSTIC] fadeActiveMixer: mixer=\(mixerName), from=\(from), to=\(to), currentMixerVol=\(mixer.volume), duration=\(duration)s")
         await fadeVolume(
             mixer: mixer,
             from: from,

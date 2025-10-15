@@ -6,88 +6,92 @@ struct PlayerControls: View {
     
     var body: some View {
         VStack(spacing: 20) {
-            // Primary Controls
-            HStack(spacing: 40) {
-                // Skip Backward (15s)
-                Button {
-                    Task {
-                        try? await viewModel.skipBackward()
-                    }
-                } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.title)
-                        .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
-                }
-                .disabled(!viewModel.canSkip)
-                
-                // Previous Track
-                Button {
-                    Task {
-                        try? await viewModel.previousTrack()
-                    }
-                } label: {
-                    Image(systemName: "backward.fill")
-                        .font(.title2)
-                        .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
-                }
-                .disabled(!viewModel.canSkip)
-                
-                // Play/Pause
-                Button {
-                    Task {
-                        do {
-                            if viewModel.isPlaying {
-                                // ✅ FIX: pause() throws
-                                try await viewModel.pause()
-                            } else if viewModel.isPaused {
-                                // ✅ FIX: resume() throws
-                                try await viewModel.resume()
-                            } else {
-                                // Load default playlist if nothing loaded
-                                if viewModel.position == nil {
-                                    do {
-                                        try await viewModel.loadPlaylist(["sample2", "sample3"])
-                                    } catch {
-                                        print("Failed to load default playlist: \(error)")
-                                        return
-                                    }
-                                }
-                                try await viewModel.play()
-                            }
-                        } catch {
-                            print("Playback error: \(error)")
+            // Primary Controls - Adaptive spacing with GeometryReader
+            GeometryReader { geometry in
+                HStack(spacing: geometry.size.width * 0.04) { // 4% adaptive spacing
+                    // Skip Backward (15s)
+                    Button {
+                        Task {
+                            try? await viewModel.skipBackward()
                         }
+                    } label: {
+                        Image(systemName: "gobackward.15")
+                            .font(.title)
+                            .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
                     }
-                } label: {
-                    Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 72))
-                        .foregroundStyle(.blue)
-                }
-                
-                // Next Track
-                Button {
-                    Task {
-                        try? await viewModel.nextTrack()
+                    .disabled(!viewModel.canSkip)
+                    
+                    // Previous Track
+                    Button {
+                        Task {
+                            try? await viewModel.previousTrack()
+                        }
+                    } label: {
+                        Image(systemName: "backward.fill")
+                            .font(.title2)
+                            .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
                     }
-                } label: {
-                    Image(systemName: "forward.fill")
-                        .font(.title2)
-                        .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
-                }
-                .disabled(!viewModel.canSkip)
-                
-                // Skip Forward (15s)
-                Button {
-                    Task {
-                        try? await viewModel.skipForward()
+                    .disabled(!viewModel.canSkip)
+                    
+                    // Play/Pause
+                    Button {
+                        Task {
+                            do {
+                                if viewModel.isPlaying {
+                                    // ✅ FIX: pause() throws
+                                    try await viewModel.pause()
+                                } else if viewModel.isPaused {
+                                    // ✅ FIX: resume() throws
+                                    try await viewModel.resume()
+                                } else {
+                                    // Load default playlist if nothing loaded
+                                    if viewModel.position == nil {
+                                        do {
+                                            try await viewModel.loadPlaylist(["sample2", "sample3"])
+                                        } catch {
+                                            print("Failed to load default playlist: \(error)")
+                                            return
+                                        }
+                                    }
+                                    try await viewModel.play()
+                                }
+                            } catch {
+                                print("Playback error: \(error)")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: viewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                            .font(.system(size: 72))
+                            .foregroundStyle(.blue)
                     }
-                } label: {
-                    Image(systemName: "goforward.15")
-                        .font(.title)
-                        .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
+                    
+                    // Next Track
+                    Button {
+                        Task {
+                            try? await viewModel.nextTrack()
+                        }
+                    } label: {
+                        Image(systemName: "forward.fill")
+                            .font(.title2)
+                            .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
+                    }
+                    .disabled(!viewModel.canSkip)
+                    
+                    // Skip Forward (15s)
+                    Button {
+                        Task {
+                            try? await viewModel.skipForward()
+                        }
+                    } label: {
+                        Image(systemName: "goforward.15")
+                            .font(.title)
+                            .foregroundStyle(viewModel.canSkip ? .primary : .secondary)
+                    }
+                    .disabled(!viewModel.canSkip)
                 }
-                .disabled(!viewModel.canSkip)
+                .frame(maxWidth: .infinity)
             }
+            .frame(height: 80) // Fixed height for button container
             
             // Secondary Controls
             HStack(spacing: 12) {

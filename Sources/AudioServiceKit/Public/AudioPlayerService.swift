@@ -327,6 +327,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Fade duration is clamped to 0.0-10.0 seconds range
     /// - Note: If stop called during crossfade, crossfade is cancelled and fadeout is performed on active track
     public func stop(fadeDuration: TimeInterval? = nil) async {
+        // 🔍 DIAGNOSTIC: Log stop entry
+        let playerIsPlaying = await audioEngine.isActivePlayerPlaying()
+        let mixerVolume = await audioEngine.getActiveMixerVolume()
+        let targetVol = await audioEngine.getTargetVolume()
+        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration?.description ?? "nil"), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(self.state)")
         // ✅ FIX: If crossfade in progress, cancel it and stop inactive player
         // Active player will fade out naturally
         if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
@@ -357,11 +362,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Clamp duration to safe range
         let clampedDuration = max(0.0, min(10.0, duration))
         
+        // 🔍 DIAGNOSTIC: Check player state BEFORE getting volume
+        let playerIsPlayingBefore = await audioEngine.isActivePlayerPlaying()
+        Self.logger.debug("[STOP_DIAGNOSTIC] Before fade: playerIsPlaying=\(playerIsPlayingBefore)")
+        
         // ✅ FIX #2: Get ACTUAL mixer volume, not target volume
         // targetVolume is for mainMixer (global), we need activeMixer volume
         let currentVolume = await audioEngine.getActiveMixerVolume()
         
         Self.logger.debug("[STOP_FADE] Starting fade: volume=\(currentVolume) → 0.0, duration=\(clampedDuration)s")
+        Self.logger.debug("[STOP_DIAGNOSTIC] Fade params: from=\(currentVolume), to=0.0, duration=\(clampedDuration)s")
         
         // Fade out active mixer
         await audioEngine.fadeActiveMixer(
@@ -370,6 +380,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             duration: clampedDuration,
             curve: configuration.fadeCurve
         )
+        
+        // 🔍 DIAGNOSTIC: Check state AFTER fade
+        let playerIsPlayingAfter = await audioEngine.isActivePlayerPlaying()
+        let mixerVolumeAfter = await audioEngine.getActiveMixerVolume()
+        Self.logger.debug("[STOP_DIAGNOSTIC] After fade: playerIsPlaying=\(playerIsPlayingAfter), mixerVol=\(mixerVolumeAfter)")
         
         Self.logger.debug("[STOP_FADE] Fade complete, performing instant stop")
         
@@ -380,9 +395,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// Stop playback immediately without fade
     /// - Note: This is the original stop() behavior
     private func stopImmediately() async {
+        // 🔍 DIAGNOSTIC: Log immediate stop
+        Self.logger.debug("[STOP_DIAGNOSTIC] stopImmediately START")
+        
         // Stop playback components
         stopPlaybackTimer()
         await audioEngine.stopBothPlayers()
+        
+        Self.logger.debug("[STOP_DIAGNOSTIC] stopImmediately: players stopped")
         
         // ISSUE #7 FIX: Deactivate audio session
         try? await sessionManager.deactivate()
@@ -927,12 +947,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Returns empty array if no playlist loaded
     public func getPlaylist() async -> [URL] {
         return await playlistManager.getPlaylist()
-    }
-    
-    /// Get current track index in playlist
-    /// - Returns: Zero-based index of current track
-    public func getCurrentTrackIndex() async -> Int {
-        return await playlistManager.currentIndex
     }
     
     // MARK: - Playlist Navigation

@@ -107,6 +107,13 @@ struct StatusCard: View {
                 }
             }
             
+            // Playlist Name
+            if !viewModel.currentPlaylistName.isEmpty {
+                Text(viewModel.currentPlaylistName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            
             // Position
             Text(viewModel.formattedPosition)
                 .font(.title2)

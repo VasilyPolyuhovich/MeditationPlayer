@@ -15,6 +15,7 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     var state: PlayerState = .finished
     var position: PlaybackPosition?
     var currentTrackIndex: Int = 0
+    var currentPlaylistName: String = ""
     var errorMessage: String?
     
     // MARK: - Configuration
@@ -53,9 +54,14 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             throw AudioPlayerError.fileLoadFailed(reason: "No valid audio files in bundle")
         }
         try await audioService.loadPlaylist(urls)
+        currentPlaylistName = detectPlaylistName(urls)
+        await updateTrackInfo()
+
     }
     
     func play() async throws {
+        await updateTrackInfo()
+
         try await audioService.startPlaying(fadeDuration: startFadeInDuration)
     }
     
@@ -81,10 +87,13 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     func nextTrack() async throws {
         try await audioService.skipToNext()
+        await updateTrackInfo()
+
     }
     
     func previousTrack() async throws {
         try await audioService.skipToPrevious()
+        await updateTrackInfo()
     }
     
     func replacePlaylist(_ tracks: [String]) async throws {
@@ -94,6 +103,8 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             throw AudioPlayerError.fileLoadFailed(reason: "No valid audio files in bundle")
         }
         try await audioService.replacePlaylist(urls)
+        currentPlaylistName = detectPlaylistName(urls)
+        await updateTrackInfo()
     }
     
     func nextPlaylist() async throws {
@@ -157,10 +168,22 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
     
     // MARK: - CrossfadeProgressObserver
+    // MARK: - CrossfadeProgressObserver
     
     func crossfadeProgressDidUpdate(_ progress: CrossfadeProgress) async {
-        crossfadeProgress = progress
+        // Check if crossfade finished (idle phase)
+        if case .idle = progress.phase {
+            // Add 0.5s delay before hiding visualizer (better UX)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(500))
+                crossfadeProgress = progress
+            }
+        } else {
+            // Immediately update for active phases
+            crossfadeProgress = progress
+        }
     }
+
     
     // MARK: - Helpers
     
@@ -171,6 +194,29 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         }
         return url
     }
+    
+    /// Update track info from audio service
+    private func updateTrackInfo() async {
+        currentTrackIndex = await audioService.getCurrentTrackIndex()
+    }
+    
+    /// Detect playlist name by comparing track arrays
+    private func detectPlaylistName(_ urls: [URL]) -> String {
+        // Extract track names from URLs
+        let trackNames = urls.map { url in
+            url.deletingPathExtension().lastPathComponent
+        }
+        
+        // Compare with presets
+        for (name, presetTracks) in Self.presets {
+            if presetTracks == trackNames {
+                return name
+            }
+        }
+        
+        return "Custom Playlist (\(urls.count) tracks)"
+    }
+
     
     // MARK: - Computed Properties
     

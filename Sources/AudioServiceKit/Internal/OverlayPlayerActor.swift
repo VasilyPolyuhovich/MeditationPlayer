@@ -449,14 +449,9 @@ actor OverlayPlayerActor {
       let progress = Float(i) / Float(steps)
       
       // Calculate volume based on curve
-      let curveValue: Float
-      if from < to {
-        // Fading in (0 -> 1)
-        curveValue = fadeCurve.volume(for: progress)
-      } else {
-        // Fading out (1 -> 0)
-        curveValue = fadeCurve.inverseVolume(for: progress)
-      }
+      // Formula: from + (to - from) * curve automatically handles direction
+      // No need for inverseVolume - it would double-invert for fade-out
+      let curveValue = fadeCurve.volume(for: progress)
       
       // Apply curve to range [from, to]
       let newVolume = from + (to - from) * curveValue
