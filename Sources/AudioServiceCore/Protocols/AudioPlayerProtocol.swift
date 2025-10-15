@@ -14,12 +14,20 @@ public protocol AudioPlayerProtocol: Actor {
     /// Current playback position
     var playbackPosition: PlaybackPosition? { get }
     
-    /// Start playing audio from URL
-    /// - Parameters:
-    ///   - url: URL of local audio file
-    ///   - configuration: Playback configuration
-    /// - Throws: AudioPlayerError if playback cannot start
-    func startPlaying(url: URL, configuration: PlayerConfiguration) async throws
+    /// Start playback with optional fade-in
+    ///
+    /// Plays the current track from playlist with configurable fade-in.
+    /// Uses track from playlist manager's current track.
+    ///
+    /// - Parameter fadeDuration: Fade-in duration in seconds (0.0 = no fade, instant start)
+    /// - Throws:
+    ///   - `AudioPlayerError.emptyPlaylist` if playlist is empty
+    ///   - `AudioPlayerError.invalidState` if cannot transition to playing
+    ///   - `AudioPlayerError.fileNotFound` if track file doesn't exist
+    ///
+    /// - Note: Configuration must be set via initializer or `updateConfiguration()`
+    /// - Note: fadeDuration is independent from crossfade between tracks
+    func startPlaying(fadeDuration: TimeInterval) async throws
     
     /// Pause playback
     /// - Throws: AudioPlayerError if cannot pause in current state
@@ -53,14 +61,26 @@ public protocol AudioPlayerProtocol: Actor {
     func setVolume(_ volume: Float) async
 }
 
-/// Protocol for audio player with advanced features (crossfading, replacement)
-public protocol AdvancedAudioPlayerProtocol: AudioPlayerProtocol {
-    /// Replace currently playing audio with crossfade
-    /// - Parameters:
-    ///   - url: URL of new audio file
-    ///   - crossfadeDuration: Duration of crossfade transition
+/// Protocol for audio player with playlist management
+public protocol PlaylistAudioPlayerProtocol: AudioPlayerProtocol {
+    /// Load initial playlist before playback
+    /// - Parameter tracks: Array of track URLs
+    /// - Throws: AudioPlayerError if playlist is empty
+    func loadPlaylist(_ tracks: [URL]) async throws
+    
+    /// Replace current playlist with crossfade
+    /// - Parameter tracks: New playlist tracks
     /// - Throws: AudioPlayerError if replacement fails
-    func replace(url: URL, crossfadeDuration: TimeInterval) async throws
+    /// - Note: Uses configuration.crossfadeDuration for crossfade
+    func replacePlaylist(_ tracks: [URL]) async throws
+    
+    /// Skip to next track in playlist
+    /// - Throws: AudioPlayerError if no next track
+    func skipToNext() async throws
+    
+    /// Skip to previous track in playlist
+    /// - Throws: AudioPlayerError if no previous track
+    func skipToPrevious() async throws
 }
 
 /// Protocol for observing player state changes

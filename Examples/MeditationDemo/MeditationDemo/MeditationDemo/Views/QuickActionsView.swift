@@ -77,7 +77,7 @@ struct QuickActionsView: View {
                     VStack(spacing: 2) {
                         Text("Volume")
                             .font(.caption2)
-                        Text("\(viewModel.volume)%")
+                        Text("\(Int(viewModel.volume * 100))%")
                             .font(.caption2)
                             .fontWeight(.semibold)
                     }
@@ -99,10 +99,9 @@ struct QuickActionsView: View {
                 Slider(value: Binding(
                     get: { Double(viewModel.volume) },
                     set: { newValue in
-                        let intValue = Int(newValue)
-                        Task { await viewModel.setVolume(intValue) }
+                        Task { await viewModel.setVolume(Float(newValue)) }
                     }
-                ), in: 0...100, step: 1)
+                ), in: 0.0...1.0, step: 0.01)
                 
                 Image(systemName: "speaker.wave.3")
                     .font(.caption)

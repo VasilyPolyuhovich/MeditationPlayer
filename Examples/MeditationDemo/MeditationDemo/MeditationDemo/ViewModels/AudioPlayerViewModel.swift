@@ -37,15 +37,12 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     // MARK: - Configuration (Editable)
     
     var crossfadeDuration: Double = 10.0
-    var volume: Int = 100  // 0-100 (UI-friendly)
-    var enableLooping: Bool = true
+    var volume: Float = 1.0  // 0.0-1.0 (v4.0)
     var repeatCount: Int? = nil
     var selectedCurve: FadeCurve = .equalPower
     
-    // Repeat Mode (Feature #1)
+    // Repeat Mode (v4.0)
     var repeatMode: RepeatMode = .off
-    var singleTrackFadeIn: TimeInterval = 2.0  // 0.5-10.0s
-    var singleTrackFadeOut: TimeInterval = 2.0  // 0.5-10.0s
     private(set) var currentRepeatCount: Int = 0
     
     // Audio Session (NEW)
@@ -75,7 +72,6 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     func play() async {
         do {
-            let config = currentConfiguration
             let trackURLs = currentPlaylist.map { trackURL(named: $0) }
             currentTrack = currentPlaylist[0]
             currentTrackIndex = 0
@@ -83,8 +79,9 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             // Reset repeat count for new playback
             currentRepeatCount = 0
             
-            // Use SDK playlist API
-            try await audioService.loadPlaylist(trackURLs, configuration: config)
+            // v4.0 API: loadPlaylist, then startPlaying with fade-in
+            try await audioService.loadPlaylist(trackURLs)
+            try await audioService.startPlaying(fadeDuration: 2.0)
         } catch {
             print("❌ Play failed: \(error)")
         }
@@ -165,35 +162,18 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         }
     }
     
-    func setVolume(_ value: Int) async {
+    func setVolume(_ value: Float) async {
         self.volume = value
-        // Convert to Float 0.0-1.0 for SDK
-        let volumeFloat = Float(value) / 100.0
-        await audioService.setVolume(volumeFloat)
+        await audioService.setVolume(value)
     }
     
-    // MARK: - Repeat Mode Control (Feature #1)
+    // MARK: - Repeat Mode Control (v4.0)
     
     /// Set repeat mode using SDK
     func updateRepeatMode(_ mode: RepeatMode) async {
         self.repeatMode = mode
         await audioService.setRepeatMode(mode)
         print("✅ Repeat mode set to: \(mode)")
-    }
-    
-    /// Update single track fade durations with debounce (500ms)
-    func updateSingleTrackFadeDurations() async {
-        // Debounce logic would be ideal, but for simplicity we call directly
-        // In production, use a Task with delay cancellation
-        do {
-            try await audioService.setSingleTrackFadeDurations(
-                fadeIn: singleTrackFadeIn,
-                fadeOut: singleTrackFadeOut
-            )
-            print("✅ Single track fade durations updated: in=\(singleTrackFadeIn)s, out=\(singleTrackFadeOut)s")
-        } catch {
-            print("❌ Failed to set fade durations: \(error)")
-        }
     }
     
     // MARK: - AudioPlayerObserver Protocol
@@ -253,9 +233,6 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             crossfadeDuration: crossfadeDuration,
             fadeCurve: selectedCurve,
             repeatMode: repeatMode,
-            repeatCount: repeatCount,
-            singleTrackFadeInDuration: singleTrackFadeIn,
-            singleTrackFadeOutDuration: singleTrackFadeOut,
             volume: volume,
             mixWithOthers: mixWithOthers
         )
@@ -267,13 +244,10 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     
     private func resetConfigurationToDefaults() {
         crossfadeDuration = 10.0
-        volume = 100
-        enableLooping = true
+        volume = 1.0  // v4.0: Float 0.0-1.0
         repeatCount = nil
         selectedCurve = .equalPower
         repeatMode = .off
-        singleTrackFadeIn = 2.0
-        singleTrackFadeOut = 2.0
         currentRepeatCount = 0
         mixWithOthers = false
     }
@@ -371,10 +345,7 @@ class AudioPlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
         let trackURLs = tracks.map { trackURL(named: $0) }
         
         // Call SDK's swapPlaylist method
-        try await audioService.swapPlaylist(
-            tracks: trackURLs,
-            crossfadeDuration: crossfadeDuration
-        )
+        try await audioService.replacePlaylist(trackURLs)
         
         // Update UI state
         currentTrackIndex = await audioService.getCurrentTrackIndex()

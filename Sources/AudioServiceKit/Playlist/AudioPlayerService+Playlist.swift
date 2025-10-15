@@ -15,42 +15,6 @@ extension AudioPlayerService {
     
     // MARK: - Playlist Management API
     
-    /// Load and start playing a playlist
-    /// - Parameters:
-    ///   - tracks: Array of track URLs
-    ///   - configuration: Player configuration (uses current if nil)
-    /// - Throws: AudioPlayerError if playlist is empty or playback fails
-    public func loadPlaylist(
-        _ tracks: [URL],
-        configuration: PlayerConfiguration? = nil
-    ) async throws {
-        // Validate playlist
-        guard !tracks.isEmpty else {
-            throw AudioPlayerError.emptyPlaylist
-        }
-        
-        // Update configuration if provided
-        if let newConfig = configuration {
-            try newConfig.validate()
-            self.configuration = newConfig
-        }
-        
-        // Load playlist
-        await playlistManager.load(tracks: tracks)
-        
-        // Get first track
-        guard let firstTrack = await playlistManager.getCurrentTrack() else {
-            throw AudioPlayerError.emptyPlaylist
-        }
-        
-        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
-        
-        // Start playback with fade in
-        try await startPlayingTrack(
-            url: firstTrack,
-            fadeIn: (configuration ?? self.configuration).fadeInDuration
-        )
-    }
     
     /// Add track to playlist
     /// - Parameter url: Track URL to add
@@ -183,44 +147,6 @@ extension AudioPlayerService {
     }
     
     // MARK: - Private Helpers
-    
-    /// Start playing specific track with fade in
-    private func startPlayingTrack(url: URL, fadeIn: TimeInterval) async throws {
-        // Configure audio session
-        try await sessionManager.configure()
-        try await sessionManager.activate()
-        
-        // Prepare audio engine
-        try await audioEngine.prepare()
-        
-        // Load audio file
-        let trackInfo = try await audioEngine.loadAudioFile(url: url)
-        self.currentTrack = trackInfo
-        self.currentTrackURL = url
-        
-        // Enter preparing state
-        let success = await stateMachine.enterPreparing()
-        Logger.state.assertTransition(
-            success,
-            from: state.description,
-            to: "preparing"
-        )
-        
-        guard success else {
-            throw AudioPlayerError.invalidState(
-                current: state.description,
-                attempted: "start playing"
-            )
-        }
-        
-        Self.logger.info("Started playing track: \(trackInfo.title)")
-        
-        // Update now playing info
-        await updateNowPlayingInfo()
-        
-        // Start playback timer
-        startPlaybackTimer()
-    }
     
     /// Crossfade to specific track
     private func crossfadeToTrack(url: URL) async throws {

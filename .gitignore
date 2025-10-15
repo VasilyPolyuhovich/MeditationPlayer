@@ -105,3 +105,101 @@ docs/.build/
 
 # Test results
 *.xcresult
+
+# ============================================================================
+# Claude AI Assistant Files
+# ============================================================================
+# All Claude working files, session notes, and development documentation
+# These files are for AI-assisted development workflow only
+
+# Main Claude directory (ALL working files)
+.claude/
+
+# Claude instructions and context files
+.claude_instructions
+PROJECT_CONTEXT.md
+CHAT_SESSIONS.md
+DECISIONS_LOG.md
+DOCUMENTATION_MAP.md
+QUICK_START.md
+TEMPLATES.md
+USER_ACTION_REQUIRED.md
+CLEANUP_INSTRUCTIONS.md
+START_HERE.md
+NEW_CHAT_MESSAGE.txt
+
+# Session files (handoffs, summaries, etc.)
+SESSION_*.md
+*_SESSION_*.md
+WELCOME_SESSION*.md
+START_HERE_SESSION*.md
+FIRST_MESSAGE_SESSION*.md
+
+# Temporary/Process files
+NEW_CHAT_*.md
+NEXT_CHAT_*.md
+READY_FOR_*.md
+QUICK_TEST_*.md
+*_STARTER.md
+*_SUMMARY.md
+*_COMPLETE.md
+*_FIXES.md
+*_STATUS.md
+*_CHECKLIST.md
+*_HANDOFF.md
+*_BRIEFING.md
+*_BRIEF.md
+*_INDEX.md
+*_CONTEXT*.md
+
+# Development process files
+BUG_FIX_*.md
+CODE_REVIEW_*.md
+CROSSFADE_*.md
+DEBUG_*.md
+DEMO_*.md
+SDK_IMPROVEMENTS_*.md
+TESTING_*.md
+UI_IMPROVEMENTS_*.md
+DOCUMENTATION_UPDATE*.md
+v*_IMPLEMENTATION*.md
+MIGRATION_*.md
+
+# Test/utility scripts (Claude-specific)
+check_build.sh
+clean_and_build.sh
+deep_clean.sh
+verify_migration.sh
+
+# Claude planning/docs directories
+docs/
+scripts/
+
+# Documentation directory Claude files (keep official docs only)
+Documentation/archive/
+Documentation/SESSION_*.md
+Documentation/FEATURE_*.md
+Documentation/NEW_CHAT_*.md
+Documentation/NEW_CHAT_MESSAGE.txt
+Documentation/QUICK_*.md
+Documentation/TRANSITION_*.md
+Documentation/PHASE_*.md
+Documentation/PLAYER_CONFIGURATION_GUIDE.md
+Documentation/TESTING_*.md
+Documentation/*_08_*.md
+Documentation/*_09_*.md
+
+# Temp directory
+Temp/
+
+# ============================================================================
+# What SHOULD be in git (project files):
+# ============================================================================
+# README.md
+# CHANGELOG.md
+# LICENSE
+# Package.swift
+# Sources/
+# Tests/
+# Examples/
+# Documentation/01_Architecture.md through 07_Migration_Guide.md
