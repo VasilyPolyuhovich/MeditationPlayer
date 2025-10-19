@@ -13,6 +13,12 @@ actor AudioEngineActor {
     private let mixerNodeA: AVAudioMixerNode
     private let mixerNodeB: AVAudioMixerNode
     
+    // Overlay player nodes (always attached, ready for use)
+    // nonisolated(unsafe): Safe because nodes are created once, attached once,
+    // then transferred to OverlayPlayerActor where they're exclusively accessed
+    private nonisolated(unsafe) let playerNodeC: AVAudioPlayerNode
+    private nonisolated(unsafe) let mixerNodeC: AVAudioMixerNode
+    
     // Track which player is currently active
     private var activePlayer: PlayerNode = .a
     
@@ -62,6 +68,8 @@ actor AudioEngineActor {
         self.playerNodeB = AVAudioPlayerNode()
         self.mixerNodeA = AVAudioMixerNode()
         self.mixerNodeB = AVAudioMixerNode()
+        self.playerNodeC = AVAudioPlayerNode()
+        self.mixerNodeC = AVAudioMixerNode()
     }
     
     // MARK: - Setup
@@ -77,6 +85,10 @@ actor AudioEngineActor {
         engine.attach(mixerNodeA)
         engine.attach(mixerNodeB)
         
+        // Attach overlay nodes (always ready for use)
+        engine.attach(playerNodeC)
+        engine.attach(mixerNodeC)
+        
         // Get the standard format from output
         let format = engine.outputNode.outputFormat(forBus: 0)
         
@@ -91,15 +103,28 @@ actor AudioEngineActor {
         engine.connect(playerNodeB, to: mixerNodeB, format: format)
         engine.connect(mixerNodeB, to: engine.mainMixerNode, format: format)
         
+        // Connect overlay player C: playerC -> mixerC -> mainMixer
+        engine.connect(playerNodeC, to: mixerNodeC, format: format)
+        engine.connect(mixerNodeC, to: engine.mainMixerNode, format: format)
+        
         // Set initial volumes
         mixerNodeA.volume = 0.0
         mixerNodeB.volume = 0.0
+        mixerNodeC.volume = 0.0  // Overlay starts silent
         engine.mainMixerNode.volume = 1.0
     }
     
     // MARK: - Engine Control
     
     func prepare() throws {
+        // Ensure nodes are attached before preparing
+        guard engine.outputNode.engine != nil else {
+            throw AudioPlayerError.engineStartFailed(
+                reason: "Audio engine not properly initialized - nodes not attached"
+            )
+        }
+        
+        // CRITICAL: Must prepare AFTER nodes are connected and AFTER audio session is active
         engine.prepare()
     }
     
@@ -184,6 +209,13 @@ actor AudioEngineActor {
     
     /// Stop both players completely and reset volumes
     func stopBothPlayers() {
+        // 🔍 DIAGNOSTIC: Log before stopping
+        let playerAPlaying = playerNodeA.isPlaying
+        let playerBPlaying = playerNodeB.isPlaying
+        let mixerAVol = mixerNodeA.volume
+        let mixerBVol = mixerNodeB.volume
+        print("[STOP_DIAGNOSTIC] stopBothPlayers: playerA.isPlaying=\(playerAPlaying), playerB.isPlaying=\(playerBPlaying), mixerA.vol=\(mixerAVol), mixerB.vol=\(mixerBVol)")
+        
         // Cancel active crossfade if running
         cancelActiveCrossfade()
         
@@ -191,6 +223,8 @@ actor AudioEngineActor {
         playerNodeB.stop()
         mixerNodeA.volume = 0.0
         mixerNodeB.volume = 0.0
+        print("[STOP_DIAGNOSTIC] stopBothPlayers: DONE - players stopped, mixers reset to 0")
+
         
         if isEngineRunning {
             engine.stop()
@@ -214,6 +248,32 @@ actor AudioEngineActor {
         // Quick cleanup: reset volumes
         mixerNodeA.volume = 0.0
         mixerNodeB.volume = 0.0
+    }
+    
+    /// Cancel crossfade and stop inactive player
+    /// - Note: Used when stop() is called during crossfade
+    /// - Note: Leaves active mixer volume unchanged for subsequent fadeout
+    func cancelCrossfadeAndStopInactive() async {
+        // 1. Cancel crossfade task
+        guard let task = activeCrossfadeTask else { return }
+        
+        task.cancel()
+        activeCrossfadeTask = nil
+        
+        // Report cancellation
+        crossfadeProgressContinuation?.yield(.idle)
+        crossfadeProgressContinuation?.finish()
+        crossfadeProgressContinuation = nil
+        
+        // 2. Stop inactive player (was fading in, no longer needed)
+        let inactivePlayer = getInactivePlayerNode()
+        inactivePlayer.stop()
+        
+        // 3. Reset inactive mixer to 0
+        getInactiveMixerNode().volume = 0.0
+        
+        // 4. Active mixer volume is LEFT UNCHANGED
+        // stopWithFade() will fade it out from current volume to 0
     }
     
     /// Rollback crossfade transaction - restore active player to normal state
@@ -269,15 +329,16 @@ actor AudioEngineActor {
         return currentActiveVolume
     }
     
-    /// Complete reset - clears all state and files
-    func fullReset() {
-        // Stop everything
+    // MARK: - Cleanup & Reset
+    
+    /// Complete async reset - clears all state including overlay
+    func fullReset() async {
+        // Stop both players
         stopBothPlayers()
         
-        // Stop overlay
-        Task {
-            await stopOverlay()
-        }
+        // Stop engine
+        engine.stop()
+        isEngineRunning = false
         
         // Clear files
         audioFileA = nil
@@ -287,9 +348,18 @@ actor AudioEngineActor {
         playbackOffsetA = 0
         playbackOffsetB = 0
         
+        // Stop overlay
+        await stopOverlay()
+        
         // Reset to player A
         activePlayer = .a
     }
+    
+    // Note: No deinit needed - AVFoundation automatically cleans up engine and nodes
+    // when actor deinitializes. Explicit deinit would require nonisolated(unsafe)
+    // access to actor-isolated properties, which is unsafe in Swift 6 strict concurrency.
+    
+
     
     // MARK: - Audio File Loading
     
@@ -442,6 +512,18 @@ actor AudioEngineActor {
         return targetVolume
     }
     
+    /// Get current active mixer volume
+    /// - Returns: Actual volume of active mixer node (0.0-1.0)
+    /// - Note: This is different from targetVolume (mainMixer.volume)
+    /// - Note: During crossfade, active mixer may have different volume than target
+    func getActiveMixerVolume() -> Float {
+        let mixerNode = getActiveMixerNode()
+        let vol = mixerNode.volume
+        let mixerName = (mixerNode === mixerNodeA) ? "MixerA" : "MixerB"
+        print("[STOP_DIAGNOSTIC] getActiveMixerVolume: \(mixerName).volume = \(vol)")
+        return vol
+    }
+    
     func fadeVolume(
         mixer: AVAudioMixerNode,
         from: Float,
@@ -449,6 +531,13 @@ actor AudioEngineActor {
         duration: TimeInterval,
         curve: FadeCurve = .equalPower
     ) async {
+        // ✅ DEBUG: Log fade parameters
+        let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
+        let playerNode = getActivePlayerNode()
+        let isPlayingStart = playerNode.isPlaying
+        print("[FADE_DEBUG] \(mixerName): from=\(from) → to=\(to), duration=\(duration)s, curve=\(curve)")
+        print("[STOP_DIAGNOSTIC] fadeVolume START: mixer=\(mixerName), playerIsPlaying=\(isPlayingStart), currentMixerVol=\(mixer.volume)")
+        
         // FIXED Issue #9: Adaptive step sizing for efficient fading
         // Short fades need high frequency updates for smoothness
         // Long fades can use lower frequency to reduce CPU usage
@@ -466,35 +555,66 @@ actor AudioEngineActor {
         let steps = Int(duration * Double(stepsPerSecond))
         let stepTime = duration / Double(steps)
         
+        print("[FADE_DEBUG] \(mixerName): steps=\(steps), stepTime=\(stepTime*1000)ms, stepsPerSecond=\(stepsPerSecond)")
+        
+        // 🔍 DIAGNOSTIC: Check if player stops during fade
+        var wasPlayingDuringFade = isPlayingStart
+        
+        // ✅ DEBUG: Log first 5 and last 5 steps
+        var loggedSteps: Set<Int> = []
+        for i in 0..<5 {
+            loggedSteps.insert(i)
+            loggedSteps.insert(steps - i)
+        }
+        // 🔍 Also log every 10% progress for stop fade diagnostic
+        for percent in [10, 20, 30, 40, 50, 60, 70, 80, 90] {
+            let stepIndex = (steps * percent) / 100
+            loggedSteps.insert(stepIndex)
+        }
+        
         for i in 0...steps {
             // FIXED Issue #10A: Check for task cancellation on every step
             // If fade is interrupted (pause/stop) → abort gracefully
             guard !Task.isCancelled else {
+                print("[FADE_DEBUG] \(mixerName): CANCELLED at step \(i)/\(steps)")
                 return // Exit immediately without throwing
             }
             
             let progress = Float(i) / Float(steps)
             
             // Calculate volume based on curve type
-            let curveValue: Float
-            if from < to {
-                // Fading in (0 -> 1)
-                curveValue = curve.volume(for: progress)
-            } else {
-                // Fading out (1 -> 0)
-                curveValue = curve.inverseVolume(for: progress)
-            }
+            // Formula: from + (to - from) * curve automatically handles direction
+            // No need for inverseVolume - it would double-invert for fade-out
+            let curveValue = curve.volume(for: progress)
             
             // Apply curve to the range [from, to]
             let newVolume = from + (to - from) * curveValue
             mixer.volume = newVolume
             
+            // 🔍 DIAGNOSTIC: Check if player is still playing
+            let isPlayingNow = playerNode.isPlaying
+            if !isPlayingNow && wasPlayingDuringFade {
+                print("[STOP_DIAGNOSTIC] ⚠️ Player STOPPED during fade at step \(i)/\(steps), progress=\(progress)")
+                wasPlayingDuringFade = false
+            }
+            
+            // ✅ DEBUG: Log critical steps
+            if loggedSteps.contains(i) {
+                print("[FADE_DEBUG] \(mixerName): step[\(i)/\(steps)] progress=\(progress) curveValue=\(curveValue) volume=\(newVolume), playerPlaying=\(isPlayingNow)")
+            }
+            
             try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
         }
         
         // Ensure final volume is exact (only if not cancelled)
+        let isPlayingEnd = playerNode.isPlaying
         if !Task.isCancelled {
             mixer.volume = to
+            print("[FADE_DEBUG] \(mixerName): COMPLETE - final volume=\(to)")
+            print("[STOP_DIAGNOSTIC] fadeVolume END: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd), finalMixerVol=\(mixer.volume)")
+        } else {
+            print("[FADE_DEBUG] \(mixerName): CANCELLED before completion")
+            print("[STOP_DIAGNOSTIC] fadeVolume CANCELLED: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd)")
         }
     }
     
@@ -585,9 +705,12 @@ actor AudioEngineActor {
             return nil
         }
         
-        // ✅ FIX: Increased buffer for better synchronization (4096 samples ≈ 93ms at 44.1kHz)
+        // ✅ STABILITY: Increased buffer for maximum stability (8192 samples ≈ 186ms at 44.1kHz)
         // Prevents timing glitches with complex audio files or high system load
-        let bufferSamples: AVAudioFramePosition = 4096  // Was: 2048
+        // Larger buffer = more stable playback, especially with Bluetooth/AirPods
+        // Trade-off: Slightly higher latency, but critical for artifact-free audio
+        let bufferSamples: AVAudioFramePosition = 8192  // Was: 2048 → 4096 → 8192
+
         let startSampleTime = lastRenderTime.sampleTime + bufferSamples
         
         return AVAudioTime(
@@ -777,8 +900,13 @@ actor AudioEngineActor {
     
     // MARK: - Helper Methods
     
-    private func getActivePlayerNode() -> AVAudioPlayerNode {
+    func getActivePlayerNode() -> AVAudioPlayerNode {
         return activePlayer == .a ? playerNodeA : playerNodeB
+    }
+    
+    /// Get active player's playing state (Sendable)
+    func isActivePlayerPlaying() -> Bool {
+        return getActivePlayerNode().isPlaying
     }
     
     private func getActiveMixerNode() -> AVAudioMixerNode {
@@ -811,6 +939,8 @@ actor AudioEngineActor {
         curve: FadeCurve = .equalPower
     ) async {
         let mixer = getActiveMixerNode()
+        let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
+        print("[STOP_DIAGNOSTIC] fadeActiveMixer: mixer=\(mixerName), from=\(from), to=\(to), currentMixerVol=\(mixer.volume), duration=\(duration)s")
         await fadeVolume(
             mixer: mixer,
             from: from,
@@ -927,32 +1057,21 @@ actor AudioEngineActor {
             await stopOverlay()
         }
         
-        // 2. Create overlay player nodes
-        // These nodes are created locally and immediately transferred to OverlayPlayerActor
-        // where they will be actor-isolated. This is safe despite the non-Sendable types.
-        nonisolated(unsafe) let playerNode = AVAudioPlayerNode()
-        nonisolated(unsafe) let mixerNode = AVAudioMixerNode()
-        
-        // 3. Attach nodes to engine
-        engine.attach(playerNode)
-        engine.attach(mixerNode)
-        
-        // 4. Connect: PlayerC → MixerC → MainMixer
-        let format = engine.outputNode.outputFormat(forBus: 0)
-        engine.connect(playerNode, to: mixerNode, format: format)
-        engine.connect(mixerNode, to: engine.mainMixerNode, format: format)
-        
-        // 5. Create overlay player actor
+        // 2. Create overlay player actor with pre-attached nodes
+        // Nodes (playerNodeC, mixerNodeC) are already attached and connected during setup
+        // This ensures overlay doesn't interrupt main playback
         overlayPlayer = OverlayPlayerActor(
-            player: playerNode,
-            mixer: mixerNode,
+            player: playerNodeC,
+            mixer: mixerNodeC,
             configuration: configuration
         )
         
-        // 6. Load file and start playback
+        // 3. Load file and start playback
+        // Engine is already running, overlay just plays on its own channel
         try await overlayPlayer?.load(url: url)
         try await overlayPlayer?.play()
     }
+
     
     /// Stop overlay playback with fade-out
     func stopOverlay() async {

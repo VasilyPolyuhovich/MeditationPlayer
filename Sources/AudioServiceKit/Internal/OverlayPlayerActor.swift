@@ -178,37 +178,30 @@ actor OverlayPlayerActor {
   /// - Adds micro-fade to prevent audio clicks
   /// - Cleans up player and mixer state
   func stop() async {
-    // Cancel loop task
+    // 1. Set state FIRST - loopCycle will exit
+    state = .stopping
+    
+    // 2. Cancel loop task
     loopTask?.cancel()
     loopTask = nil
     
-    // Fade out if configured and volume > 0
-    if configuration.fadeOutDuration > 0 && mixer.volume > 0 {
-      state = .stopping
+    // 3. Fade down mixer (general stop fade, NOT loop fade!)
+    if mixer.volume > 0 && configuration.fadeOutDuration > 0 {
       await fadeVolume(
         from: mixer.volume,
         to: 0.0,
         duration: configuration.fadeOutDuration
       )
+    } else {
+      // Instant stop without fade
+      mixer.volume = 0.0
     }
     
-    // Micro-fade to prevent clicks
-    if mixer.volume > 0.01 {
-      await fadeVolume(
-        from: mixer.volume,
-        to: 0.0,
-        duration: 0.02,
-        curve: .linear
-      )
-    }
-    
-    // Small delay for fade completion
-    try? await Task.sleep(nanoseconds: 25_000_000)  // 25ms
-    
-    // Stop and cleanup
+    // 4. Stop player (after fade!)
     player.stop()
     player.reset()
-    mixer.volume = 0.0
+    
+    // 5. Cleanup
     state = .idle
   }
   
@@ -303,6 +296,47 @@ actor OverlayPlayerActor {
     mixer.volume = clamped
   }
   
+  /// Set loop mode dynamically during playback.
+  ///
+  /// ## Behavior:
+  /// - Updates `configuration.loopMode`
+  /// - Takes effect on next loop iteration (current iteration completes)
+  /// - Can change `.once` to `.infinite` while playing
+  ///
+  /// ## Example:
+  /// ```swift
+  /// // Start with limited loops
+  /// try await overlay.play()  // plays 3 times
+  ///
+  /// // User toggles "infinite loop" in UI
+  /// await overlay.setLoopMode(.infinite)  // continues forever
+  /// ```
+  ///
+  /// - Parameter mode: New loop mode (`.once`, `.count(n)`, `.infinite`)
+  func setLoopMode(_ mode: OverlayConfiguration.LoopMode) {
+    configuration.loopMode = mode
+  }
+  
+  /// Set loop delay dynamically during playback.
+  ///
+  /// ## Behavior:
+  /// - Updates `configuration.loopDelay`
+  /// - Takes effect on next loop iteration (current delay completes if active)
+  /// - Useful for adjusting timer intervals in real-time
+  ///
+  /// ## Example:
+  /// ```swift
+  /// // User adjusts "delay between sounds" slider
+  /// await overlay.setLoopDelay(15.0)  // 15 seconds between iterations
+  /// ```
+  ///
+  /// - Parameter delay: Delay in seconds (must be >= 0.0)
+  func setLoopDelay(_ delay: TimeInterval) {
+    let clamped = max(0.0, delay)
+    configuration.loopDelay = clamped
+  }
+
+  
   /// Get current playback state.
   ///
   /// - Returns: Current `OverlayState`
@@ -327,8 +361,8 @@ actor OverlayPlayerActor {
   /// ```
   private func loopCycle() async {
     while shouldContinueLooping() {
-      // Check cancellation before each iteration
-      guard !Task.isCancelled else { break }
+      // Check cancellation and state before each iteration
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 1. Fade in (if configured)
       let shouldFadeIn = configuration.applyFadeOnEachLoop || loopCount == 0
@@ -343,7 +377,7 @@ actor OverlayPlayerActor {
         mixer.volume = configuration.volume
       }
       
-      guard !Task.isCancelled else { break }
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 2. Schedule and play buffer
       scheduleBuffer()
@@ -352,7 +386,7 @@ actor OverlayPlayerActor {
       // 3. Wait for playback to finish
       await waitForPlaybackEnd()
       
-      guard !Task.isCancelled else { break }
+      guard !Task.isCancelled && state == .playing else { break }
       
       // 4. Fade out (if configured)
       let isLastIteration = isLastLoop()
@@ -375,9 +409,9 @@ actor OverlayPlayerActor {
       
       // 7. Apply loop delay (cancellable)
       if configuration.loopDelay > 0 {
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled && state == .playing else { break }
         try? await Task.sleep(nanoseconds: UInt64(configuration.loopDelay * 1_000_000_000))
-        guard !Task.isCancelled else { break }
+        guard !Task.isCancelled && state == .playing else { break }
       }
     }
     
@@ -456,14 +490,9 @@ actor OverlayPlayerActor {
       let progress = Float(i) / Float(steps)
       
       // Calculate volume based on curve
-      let curveValue: Float
-      if from < to {
-        // Fading in (0 -> 1)
-        curveValue = fadeCurve.volume(for: progress)
-      } else {
-        // Fading out (1 -> 0)
-        curveValue = fadeCurve.inverseVolume(for: progress)
-      }
+      // Formula: from + (to - from) * curve automatically handles direction
+      // No need for inverseVolume - it would double-invert for fade-out
+      let curveValue = fadeCurve.volume(for: progress)
       
       // Apply curve to range [from, to]
       let newVolume = from + (to - from) * curveValue

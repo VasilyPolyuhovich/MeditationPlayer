@@ -204,6 +204,30 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Synchronize playlist modifications
     case invalidPlaylistIndex(index: Int, count: Int)
     
+    /// No next track available in playlist
+    ///
+    /// **When it occurs:**
+    /// - Calling skipToNext() at end of sequential playlist
+    /// - No more tracks to advance to
+    ///
+    /// **How to handle:**
+    /// - Check if next track exists before skipping
+    /// - Enable repeat mode for continuous playback
+    /// - Disable "next" button when at end
+    case noNextTrack
+    
+    /// No previous track available in playlist
+    ///
+    /// **When it occurs:**
+    /// - Calling skipToPrevious() at start of sequential playlist
+    /// - No previous tracks to go back to
+    ///
+    /// **How to handle:**
+    /// - Check if previous track exists before skipping
+    /// - Disable "previous" button when at start
+    case noPreviousTrack
+
+    
     // MARK: - Unknown Errors
     
     /// Unknown or unexpected error occurred
@@ -267,6 +291,13 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
         case .invalidPlaylistIndex(let index, let count):
             return "Invalid playlist index \(index) (playlist has \(count) tracks)"
             
+        case .noNextTrack:
+            return "No next track available"
+            
+        case .noPreviousTrack:
+            return "No previous track available"
+
+            
         // Unknown Errors
         case .unknown(let reason):
             return "Unknown error: \(reason)"
@@ -305,7 +336,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             return .system
         case .bufferSchedulingFailed:
             return .playback
-        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex:
+        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack:
             return .playlist
         case .unknown:
             return .unknown
