@@ -226,6 +226,19 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Check if previous track exists before skipping
     /// - Disable "previous" button when at start
     case noPreviousTrack
+    
+    /// Sound effect not found (not preloaded)
+    ///
+    /// **When it occurs:**
+    /// - Playing sound effect that wasn't preloaded
+    /// - Sound effect was unloaded
+    /// - Invalid sound effect ID
+    ///
+    /// **How to handle:**
+    /// - Preload sound effects before playing
+    /// - Check loaded effects list
+    /// - Handle missing effects gracefully
+    case soundEffectNotFound(id: UUID)
 
     
     // MARK: - Unknown Errors
@@ -296,6 +309,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             
         case .noPreviousTrack:
             return "No previous track available"
+            
+        case .soundEffectNotFound(let id):
+            return "Sound effect not found: \(id) - ensure it's preloaded before playing"
 
             
         // Unknown Errors
@@ -336,7 +352,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             return .system
         case .bufferSchedulingFailed:
             return .playback
-        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack:
+        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack, .soundEffectNotFound:
             return .playlist
         case .unknown:
             return .unknown

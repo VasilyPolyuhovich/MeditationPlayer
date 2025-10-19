@@ -20,15 +20,14 @@ import Foundation
 /// config.volume = 0.3
 /// config.fadeInDuration = 2.0
 /// config.fadeOutDuration = 2.0
-/// config.applyFadeOnEachLoop = false  // Continuous loop
 ///
-/// try await service.startOverlay(url: rainURL, configuration: config)
+/// try await service.playOverlay(url: rainURL, configuration: config)
 /// ```
 ///
 /// ## Example: Bell Every 5 Minutes (3 times)
 /// ```swift
 /// let config = OverlayConfiguration.bell(times: 3, interval: 300)
-/// try await service.startOverlay(url: bellURL, configuration: config)
+/// try await service.playOverlay(url: bellURL, configuration: config)
 ///
 /// // Timeline:
 /// // 0:00  → fadeIn → DING → fadeOut → [5 min silence]
@@ -36,7 +35,7 @@ import Foundation
 /// // 10:00 → fadeIn → DING → fadeOut
 /// ```
 ///
-/// - SeeAlso: `AudioPlayerService.startOverlay(url:configuration:)`
+/// - SeeAlso: `AudioPlayerService.playOverlay(url:configuration:)`
 public struct OverlayConfiguration: Sendable, Equatable {
   
   // MARK: - Loop Behavior
@@ -93,35 +92,6 @@ public struct OverlayConfiguration: Sendable, Equatable {
   /// - SeeAlso: `FadeCurve` for available curve types
   public var fadeCurve: FadeCurve
   
-  /// Controls whether fade in/out is applied on each loop iteration.
-  ///
-  /// ## Behavior:
-  /// - `true`: Each loop iteration fades in → plays → fades out
-  ///   - Best for distinct sounds like bells or chimes
-  ///   - Creates clear separation between iterations
-  /// - `false`: Fade only on first start and final stop
-  ///   - Best for continuous ambient sounds like rain or ocean
-  ///   - Smooth continuous playback
-  ///
-  /// ## Example: Bell with fades
-  /// ```swift
-  /// config.applyFadeOnEachLoop = true
-  /// // Loop 1: fadeIn → DING → fadeOut → [delay]
-  /// // Loop 2: fadeIn → DING → fadeOut → [delay]
-  /// // Loop 3: fadeIn → DING → fadeOut
-  /// ```
-  ///
-  /// ## Example: Continuous rain
-  /// ```swift
-  /// config.applyFadeOnEachLoop = false
-  /// // Loop 1: fadeIn → rain sound → [no delay]
-  /// // Loop 2: rain sound → [no delay]
-  /// // Loop 3: rain sound → fadeOut
-  /// ```
-  ///
-  /// **Default:** `true`
-  public var applyFadeOnEachLoop: Bool
-  
   // MARK: - Initialization
   
   /// Creates a new overlay configuration with default values.
@@ -133,15 +103,13 @@ public struct OverlayConfiguration: Sendable, Equatable {
   /// - `fadeInDuration`: `0.0`
   /// - `fadeOutDuration`: `0.0`
   /// - `fadeCurve`: `.linear`
-  /// - `applyFadeOnEachLoop`: `true`
   public init(
     loopMode: LoopMode = .once,
     loopDelay: TimeInterval = 0.0,
     volume: Float = 1.0,
     fadeInDuration: TimeInterval = 0.0,
     fadeOutDuration: TimeInterval = 0.0,
-    fadeCurve: FadeCurve = .linear,
-    applyFadeOnEachLoop: Bool = true
+    fadeCurve: FadeCurve = .linear
   ) {
     self.loopMode = loopMode
     self.loopDelay = loopDelay
@@ -149,7 +117,6 @@ public struct OverlayConfiguration: Sendable, Equatable {
     self.fadeInDuration = fadeInDuration
     self.fadeOutDuration = fadeOutDuration
     self.fadeCurve = fadeCurve
-    self.applyFadeOnEachLoop = applyFadeOnEachLoop
   }
   
   // MARK: - Validation
@@ -210,30 +177,61 @@ public extension OverlayConfiguration {
 // MARK: - Preset Configurations
 
 public extension OverlayConfiguration {
+  /// Default configuration (Spotify-inspired)
+  ///
+  /// Balanced settings for general-purpose overlay audio.
+  /// Smooth fades with subtle background volume.
+  ///
+  /// ## Settings:
+  /// - Loop: Once (play file once)
+  /// - Volume: 60% (balanced mix)
+  /// - Fade in: 1 second
+  /// - Fade out: 1 second
+  /// - Fade curve: Linear
+  ///
+  /// ## Example:
+  /// ```swift
+  /// try await service.playOverlay(url: ambientURL, configuration: .default)
+  /// ```
+  static var `default`: Self {
+    Self(
+      loopMode: .once,
+      loopDelay: 0.0,
+      volume: 0.6,
+      fadeInDuration: 1.0,
+      fadeOutDuration: 1.0,
+      fadeCurve: .linear
+    )
+  }
+  
   /// Preset configuration for ambient sounds (rain, ocean, forest).
+  ///
+  /// Continuous background atmosphere with smooth transitions.
   ///
   /// ## Settings:
   /// - Loop: Infinite
   /// - Volume: 30% (subtle background)
   /// - Fade in: 2 seconds
   /// - Fade out: 2 seconds
-  /// - Fade on each loop: `false` (continuous)
   ///
   /// ## Example:
   /// ```swift
-  /// try await service.startOverlay(url: rainURL, configuration: .ambient)
+  /// try await service.playOverlay(url: rainURL, configuration: .ambient)
   /// ```
   static var ambient: Self {
-    var config = Self()
-    config.loopMode = .infinite
-    config.volume = 0.3
-    config.fadeInDuration = 2.0
-    config.fadeOutDuration = 2.0
-    config.applyFadeOnEachLoop = false
-    return config
+    Self(
+      loopMode: .infinite,
+      loopDelay: 0.0,
+      volume: 0.3,
+      fadeInDuration: 2.0,
+      fadeOutDuration: 2.0,
+      fadeCurve: .linear
+    )
   }
   
   /// Preset configuration for timer bells or periodic sounds.
+  ///
+  /// Distinct, clearly separated sound events with fades.
   ///
   /// ## Settings:
   /// - Loop: Specified number of times
@@ -241,12 +239,11 @@ public extension OverlayConfiguration {
   /// - Volume: 50% (clearly audible)
   /// - Fade in: 0.5 seconds
   /// - Fade out: 0.5 seconds
-  /// - Fade on each loop: `true` (distinct rings)
   ///
   /// ## Example:
   /// ```swift
   /// let config = OverlayConfiguration.bell(times: 3, interval: 300)
-  /// try await service.startOverlay(url: bellURL, configuration: config)
+  /// try await service.playOverlay(url: bellURL, configuration: config)
   /// // Rings at 0:00, 5:00, 10:00
   /// ```
   ///
@@ -256,13 +253,13 @@ public extension OverlayConfiguration {
   ///
   /// - Returns: Configured overlay for bell timer
   static func bell(times: Int, interval: TimeInterval) -> Self {
-    var config = Self()
-    config.loopMode = .count(times)
-    config.loopDelay = interval
-    config.volume = 0.5
-    config.fadeInDuration = 0.5
-    config.fadeOutDuration = 0.5
-    config.applyFadeOnEachLoop = true
-    return config
+    Self(
+      loopMode: .count(times),
+      loopDelay: interval,
+      volume: 0.5,
+      fadeInDuration: 0.5,
+      fadeOutDuration: 0.5,
+      fadeCurve: .linear
+    )
   }
 }

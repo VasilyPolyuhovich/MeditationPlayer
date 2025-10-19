@@ -21,7 +21,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // SSOT: State managed exclusively by state machine
     private var _state: PlayerState
     public var state: PlayerState { _state }
-    public internal(set) var configuration: PlayerConfiguration  // Public read, internal write for playlist API
+    public private(set) var configuration: PlayerConfiguration  // Public read, private write (use updateConfiguration)
     public internal(set) var currentTrack: TrackInfo?  // Public read, internal write for playlist API
     public private(set) var playbackPosition: PlaybackPosition?
     
@@ -42,15 +42,27 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Loop tracking
     private var currentRepeatCount = 0
     internal var currentTrackURL: URL?  // Allow internal access for playlist API
-    private var isLoopCrossfadeInProgress = false
-    internal var isTrackReplacementInProgress: Bool = false  // Allow internal access for playlist API
+    
+    // Crossfade operation tracking (unified lock)
+    private enum CrossfadeOperation {
+        case automaticLoop   // Triggered by playback position reaching near-end
+        case manualChange    // Triggered by user API calls (replaceTrack, skipTo*, etc.)
+    }
+    private var activeCrossfadeOperation: CrossfadeOperation? = nil
     
     // Crossfade progress observation
     private var crossfadeProgressTask: Task<Void, Never>?
     public private(set) var currentCrossfadeProgress: CrossfadeProgress = .idle
     
-    // Playlist manager (NEW)
+    // Route change debounce (prevents rapid-fire iOS events from breaking state)
+    private var routeChangeDebounceTask: Task<Void, Never>?
+    private var isHandlingRouteChange = false
+    
+    // Playlist manager
     internal var playlistManager: PlaylistManager  // Allow internal access for playlist API
+    
+    // Sound effects player
+    private var soundEffectsPlayer: SoundEffectsPlayerActor!
 
     /// Pending fade-in duration for next startPlaying call
     /// Allows per-call fade-in override without changing configuration
@@ -63,17 +75,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
         self.sessionManager = AudioSessionManager()
-        // Initialize playlist manager with default config
-        self.playlistManager = PlaylistManager(
-            configuration: PlayerConfiguration(
-                crossfadeDuration: configuration.crossfadeDuration,
-                fadeCurve: configuration.fadeCurve,
-                repeatMode: configuration.repeatMode,
-                repeatCount: configuration.repeatCount,
-                volume: configuration.volume,
-                mixWithOthers: configuration.mixWithOthers
-            )
-        )
+        // Initialize playlist manager with configuration
+        self.playlistManager = PlaylistManager(configuration: configuration)
         // remoteCommandManager will be created in setup() on MainActor
     }
     
@@ -85,7 +88,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Configure and activate audio session BEFORE engine setup
         // This prevents crashes when engine accesses outputNode
         do {
-            try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
+            try await sessionManager.configure(options: configuration.audioSessionOptions)
             try await sessionManager.activate()
             Self.logger.debug("Audio session activated in setup()")
         } catch {
@@ -95,6 +98,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Now safe to setup engine (accesses outputNode)
         await audioEngine.setup()
+        
+        // Initialize sound effects player (uses its own AVAudioEngine)
+        soundEffectsPlayer = SoundEffectsPlayerActor()
         
         // FIXED: Create RemoteCommandManager on MainActor
         remoteCommandManager = await MainActor.run {
@@ -129,6 +135,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 await self.handleRouteChange(reason: reason)
             }
         }
+        
+        // Handle media services reset (critical for AVAudioPlayer coexistence)
+        await sessionManager.setMediaServicesResetHandler { [weak self] in
+            guard let self = self else { return }
+            Task {
+                await self.handleMediaServicesReset()
+            }
+        }
     }
     
     private func setupRemoteCommands() {
@@ -144,10 +158,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                     try? await self?.pause()
                 },
                 skipForwardHandler: { [weak self] interval in
-                    try? await self?.skipForward(by: interval)
+                    try? await self?.skip(forward: interval)
                 },
                 skipBackwardHandler: { [weak self] interval in
-                    try? await self?.skipBackward(by: interval)
+                    try? await self?.skip(backward: interval)
                 }
             )
         }
@@ -170,9 +184,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: fadeDuration is independent from crossfade between tracks
     public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
         // Get current track from playlist
-        guard let url = await playlistManager.getCurrentTrack() else {
+        guard let track = await playlistManager.getCurrentTrack() else {
             throw AudioPlayerError.emptyPlaylist
         }
+        let url = track.url
         
         // Store fade-in duration for startEngine()
         pendingFadeInDuration = fadeDuration
@@ -186,12 +201,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Reset loop tracking
         self.currentTrackURL = url
         self.currentRepeatCount = 0
-        self.isLoopCrossfadeInProgress = false
-        self.isTrackReplacementInProgress = false
+        self.activeCrossfadeOperation = nil
         
-        // Configure audio session
+        // Configure audio session with user's options (default: peaceful coexistence)
         do {
-            try await sessionManager.configure(mixWithOthers: configuration.mixWithOthers)
+            try await sessionManager.configure(options: configuration.audioSessionOptions)
             Self.logger.debug("Audio session configured successfully")
         } catch {
             Self.logger.error("Failed to configure audio session: \(error.localizedDescription)")
@@ -249,11 +263,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     public func pause() async throws {
         // Cancel any active crossfade (without rollback)
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+        if activeCrossfadeOperation != nil {
             await audioEngine.cancelCrossfadeAndStopInactive()
             
-            isLoopCrossfadeInProgress = false
-            isTrackReplacementInProgress = false
+            activeCrossfadeOperation = nil
             
             crossfadeProgressTask?.cancel()
             crossfadeProgressTask = nil
@@ -322,24 +335,22 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     /// Stop playback with optional fade out
-    /// - Parameter fadeDuration: Duration of fade out (nil = instant stop, 0.0-10.0 seconds)
-    /// - Note: Use nil or 0.0 for instant stop (default behavior)
-    /// - Note: Fade duration is clamped to 0.0-10.0 seconds range
+    /// - Parameter fadeDuration: Duration of fade out in seconds (0.0 = instant stop, clamped to 0.0-10.0)
+    /// - Note: Default is instant stop (fadeDuration = 0.0)
     /// - Note: If stop called during crossfade, crossfade is cancelled and fadeout is performed on active track
-    public func stop(fadeDuration: TimeInterval? = nil) async {
+    public func stop(fadeDuration: TimeInterval = 0.0) async {
         // 🔍 DIAGNOSTIC: Log stop entry
         let playerIsPlaying = await audioEngine.isActivePlayerPlaying()
         let mixerVolume = await audioEngine.getActiveMixerVolume()
         let targetVol = await audioEngine.getTargetVolume()
-        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration?.description ?? "nil"), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(self.state)")
+        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(self.state)")
         // ✅ FIX: If crossfade in progress, cancel it and stop inactive player
         // Active player will fade out naturally
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+        if activeCrossfadeOperation != nil {
             Self.logger.debug("[STOP] Cancel crossfade in progress")
             await audioEngine.cancelCrossfadeAndStopInactive()
             
-            isLoopCrossfadeInProgress = false
-            isTrackReplacementInProgress = false
+            activeCrossfadeOperation = nil
             
             // Cancel progress observation
             crossfadeProgressTask?.cancel()
@@ -347,9 +358,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             currentCrossfadeProgress = .idle
         }
         
-        if let duration = fadeDuration, duration > 0 {
+        if fadeDuration > 0 {
             // Stop with fade
-            await stopWithFade(duration: duration)
+            await stopWithFade(duration: fadeDuration)
         } else {
             // Instant stop (existing behavior)
             await stopImmediately()
@@ -412,8 +423,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         currentTrack = nil
         currentTrackURL = nil
         currentRepeatCount = 0
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false
+        activeCrossfadeOperation = nil
         
         // State change via state machine
         await stateMachine.enterFinished()
@@ -424,18 +434,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             manager.clearNowPlayingInfo()
         }
     }
-    
-    /// Stop playback with default fade duration from configuration
-    /// - Note: Default fade duration is 3.0 seconds
-    public func stopWithDefaultFade() async {
-        await stop(fadeDuration: 3.0)
-    }
-    
-    /// Stop playback immediately without any fade
-    /// - Note: Alias for stop() without parameters for code clarity
-    public func stopImmediatelyWithoutFade() async {
-        await stop(fadeDuration: nil)
-    }
+
     
     public func finish(fadeDuration: TimeInterval?) async throws {
         let duration = fadeDuration ?? 3.0
@@ -455,13 +454,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
     }
     
-    public func skipForward(by interval: TimeInterval = 15.0) async throws {
+    public func skip(forward interval: TimeInterval = 15.0) async throws {
         // Cancel any active crossfade (without rollback)
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+        if activeCrossfadeOperation != nil {
             await audioEngine.cancelCrossfadeAndStopInactive()
             
-            isLoopCrossfadeInProgress = false
-            isTrackReplacementInProgress = false
+            activeCrossfadeOperation = nil
             
             crossfadeProgressTask?.cancel()
             crossfadeProgressTask = nil
@@ -487,13 +485,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         try await audioEngine.seek(to: newTime)
     }
     
-    public func skipBackward(by interval: TimeInterval = 15.0) async throws {
+    public func skip(backward interval: TimeInterval = 15.0) async throws {
         // Cancel any active crossfade (without rollback)
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+        if activeCrossfadeOperation != nil {
             await audioEngine.cancelCrossfadeAndStopInactive()
             
-            isLoopCrossfadeInProgress = false
-            isTrackReplacementInProgress = false
+            activeCrossfadeOperation = nil
             
             crossfadeProgressTask?.cancel()
             crossfadeProgressTask = nil
@@ -521,13 +518,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Throws: AudioPlayerError if seek fails
     /// - Note: Uses brief fade to avoid buffer discontinuity artifacts (clicking sounds)
     /// - Note: Automatically cancels any active crossfade before seeking
-    public func seekWithFade(to time: TimeInterval, fadeDuration: TimeInterval = 0.1) async throws {
+    public func seek(to time: TimeInterval, fadeDuration: TimeInterval = 0.1) async throws {
         // Cancel any active crossfade (without rollback)
-        if isLoopCrossfadeInProgress || isTrackReplacementInProgress {
+        if activeCrossfadeOperation != nil {
             await audioEngine.cancelCrossfadeAndStopInactive()
             
-            isLoopCrossfadeInProgress = false
-            isTrackReplacementInProgress = false
+            activeCrossfadeOperation = nil
             
             crossfadeProgressTask?.cancel()
             crossfadeProgressTask = nil
@@ -575,12 +571,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             repeatMode: configuration.repeatMode,
             repeatCount: configuration.repeatCount,
             volume: clampedVolume,
-            mixWithOthers: configuration.mixWithOthers
+            audioSessionOptions: configuration.audioSessionOptions
         )
     }
     
-    /// Get current repeat count (number of loop iterations completed)
-    public func getRepeatCount() -> Int {
+    /// Current repeat count (number of loop iterations completed)
+    public var repeatCount: Int {
         return currentRepeatCount
     }
     
@@ -603,7 +599,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             repeatMode: mode,
             repeatCount: configuration.repeatCount,
             volume: configuration.volume,
-                mixWithOthers: configuration.mixWithOthers
+            audioSessionOptions: configuration.audioSessionOptions
         )
         
         // Sync to PlaylistManager
@@ -612,14 +608,85 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.info("Repeat mode set to: \(mode)")
     }
     
-    /// Returns the current repeat mode
+    /// Current repeat mode
     /// - Returns: Current repeat mode (.off, .singleTrack, .playlist)
-    public func getRepeatMode() -> RepeatMode {
+    public var repeatMode: RepeatMode {
         return configuration.repeatMode
     }
     
+    /// Update player configuration (stops playback first)
+    ///
+    /// Changes global playback settings. Requires stop to apply changes safely.
+    /// After updating, call startPlaying() to resume with new configuration.
+    ///
+    /// **Configurable Settings:**
+    /// - Crossfade duration (affects playlist transitions and single track loops)
+    /// - Fade curve (linear, easeIn, easeOut, etc.)
+    /// - Repeat mode (off, singleTrack, playlist)
+    /// - Repeat count (for repeat modes)
+    /// - Volume level
+    /// - Audio session options
+    ///
+    /// **Example:**
+    /// ```swift
+    /// var newConfig = player.configuration
+    /// newConfig.crossfadeDuration = 8.0
+    /// newConfig.fadeCurve = .easeInOut
+    /// 
+    /// try await player.updateConfiguration(newConfig)
+    /// try await player.startPlaying()  // Resume with new settings
+    /// ```
+    ///
+    /// - Parameter config: New configuration to apply
+    /// - Throws: AudioPlayerError if validation fails
+    /// - Note: Playback is stopped before applying changes for safety
+    /// - Note: Configuration changes take effect immediately for next playback
+    public func updateConfiguration(_ config: PlayerConfiguration) async throws {
+        // 1. Force stop to ensure clean state
+        await stop(fadeDuration: 0.0)
+        
+        // 2. Validate configuration
+        try config.validate()
+        
+        // 3. Update configuration
+        self.configuration = config
+        
+        // 4. Sync to playlist manager
+        await syncConfigurationToPlaylistManager()
+        
+        Self.logger.info("Configuration updated: crossfade=\(config.crossfadeDuration)s, repeatMode=\(config.repeatMode)")
+    }
     
-    /// Reset player to initial state with default configuration
+    
+    #if DEBUG
+    /// Reset player to initial state with default configuration (DEBUG only)
+    ///
+    /// **⚠️ DEBUG ONLY:** This method is only available in debug builds.
+    ///
+    /// Performs full cleanup and re-initialization of the player:
+    /// - Stops all playback (main, overlay, sound effects)
+    /// - Clears playlist and all state
+    /// - Resets configuration to defaults
+    /// - Reinitializes state machine
+    /// - Deactivates audio session
+    ///
+    /// **Use Cases:**
+    /// - Testing: Reset between test cases
+    /// - Debugging: Clean slate for reproduction
+    /// - Development: Quick reset during iteration
+    ///
+    /// **Production Alternative:**
+    /// In production, create a new AudioPlayerService instance instead of reset().
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // DEBUG: Quick reset
+    /// await player.reset()
+    ///
+    /// // PRODUCTION: Create new instance
+    /// player = AudioPlayerService(configuration: myConfig)
+    /// await player.setup()
+    /// ```
     public func reset() async {
         // Stop timer first
         stopPlaybackTimer()
@@ -642,8 +709,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         currentTrackURL = nil
         playbackPosition = nil
         currentRepeatCount = 0
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false
+        activeCrossfadeOperation = nil
         
         // CRITICAL: Reinitialize state machine to FinishedState
         // This prevents Error 4 (invalidState) on next play()
@@ -661,9 +727,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             manager.clearNowPlayingInfo()
         }
     }
+    #endif
     
-    /// Cleanup all resources (call before deallocation if needed)
-    public func cleanup() async {
+    /// Cleanup all resources (automatic deallocation)
+    ///
+    /// **Note:** This is called automatically during deallocation.
+    /// You don't need to call this manually in production code.
+    ///
+    /// Swift's automatic reference counting handles cleanup when
+    /// AudioPlayerService is deallocated. This method exists for
+    /// explicit cleanup in special scenarios.
+    internal func cleanup() async {
         // Stop timer and playback
         stopPlaybackTimer()
         await audioEngine.fullReset()
@@ -676,8 +750,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         currentTrackURL = nil
         playbackPosition = nil
         currentRepeatCount = 0
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false
+        activeCrossfadeOperation = nil
         await stateMachine.enterFinished()
         
         // Remove remote commands
@@ -691,53 +764,122 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         observers.removeAll()
     }
     
-    /// Replace current track with a new one using synchronized crossfade
-    /// - Parameters:
-    ///   - url: URL of the new audio file
-    ///   - crossfadeDuration: Duration of the crossfade in seconds (default: 5.0, range: 1.0-30.0)
-    ///   - retryDelay: Delay before retry if crossfade is in progress (default: 1.5s)
-    /// - Throws: AudioPlayerError if file cannot be loaded or crossfade fails
-    /// - Note: Validates and clamps crossfade duration to safe range (1.0-30.0 seconds)
-    /// - Note: If crossfade is in progress, performs rollback and retries after delay
-    public func replaceTrack(url: URL, crossfadeDuration: TimeInterval = 5.0, retryDelay: TimeInterval = 1.5) async throws {
-        // Validate and clamp crossfade duration
-        let validatedDuration = max(1.0, min(30.0, crossfadeDuration))
-        
-        // If crossfade in progress - rollback and retry
-        if isTrackReplacementInProgress {
-            // 1. Rollback current transition
-            await rollbackCrossfade()
-            
-            // 2. Short delay before retry (1-2 seconds)
-            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
-            
-            // 3. Continue with new track (fall through)
+
+
+    // MARK: - Playlist Management
+    
+    /// Load initial playlist before playback (Track version)
+    ///
+    /// Loads validated tracks into playlist manager without starting playback.
+    /// Use this method to prepare the player before calling `startPlaying()`.
+    ///
+    /// - Parameter tracks: Array of validated Track objects (must not be empty)
+    /// - Throws:
+    ///   - `AudioPlayerError.emptyPlaylist` if tracks array is empty
+    ///
+    /// - Note: This is a lightweight operation - no audio loading or playback
+    /// - Note: For replacing playlist during playback, use `replacePlaylist(_:)`
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Validate and load
+    /// let tracks = [introURL, meditationURL].compactMap { Track(url: $0) }
+    /// try await player.loadPlaylist(tracks)
+    /// ```
+    public func loadPlaylist(_ tracks: [Track]) async throws {
+        guard !tracks.isEmpty else {
+            throw AudioPlayerError.emptyPlaylist
         }
         
-        // Store new URL
-        currentTrackURL = url
+        await playlistManager.load(tracks: tracks)
         
-        // CRITICAL: Remember state BEFORE any async operations
+        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
+    }
+
+    /// Load initial playlist before playback (URL version - backward compatible)
+    ///
+    /// Loads tracks from URLs into playlist manager without starting playback.
+    /// Invalid files are automatically filtered out during Track creation.
+    ///
+    /// - Parameter tracks: Array of track URLs (must not be empty)
+    /// - Throws:
+    ///   - `AudioPlayerError.emptyPlaylist` if tracks array is empty
+    ///
+    /// - Note: Prefer using Track version for early validation feedback
+    /// - Note: Invalid URLs (files not found) are filtered with warning
+    ///
+    /// **Example:**
+    /// ```swift
+    /// try await player.loadPlaylist([introURL, meditationURL, outroURL])
+    /// ```
+    public func loadPlaylist(_ tracks: [URL]) async throws {
+        guard !tracks.isEmpty else {
+            throw AudioPlayerError.emptyPlaylist
+        }
+        
+        await playlistManager.load(tracks: tracks)
+        
+        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
+    }
+
+    /// Replace current playlist with crossfade (Track version)
+    ///
+    /// Replaces the current playlist with validated tracks. If playing, performs
+    /// smooth crossfade to first track of new playlist. If paused/stopped,
+    /// performs silent switch.
+    ///
+    /// - Parameter tracks: New playlist validated Track objects (must not be empty)
+    /// - Throws:
+    ///   - `AudioPlayerError.invalidConfiguration` if tracks array is empty
+    ///   - Other errors from audio engine
+    ///
+    /// - Note: Uses `configuration.crossfadeDuration` for crossfade
+    /// - Note: Resets playlist index to 0 and repeat count to 0
+    ///
+    /// **Example:**
+    /// ```swift
+    /// let newTracks = urls.compactMap { Track(url: $0) }
+    /// try await player.replacePlaylist(newTracks)
+    /// ```
+    public func replacePlaylist(_ tracks: [Track]) async throws {
+        // 1. Validation
+        guard !tracks.isEmpty else {
+            throw AudioPlayerError.invalidConfiguration(
+                reason: "Cannot swap to empty playlist"
+            )
+        }
+        
+        // Use crossfade duration from configuration
+        let validDuration = configuration.crossfadeDuration
+        
+        // 2. Rollback if crossfade in progress
+        if activeCrossfadeOperation != nil {
+            await rollbackCrossfade()
+            try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s delay
+        }
+        
+        // 3. State preservation (BEFORE async operations!)
         let wasPlaying = state == .playing
         
-        // Load new file on secondary player (suspension point)
-        let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: url)
+        // 4. Load first track of new playlist on secondary player
+        let firstTrack = tracks[0]
+        let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrack.url)
         
-        // CRITICAL: Recheck state after async operation (actor reentrancy protection)
+        // 5. Recheck state after async (actor reentrancy protection)
         let isStillPlaying = state == .playing
         
-        // Decision: crossfade only if BOTH conditions true
+        // 6. Decision: crossfade or silent switch
         if wasPlaying && isStillPlaying {
-            // Mark replacement in progress
-            isTrackReplacementInProgress = true
-            defer { isTrackReplacementInProgress = false }
+            // Mark as in progress
+            activeCrossfadeOperation = .manualChange
+            defer { activeCrossfadeOperation = nil }
             
-            // Still playing - do crossfade
+            // Prepare secondary player
             await audioEngine.prepareSecondaryPlayer()
             
-            // Perform synchronized crossfade with progress observation
+            // Perform synchronized crossfade with progress
             let progressStream = await audioEngine.performSynchronizedCrossfade(
-                duration: validatedDuration,
+                duration: validDuration,
                 curve: configuration.fadeCurve
             )
             
@@ -748,91 +890,51 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 }
             }
             
-            // Wait for crossfade completion
+            // Wait for completion
             await crossfadeProgressTask?.value
             crossfadeProgressTask = nil
             
-            // CRITICAL ORDER: Switch THEN stop inactive to avoid stopping new track
-            // 1. Switch active reference (primary → secondary, new track becomes active)
+            // Switch players (secondary becomes active)
             await audioEngine.switchActivePlayer()
             
-            // 2. Stop OLD player (now inactive after switch)
+            // Stop old player (now inactive)
             await audioEngine.stopInactivePlayer()
             
-            // 3. Reset OLD mixer volume (now inactive)
+            // Reset inactive mixer
             await audioEngine.resetInactiveMixer()
             
-            // 4. Clear inactive file to free memory
+            // Clear inactive file
             await audioEngine.clearInactiveFile()
-            
-            // CRITICAL FIX: Ensure state=.playing after crossfade
-            // During crossfade (5-10s), state may have changed (e.g., pause())
-            // Force state back to playing since new track is now active
-            if state != .playing {
-                await stateMachine.enterPlaying()
-            }
         } else {
-            // Paused or stopped during load - just switch files without starting
+            // Paused or stopped - just switch without playback
             await audioEngine.switchActivePlayer()
             await audioEngine.stopInactivePlayer()
-            
-            // Keep current state (paused if paused, finished if stopped)
-            // state remains unchanged
         }
         
-        // Update track info
+        // 7. Update PlaylistManager (URL version)
+        await playlistManager.replacePlaylist(tracks)
+        
+        // 8. Update current track state
         currentTrack = newTrack
+        currentTrackURL = firstTrack.url
         
-        // Reset repeat count for new track
+        // 9. Reset counters
         currentRepeatCount = 0
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false  // Ensure cleared
+        activeCrossfadeOperation = nil
         
-        // Update now playing info
+        // 10. Update UI
         await updateNowPlayingInfo()
-    }
-    
-
-    // MARK: - Playlist Management
-    
-    /// Load initial playlist before playback
-    ///
-    /// Loads tracks into playlist manager without starting playback.
-    /// Use this method to prepare the player before calling `startPlaying()`.
-    ///
-    /// - Parameter tracks: Array of track URLs (must not be empty)
-    /// - Throws:
-    ///   - `AudioPlayerError.emptyPlaylist` if tracks array is empty
-    ///
-    /// - Note: This is a lightweight operation - no audio loading or playback
-    /// - Note: For replacing playlist during playback, use `replacePlaylist(_:)`
-    ///
-    /// **Example:**
-    /// ```swift
-    /// // Load meditation session
-    /// try await player.loadPlaylist([intro, meditation, outro])
-    ///
-    /// // Start when user is ready
-    /// try await player.startPlaying(fadeDuration: 2.0)
-    /// ```
-    public func loadPlaylist(_ tracks: [URL]) async throws {
-        guard !tracks.isEmpty else {
-            throw AudioPlayerError.emptyPlaylist
-        }
         
-        // Simple load - no audio operations
-        await playlistManager.load(tracks: tracks)
-        
-        Self.logger.info("Loaded playlist with \(tracks.count) tracks")
+        Self.logger.info("Playlist replaced successfully (\(tracks.count) tracks)")
     }
 
-    /// Replace current playlist with crossfade
+    /// Replace current playlist with crossfade (URL version - backward compatible)
     ///
-    /// Replaces the current playlist with new tracks. If playing, performs
+    /// Replaces the current playlist with new tracks from URLs. If playing, performs
     /// smooth crossfade to first track of new playlist. If paused/stopped,
     /// performs silent switch.
     ///
-    /// - Parameter tracks: New playlist tracks (must not be empty)
+    /// - Parameter tracks: New playlist track URLs (must not be empty)
     /// - Throws:
     ///   - `AudioPlayerError.invalidConfiguration` if tracks array is empty
     ///   - Other errors from audio engine
@@ -844,9 +946,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// **Example:**
     /// ```swift
-    /// // Switch to different session during playback
-    /// try await player.replacePlaylist(advancedSession)
-    /// // → Smooth crossfade to new session
+    /// try await player.replacePlaylist([url1, url2, url3])
     /// ```
     public func replacePlaylist(_ tracks: [URL]) async throws {
         // 1. Validation
@@ -860,7 +960,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let validDuration = configuration.crossfadeDuration
         
         // 2. Rollback if crossfade in progress
-        if isTrackReplacementInProgress || isLoopCrossfadeInProgress {
+        if activeCrossfadeOperation != nil {
             await rollbackCrossfade()
             try await Task.sleep(nanoseconds: 1_500_000_000) // 1.5s delay
         }
@@ -878,8 +978,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 6. Decision: crossfade or silent switch
         if wasPlaying && isStillPlaying {
             // Mark as in progress
-            isTrackReplacementInProgress = true
-            defer { isTrackReplacementInProgress = false }
+            activeCrossfadeOperation = .manualChange
+            defer { activeCrossfadeOperation = nil }
             
             // Prepare secondary player
             await audioEngine.prepareSecondaryPlayer()
@@ -913,10 +1013,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Clear inactive file
             await audioEngine.clearInactiveFile()
             
-            // Ensure playing state after crossfade
-            if state != .playing {
-                await stateMachine.enterPlaying()
-            }
+            // State is NOT forced here - respect user actions during crossfade
+            // If user called pause() during crossfade, state=.paused is correct
+            // Crossfade completion does NOT change playback state
+            // State machine handles state transitions via public API only
         } else {
             // Paused or stopped - just switch without playback
             await audioEngine.switchActivePlayer()
@@ -924,7 +1024,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Keep current state (paused/finished)
         }
         
-        // 7. Update PlaylistManager
+        // 7. Update PlaylistManager (URL version)
         await playlistManager.replacePlaylist(tracks)
         
         // 8. Update current track state
@@ -933,8 +1033,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 9. Reset counters
         currentRepeatCount = 0
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false
+        activeCrossfadeOperation = nil
         
         // 10. Update UI
         await updateNowPlayingInfo()
@@ -942,11 +1041,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.info("Playlist replaced successfully (\(tracks.count) tracks)")
     }
     
-    /// Get current playlist track URLs
-    /// - Returns: Array of track URLs in playback order
+    /// Current playlist tracks
+    /// - Returns: Array of Track objects in playback order
     /// - Note: Returns empty array if no playlist loaded
-    public func getPlaylist() async -> [URL] {
-        return await playlistManager.getPlaylist()
+    public var playlist: [Track] {
+        get async { await playlistManager.getTracks() }
     }
     
     // MARK: - Playlist Navigation
@@ -956,11 +1055,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Uses configuration.crossfadeDuration for crossfade
     /// - Note: If crossfade in progress, performs rollback and retries
     public func skipToNext() async throws {
-        guard let nextURL = await playlistManager.skipToNext() else {
+        guard let nextTrack = await playlistManager.skipToNext() else {
             throw AudioPlayerError.noNextTrack
         }
-        try await replaceTrack(
-            url: nextURL,
+        try await replaceCurrentTrack(
+            track: nextTrack,
             crossfadeDuration: configuration.crossfadeDuration
         )
     }
@@ -970,23 +1069,116 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Uses configuration.crossfadeDuration for crossfade
     /// - Note: If crossfade in progress, performs rollback and retries
     public func skipToPrevious() async throws {
-        guard let prevURL = await playlistManager.skipToPrevious() else {
+        guard let prevTrack = await playlistManager.skipToPrevious() else {
             throw AudioPlayerError.noPreviousTrack
         }
-        try await replaceTrack(
-            url: prevURL,
+        try await replaceCurrentTrack(
+            track: prevTrack,
             crossfadeDuration: configuration.crossfadeDuration
         )
     }
+    
+    // MARK: - Internal Track Replacement
+    
+    /// Internal method for replacing current track with crossfade (used by skipToNext/skipToPrevious)
+    /// - Parameters:
+    ///   - track: New track to play
+    ///   - crossfadeDuration: Crossfade duration in seconds
+    ///   - retryDelay: Delay before retry if crossfade already in progress
+    internal func replaceCurrentTrack(track: Track, crossfadeDuration: TimeInterval, retryDelay: TimeInterval = 1.5) async throws {
+        let url = track.url
+        
+        // Validate and clamp crossfade duration
+        let validatedDuration = max(1.0, min(30.0, crossfadeDuration))
+        
+        // If crossfade in progress - rollback and retry
+        if activeCrossfadeOperation != nil {
+            // 1. Rollback current transition
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            activeCrossfadeOperation = nil
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
+            
+            // 2. Short delay before retry
+            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+        }
+        
+        // CRITICAL: Remember state BEFORE any async operations
+        let wasPlaying = state == .playing
+        
+        // Load new file on secondary player (suspension point)
+        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: url)
+        
+        // CRITICAL: Recheck state after async operation (actor reentrancy protection)
+        let isStillPlaying = state == .playing
+        
+        // Decision: crossfade only if BOTH conditions true
+        if wasPlaying && isStillPlaying {
+            // Mark replacement in progress
+            activeCrossfadeOperation = .manualChange
+            defer { activeCrossfadeOperation = nil }
+            
+            // Still playing - do crossfade
+            await audioEngine.prepareSecondaryPlayer()
+            
+            // Perform synchronized crossfade with progress observation
+            let progressStream = await audioEngine.performSynchronizedCrossfade(
+                duration: validatedDuration,
+                curve: configuration.fadeCurve
+            )
+            
+            // Observe progress
+            crossfadeProgressTask = Task { [weak self] in
+                for await progress in progressStream {
+                    await self?.updateCrossfadeProgress(progress)
+                }
+            }
+            
+            // Wait for crossfade completion
+            await crossfadeProgressTask?.value
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
+            
+            // CRITICAL ORDER: Switch THEN stop inactive to avoid stopping new track
+            // 1. Switch active reference (primary → secondary, new track becomes active)
+            await audioEngine.switchActivePlayer()
+            
+            // 2. Stop OLD player (now inactive after switch)
+            await audioEngine.stopInactivePlayer()
+            
+            // 3. Reset OLD mixer volume (now inactive)
+            await audioEngine.resetInactiveMixer()
+            
+            // 4. Clear inactive file to free memory
+            await audioEngine.clearInactiveFile()
+            
+            // CRITICAL FIX: Ensure state=.playing after crossfade
+            if state != .playing {
+                await stateMachine.enterPlaying()
+            }
+        } else {
+            // Paused or stopped during load - just switch files without starting
+            await audioEngine.switchActivePlayer()
+            await audioEngine.stopInactivePlayer()
+        }
+    }
 
     
-    // MARK: - Observers
+    // MARK: - Observers (Public for Demo App)
     
     public func addObserver(_ observer: AudioPlayerObserver) {
         observers.append(observer)
     }
     
-    public func removeAllObservers() {
+    public func removeObserver(_ observer: AudioPlayerObserver) {
+        // Remove by identity (assuming observers are classes)
+        observers.removeAll { existingObserver in
+            existingObserver === observer
+        }
+    }
+    
+    internal func removeAllObservers() {
         observers.removeAll()
     }
     
@@ -1056,7 +1248,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Check for loop crossfade trigger (with race condition protection)
-        if shouldTriggerLoopCrossfade(position) && !isLoopCrossfadeInProgress {
+        if shouldTriggerLoopCrossfade(position) && activeCrossfadeOperation != .automaticLoop {
             await startLoopCrossfade()
         }
     }
@@ -1117,8 +1309,29 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Session Event Handlers
     
+    /// Ensure audio session is active before critical operations
+    /// Protects against external AVAudioPlayer interference
+    private func ensureSessionActive() async throws {
+        do {
+            try await sessionManager.activate()
+        } catch {
+            Self.logger.error("[SESSION] Failed to ensure session active: \(error.localizedDescription)")
+            throw error
+        }
+    }
+    
     private func handleInterruption(shouldResume: Bool) async {
         if shouldResume {
+            // Reactivate audio session after interruption (critical for phone calls)
+            // iOS deactivates session during interruption - must reactivate before resume
+            do {
+                try await sessionManager.activate()
+                Self.logger.debug("[INTERRUPTION] Audio session reactivated")
+            } catch {
+                Self.logger.error("[INTERRUPTION] Failed to reactivate session: \(error.localizedDescription)")
+                return
+            }
+            
             // Try to resume playback
             try? await resume()
         } else {
@@ -1128,22 +1341,136 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     private func handleRouteChange(reason: AVAudioSession.RouteChangeReason) async {
+        let currentRoute = await sessionManager.getCurrentRoute()
+        Self.logger.info("[ROUTE_CHANGE] Reason: \(reason.rawValue), New route: \(currentRoute)")
+        
         switch reason {
         case .oldDeviceUnavailable:
-            // Headphones unplugged - pause immediately
+            // Headphones unplugged - handle IMMEDIATELY (no debounce)
+            // User expects instant pause when unplugging
+            Self.logger.debug("[ROUTE_CHANGE] Device unplugged - pausing immediately")
+            
+            // Cancel any pending route change activations
+            routeChangeDebounceTask?.cancel()
+            routeChangeDebounceTask = nil
+            
             try? await pause()
             
-        case .newDeviceAvailable:
-            // Headphones plugged in - don't auto-resume, let user decide
-            break
+        case .newDeviceAvailable, .categoryChange, .override:
+            // Device connected/changed - DEBOUNCE to prevent rapid-fire iOS events
+            // Bluetooth devices often trigger multiple events in quick succession
+            Self.logger.debug("[ROUTE_CHANGE] Event \(reason.rawValue) - debouncing (300ms)")
             
-        case .categoryChange, .override:
-            // Route changed - continue playback
-            break
+            // Cancel previous debounce task
+            routeChangeDebounceTask?.cancel()
+            
+            // Create new debounced task
+            routeChangeDebounceTask = Task {
+                // Wait 300ms for event storm to settle
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                
+                // Check if cancelled during sleep
+                guard !Task.isCancelled else {
+                    Self.logger.debug("[ROUTE_CHANGE] Debounce cancelled")
+                    return
+                }
+                
+                // Guard against concurrent execution
+                guard !isHandlingRouteChange else {
+                    Self.logger.warning("[ROUTE_CHANGE] Already handling route change, skipping")
+                    return
+                }
+                
+                isHandlingRouteChange = true
+                defer { isHandlingRouteChange = false }
+                
+                Self.logger.debug("[ROUTE_CHANGE] Debounce complete - reactivating session")
+                
+                do {
+                    try await sessionManager.activate()
+                    Self.logger.info("[ROUTE_CHANGE] Session reactivated successfully on route: \(await sessionManager.getCurrentRoute())")
+                    // Audio continues automatically if playing
+                } catch {
+                    Self.logger.error("[ROUTE_CHANGE] Failed to reactivate session: \(error.localizedDescription)")
+                }
+            }
             
         default:
+            Self.logger.debug("[ROUTE_CHANGE] Unhandled reason: \(reason.rawValue)")
             break
         }
+    }
+    
+    private func handleMediaServicesReset() async {
+        Self.logger.error("[MEDIA_SERVICES] ⚠️ CRITICAL: Media services were reset!")
+        Self.logger.info("[MEDIA_SERVICES] Attempting to recover audio session and engine...")
+        
+        // Step 1: Save current playback state BEFORE any recovery
+        let wasPlaying = state == .playing
+        let currentPosition = wasPlaying ? await audioEngine.getCurrentPosition()?.currentTime : nil
+        if let pos = currentPosition {
+            Self.logger.debug("[MEDIA_SERVICES] Saved playback position: \(pos)s")
+        }
+        
+        // Step 2: Reconfigure audio session from scratch with user's options
+        do {
+            try await sessionManager.configure(options: configuration.audioSessionOptions)
+            Self.logger.debug("[MEDIA_SERVICES] Session reconfigured successfully")
+        } catch {
+            Self.logger.error("[MEDIA_SERVICES] Failed to reconfigure session: \(error.localizedDescription)")
+            // Enter failed state if we can't recover
+            await stateMachine.enterFailed(error: .sessionConfigurationFailed(
+                reason: "Media services reset - reconfiguration failed: \(error.localizedDescription)"
+            ))
+            return
+        }
+        
+        // Step 3: Reactivate session
+        do {
+            try await sessionManager.activate()
+            Self.logger.debug("[MEDIA_SERVICES] Session reactivated successfully")
+        } catch {
+            Self.logger.error("[MEDIA_SERVICES] Failed to reactivate session: \(error.localizedDescription)")
+            await stateMachine.enterFailed(error: .sessionConfigurationFailed(
+                reason: "Media services reset - reactivation failed: \(error.localizedDescription)"
+            ))
+            return
+        }
+        
+        // Step 4: Reset and restart audio engine
+        // Media services reset means engine crashed - need full restart
+        // IMPORTANT: Don't use stop() - it doesn't save position!
+        do {
+            // Force engine state reset (media services crashed, flags may be stale)
+            await audioEngine.resetEngineRunningState()
+            
+            // Prepare and start fresh
+            try await audioEngine.prepare()
+            try await audioEngine.start()
+            Self.logger.debug("[MEDIA_SERVICES] Audio engine restarted successfully")
+        } catch {
+            Self.logger.error("[MEDIA_SERVICES] Failed to restart engine: \(error.localizedDescription)")
+            await stateMachine.enterFailed(error: .engineStartFailed(
+                reason: "Media services reset - engine restart failed: \(error.localizedDescription)"
+            ))
+            return
+        }
+        
+        // Step 5: Restore playback with saved position
+        if wasPlaying {
+            Self.logger.info("[MEDIA_SERVICES] Restoring playback after recovery")
+            
+            // Restore position if we had one
+            if let position = currentPosition {
+                Self.logger.debug("[MEDIA_SERVICES] Seeking to saved position: \(position)s")
+                try? await seek(to: position, fadeDuration: 0.0)
+            }
+            
+            // Resume playback
+            try? await resume()
+        }
+        
+        Self.logger.info("[MEDIA_SERVICES] ✅ Recovery complete - audio session restored")
     }
     
     // MARK: - Loop Crossfade Logic (UPDATED - Phase 3)
@@ -1177,7 +1504,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard configuration.repeatMode != .singleTrack else { return false }
         
         // Don't trigger if already replacing track
-        guard !isTrackReplacementInProgress else { return false }
+        guard activeCrossfadeOperation != .manualChange else { return false }
         
         // Only trigger when playing
         guard state == .playing else { return false }
@@ -1231,7 +1558,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard configuration.repeatMode != .off else { return false }
         
         // Don't trigger if already in progress
-        guard !isLoopCrossfadeInProgress else { return false }
+        guard activeCrossfadeOperation != .automaticLoop else { return false }
         
         // Only trigger when playing
         guard state == .playing else { return false }
@@ -1267,24 +1594,22 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Handles .off (finish), .singleTrack (loop current), .playlist (advance)
     private func startLoopCrossfade() async {
         // Mark as in progress BEFORE any async operations
-        isLoopCrossfadeInProgress = true
+        activeCrossfadeOperation = .automaticLoop
+        defer { activeCrossfadeOperation = nil }
         
         // Determine action based on repeat mode
         switch configuration.repeatMode {
         case .off:
             // Finish playback with fade out
             try? await finish(fadeDuration: 3.0)
-            isLoopCrossfadeInProgress = false
             
         case .singleTrack:
             // Loop current track with fade
             await loopCurrentTrackWithFade()
-            isLoopCrossfadeInProgress = false
             
         case .playlist:
             // Advance to next playlist track
             await advanceToNextPlaylistTrack()
-            isLoopCrossfadeInProgress = false
         }
     }
     
@@ -1393,11 +1718,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         updateCrossfadeProgress(prepareProgress)
         
         // 1. Get next track from playlist manager
-        guard let nextURL = await playlistManager.getNextTrack() else {
+        guard let nextTrack = await playlistManager.getNextTrack() else {
             // No more tracks - finish playback
             try? await finish(fadeDuration: 3.0)
             return
         }
+        let nextURL = nextTrack.url
         
         // 2. Load next track on secondary player
         do {
@@ -1448,20 +1774,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     /// Sync current configuration to playlist manager
     private func syncConfigurationToPlaylistManager() async {
-        let playerConfig = PlayerConfiguration(
-            crossfadeDuration: configuration.crossfadeDuration,
-            fadeCurve: configuration.fadeCurve,
-            repeatMode: configuration.repeatMode,
-            repeatCount: configuration.repeatCount,
-            volume: configuration.volume,
-                mixWithOthers: configuration.mixWithOthers
-        )
-        await playlistManager.updateConfiguration(playerConfig)
+        await playlistManager.updateConfiguration(configuration)
     }
     
     // MARK: - Overlay Player Control
     
-    /// Start overlay audio playback with specified configuration
+    /// Play overlay audio with current configuration
     /// 
     /// Overlay player provides an independent audio layer for ambient sounds, background music,
     /// or atmospheric effects that play alongside the main audio track. The overlay player
@@ -1473,6 +1791,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Sleep apps: White noise alongside sleep stories
     /// - Games: Ambient soundscapes with dialogue/effects
     ///
+    /// **Configuration:**
+    /// - Set configuration via `setOverlayConfiguration()` before first play
+    /// - Default configuration is `.default` (Spotify-inspired balanced settings)
+    /// - Configuration persists across multiple playOverlay() calls
+    ///
     /// **Important Notes:**
     /// - Overlay player is independent of main player state
     /// - Main track crossfades do NOT affect overlay playback
@@ -1481,25 +1804,91 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// **Example:**
     /// ```swift
-    /// // Start rain sounds with infinite loop
-    /// let config = OverlayConfiguration(
-    ///     volume: 0.3,
-    ///     loopMode: .infinite,
-    ///     fadeInDuration: 2.0,
-    ///     fadeOutDuration: 2.0
-    /// )
-    /// try await player.startOverlay(url: rainURL, configuration: config)
+    /// // Configure once
+    /// try await player.setOverlayConfiguration(.ambient)
+    ///
+    /// // Play rain sounds
+    /// try await player.playOverlay(rainURL)
+    ///
+    /// // Later, switch to ocean (same config)
+    /// try await player.playOverlay(oceanURL)
     /// ```
     ///
-    /// - Parameters:
-    ///   - url: Local file URL for overlay audio (remote URLs not supported)
-    ///   - configuration: Playback configuration (volume, loop mode, fade durations)
+    /// - Parameter url: Local file URL for overlay audio (remote URLs not supported)
     /// - Throws: 
     ///   - `AudioPlayerError.fileNotFound` if file doesn't exist
     ///   - `AudioPlayerError.invalidAudioFile` if file format is unsupported
     ///   - `AudioPlayerError.audioSessionError` if audio session setup fails
-    public func startOverlay(url: URL, configuration: OverlayConfiguration) async throws {
-        try await audioEngine.startOverlay(url: url, configuration: configuration)
+    public func playOverlay(_ url: URL) async throws {
+        // Ensure session is active before starting overlay (critical for coexistence)
+        try await ensureSessionActive()
+        
+        // Use current configuration from overlay player (set via setOverlayConfiguration)
+        try await audioEngine.startOverlay(url: url, configuration: await audioEngine.getOverlayConfiguration() ?? .default)
+    }
+    
+    /// Play overlay audio with Track (validated file)
+    ///
+    /// Same as playOverlay(URL) but uses validated Track object.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// let rainTrack = Track(url: rainURL)!
+    /// try await player.playOverlay(rainTrack)
+    /// ```
+    ///
+    /// - Parameter track: Validated track to play
+    /// - Throws: Same errors as playOverlay(URL)
+    public func playOverlay(_ track: Track) async throws {
+        try await playOverlay(track.url)
+    }
+    
+    /// Set overlay configuration (stops current overlay)
+    ///
+    /// Updates overlay playback behavior. Stops any currently playing overlay
+    /// to apply new settings cleanly.
+    ///
+    /// **Configuration Changes:**
+    /// - Volume levels
+    /// - Loop mode (once, count, infinite)
+    /// - Loop delay between iterations
+    /// - Fade in/out durations
+    /// - Fade curve type
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Switch to ambient preset
+    /// try await player.setOverlayConfiguration(.ambient)
+    ///
+    /// // Custom configuration
+    /// var config = OverlayConfiguration.default
+    /// config.volume = 0.5
+    /// config.loopMode = .infinite
+    /// try await player.setOverlayConfiguration(config)
+    /// ```
+    ///
+    /// - Parameter configuration: New overlay configuration
+    /// - Note: Stops current overlay playback before applying changes
+    public func setOverlayConfiguration(_ configuration: OverlayConfiguration) async throws {
+        // Stop current overlay before changing config
+        await audioEngine.stopOverlay()
+        
+        // Set new configuration
+        await audioEngine.setOverlayConfiguration(configuration)
+    }
+    
+    /// Get current overlay configuration
+    ///
+    /// Returns the current overlay player configuration, or nil if not set.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// if let config = await player.getOverlayConfiguration() {
+    ///     print("Overlay volume: \(config.volume)")
+    /// }
+    /// ```
+    public func getOverlayConfiguration() async -> OverlayConfiguration? {
+        return await audioEngine.getOverlayConfiguration()
     }
     
     /// Stop overlay playback with fade-out
@@ -1542,27 +1931,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// ```
     public func resumeOverlay() async {
         await audioEngine.resumeOverlay()
-    }
-    
-    /// Replace current overlay file with crossfade
-    ///
-    /// Replaces the currently playing overlay audio with a new file, using a smooth
-    /// crossfade transition. The crossfade duration is determined by the overlay's
-    /// configuration.
-    ///
-    /// **Example:**
-    /// ```swift
-    /// // Switch from rain to ocean sounds
-    /// try await player.replaceOverlay(url: oceanURL)
-    /// ```
-    ///
-    /// - Parameter url: New audio file URL
-    /// - Throws: 
-    ///   - `AudioPlayerError.invalidState` if no overlay is currently active
-    ///   - `AudioPlayerError.fileNotFound` if new file doesn't exist
-    ///   - `AudioPlayerError.invalidAudioFile` if new file format is unsupported
-    public func replaceOverlay(url: URL) async throws {
-        try await audioEngine.replaceOverlay(url: url)
     }
     
     /// Set overlay volume independently
@@ -1615,15 +1983,24 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// **Example:**
     /// ```swift
     /// // User adjusts "delay between sounds" slider to 10 seconds
-    /// await player.setOverlayLoopDelay(10.0)
+    /// try await player.setOverlayLoopDelay(10.0)
     ///
     /// // Remove delay for continuous playback
-    /// await player.setOverlayLoopDelay(0.0)
+    /// try await player.setOverlayLoopDelay(0.0)
     /// ```
     ///
     /// - Parameter delay: Delay in seconds between iterations (must be >= 0.0)
-    /// - Throws: `AudioPlayerError.invalidState` if no overlay is active
+    /// - Throws: 
+    ///   - `AudioPlayerError.invalidState` if no overlay is active
+    ///   - `AudioPlayerError.invalidConfiguration` if delay < 0.0
     public func setOverlayLoopDelay(_ delay: TimeInterval) async throws {
+        // Validate delay
+        guard delay >= 0.0 else {
+            throw AudioPlayerError.invalidConfiguration(
+                reason: "Loop delay must be >= 0.0 (got: \(delay))"
+            )
+        }
+        
         guard let overlay = await audioEngine.overlayPlayer else {
             throw AudioPlayerError.invalidState(
                 current: "no overlay",
@@ -1634,28 +2011,28 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
 
     
-    /// Get current overlay player state
+    /// Current overlay player state
     ///
     /// Returns the current state of the overlay player for UI updates and state tracking.
     ///
     /// **Example:**
     /// ```swift
-    /// let state = await player.getOverlayState()
+    /// let state = await player.overlayState
     /// if state.isPlaying {
     ///     print("Overlay is playing")
     /// }
     /// ```
     ///
     /// - Returns: Current overlay state, or `.idle` if no overlay is loaded
-    public func getOverlayState() async -> OverlayState {
-        return await audioEngine.getOverlayState()
+    public var overlayState: OverlayState {
+        get async { await audioEngine.getOverlayState() }
     }
     
     // MARK: - Global Control
     
-    /// Pause both main player and overlay
+    /// Pause all audio (main player + overlay + sound effects)
     ///
-    /// Pauses both the main audio player and overlay player simultaneously.
+    /// Pauses main player and overlay, stops any playing sound effect.
     /// Useful for handling interruptions (phone calls, alarms) or user pause action.
     ///
     /// **Example:**
@@ -1664,12 +2041,46 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// await player.pauseAll()
     /// ```
     public func pauseAll() async {
-        await audioEngine.pauseAll()
+        // Cancel any active crossfade (without rollback)
+        if activeCrossfadeOperation != nil {
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            activeCrossfadeOperation = nil
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
+        }
+        
+        // Guard: only pause if playing or preparing
+        guard state == .playing || state == .preparing else {
+            // If already paused or finished, just pause overlay and return
+            if state == .paused || state == .finished {
+                await audioEngine.pauseOverlay()
+                return
+            }
+            // Invalid state - still pause overlay for consistency
+            await audioEngine.pauseOverlay()
+            return
+        }
+        
+        // Pause main player via state machine
+        await stateMachine.enterPaused()
+        
+        // Pause overlay separately
+        await audioEngine.pauseOverlay()
+        
+        // Stop sound effects (no pause, only stop)
+        await soundEffectsPlayer.stop(fadeDuration: 0.0)
+        
+        // Update Now Playing
+        await updateNowPlayingPlaybackRate(0.0)
     }
     
-    /// Resume both main player and overlay
+    /// Resume all audio (main player + overlay)
     ///
-    /// Resumes playback of both main player and overlay after a pause.
+    /// Resumes playback of main player and overlay after a pause.
+    /// Sound effects are not resumed (they were stopped, not paused).
     ///
     /// **Example:**
     /// ```swift
@@ -1677,13 +2088,37 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// await player.resumeAll()
     /// ```
     public func resumeAll() async {
-        await audioEngine.resumeAll()
+        // Guard: only resume if paused
+        guard state == .paused else {
+            // If already playing, just resume overlay and return
+            if state == .playing {
+                await audioEngine.resumeOverlay()
+                return
+            }
+            // If finished - can't resume, but still try overlay
+            if state == .finished {
+                await audioEngine.resumeOverlay()
+                return
+            }
+            // Invalid state - still resume overlay for consistency
+            await audioEngine.resumeOverlay()
+            return
+        }
+        
+        // Resume main player via state machine
+        await stateMachine.enterPlaying()
+        
+        // Resume overlay separately
+        await audioEngine.resumeOverlay()
+        
+        // Update Now Playing
+        await updateNowPlayingPlaybackRate(1.0)
     }
     
-    /// Stop both main player and overlay completely
+    /// Stop all audio (main player + overlay + sound effects)
     ///
     /// Emergency stop that halts all audio playback immediately.
-    /// Both players are stopped and reset to idle state.
+    /// All players are stopped and reset to idle state.
     ///
     /// **Example:**
     /// ```swift
@@ -1691,7 +2126,31 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// await player.stopAll()
     /// ```
     public func stopAll() async {
-        await audioEngine.stopAll()
+        // Cancel any active crossfade
+        if activeCrossfadeOperation != nil {
+            await audioEngine.cancelCrossfadeAndStopInactive()
+            
+            activeCrossfadeOperation = nil
+            
+            crossfadeProgressTask?.cancel()
+            crossfadeProgressTask = nil
+            currentCrossfadeProgress = .idle
+        }
+        
+        // Stop playback timer
+        stopPlaybackTimer()
+        
+        // Stop main player via state machine (transition to finished)
+        await stateMachine.enterFinished()
+        
+        // Stop overlay separately
+        await audioEngine.stopOverlay()
+        
+        // Stop sound effects
+        await soundEffectsPlayer.stop(fadeDuration: 0.0)
+        
+        // Update Now Playing
+        await updateNowPlayingPlaybackRate(0.0)
     }
     
     // MARK: - Crossfade Progress
@@ -1704,8 +2163,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         _ = await audioEngine.rollbackCrossfade(rollbackDuration: rollbackDuration)
         
         // Clear crossfade flags (handles all repeat modes)
-        isLoopCrossfadeInProgress = false
-        isTrackReplacementInProgress = false
+        activeCrossfadeOperation = nil
         
         // Cancel progress observation
         crossfadeProgressTask?.cancel()
@@ -1781,6 +2239,9 @@ extension AudioPlayerService: AudioStateMachineContext {
     }
     
     func resumePlayback() async throws {
+        // Ensure session is active before resuming (protects against external interference)
+        try await ensureSessionActive()
+        
         await audioEngine.play()
         // Restart playback timer after resume
         startPlaybackTimer()
@@ -1807,6 +2268,131 @@ extension AudioPlayerService: AudioStateMachineContext {
     
     func transitionToFailed(error: AudioPlayerError) async {
         await stateMachine.enterFailed(error: error)
+    }
+    
+    // MARK: - Sound Effects API
+    
+    /// Preload multiple sound effects into memory (batch operation)
+    ///
+    /// Preloads sound effects into LRU cache for instant playback.
+    /// Best practice: Call during app initialization with all effects you'll need.
+    ///
+    /// **LRU Cache:**
+    /// - Default limit: 10 effects
+    /// - Auto-eviction of least recently used when full
+    /// - Currently playing effects are never evicted
+    ///
+    /// **Example:**
+    /// ```swift
+    /// let gong = try await SoundEffect(url: gongURL, volume: 0.9)
+    /// let bell = try await SoundEffect(url: bellURL, volume: 0.8)
+    /// let click = try await SoundEffect(url: clickURL, volume: 1.0)
+    ///
+    /// await player.preloadSoundEffects([gong, bell, click])
+    /// ```
+    ///
+    /// - Parameter effects: Array of sound effects to preload
+    /// - Note: This is optional - playSoundEffect() auto-preloads if needed
+    public func preloadSoundEffects(_ effects: [SoundEffect]) async {
+        await soundEffectsPlayer.preloadEffects(effects)
+    }
+    
+    /// Play sound effect with auto-preload and optional fade-in
+    ///
+    /// Plays sound effect independently from main player and overlay.
+    /// Only one sound effect can play at a time - new trigger cancels previous.
+    ///
+    /// **Auto-preload:**
+    /// If effect not in cache, it's automatically preloaded (with console warning).
+    /// For best performance, use `preloadSoundEffects()` upfront.
+    ///
+    /// **Volume:**
+    /// Uses volume from SoundEffect initialization (0.0-1.0).
+    /// To change volume, create new SoundEffect with different volume.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Instant playback (no fade)
+    /// try await player.playSoundEffect(gong)
+    ///
+    /// // With fade-in
+    /// try await player.playSoundEffect(bell, fadeDuration: 0.2)
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - effect: Sound effect to play
+    ///   - fadeDuration: Fade-in duration in seconds (default: 0.0 = instant)
+    public func playSoundEffect(_ effect: SoundEffect, fadeDuration: TimeInterval = 0.0) async {
+        await soundEffectsPlayer.play(effect, fadeDuration: fadeDuration)
+    }
+    
+    /// Stop current sound effect with optional fade-out
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Instant stop
+    /// await player.stopSoundEffect()
+    ///
+    /// // Fade out
+    /// await player.stopSoundEffect(fadeDuration: 0.5)
+    /// ```
+    ///
+    /// - Parameter fadeDuration: Fade-out duration in seconds (default: 0.0 = instant)
+    public func stopSoundEffect(fadeDuration: TimeInterval = 0.0) async {
+        await soundEffectsPlayer.stop(fadeDuration: fadeDuration)
+    }
+    
+    /// Set master volume for all sound effects
+    ///
+    /// Sets the master volume level that applies to all sound effects.
+    /// Final volume = effect's individual volume × master volume.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Effect created with volume 0.8
+    /// let bell = try await SoundEffect(url: bellURL, volume: 0.8)
+    ///
+    /// // Set master to 50%
+    /// await player.setSoundEffectVolume(0.5)
+    ///
+    /// // Final volume = 0.8 × 0.5 = 0.4 (40%)
+    /// await player.playSoundEffect(bell)
+    /// ```
+    ///
+    /// - Parameter volume: Volume level (0.0 - 1.0)
+    /// - Note: Clamped to 0.0-1.0 range
+    /// - Note: No need to reload effects - applies immediately
+    public func setSoundEffectVolume(_ volume: Float) async {
+        await soundEffectsPlayer.setVolume(volume)
+    }
+    
+    /// Unload specific sound effects from memory (manual cleanup)
+    ///
+    /// Use this for high-performance scenarios where you want explicit control
+    /// over cache. Normally, LRU cache handles cleanup automatically.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// // Done with these effects - free memory
+    /// await player.unloadSoundEffects([tutorialGong, tutorialBell])
+    /// ```
+    ///
+    /// - Parameter effects: Array of effects to unload
+    /// - Note: Currently playing effects are stopped before unloading
+    public func unloadSoundEffects(_ effects: [SoundEffect]) async {
+        await soundEffectsPlayer.unloadEffects(effects)
+    }
+    
+    /// Check if sound effect is currently playing
+    public var isSoundEffectPlaying: Bool {
+        get async { await soundEffectsPlayer.isPlaying }
+    }
+    
+    /// Currently playing sound effect
+    /// - Returns: Sound effect object or nil if nothing playing
+    /// - Note: Use for UI updates (e.g., highlighting active button)
+    public var currentSoundEffect: SoundEffect? {
+        get async { await soundEffectsPlayer.currentEffect }
     }
 }
 

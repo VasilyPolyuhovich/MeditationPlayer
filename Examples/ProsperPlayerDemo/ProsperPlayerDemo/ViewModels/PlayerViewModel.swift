@@ -39,12 +39,65 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     var selectedOverlayTrack: String = "voiceover1"
     var overlayLoopEnabled: Bool = true  // Default: infinite loop
     var overlayLoopDelay: Double = 0.0  // Default: no delay
+    var overlayVolume: Float = 0.5  // Default: 50%
+    
+    // MARK: - Sound Effects State
+    
+    var preloadedEffects: [SoundEffect] = []
+    var currentEffect: SoundEffect?
+    var isSoundEffectPlaying: Bool = false
+    var soundEffectVolume: Float = 0.8  // Default: 80%
     
     // MARK: - Initialization
     
     init(audioService: AudioPlayerService) async {
         self.audioService = audioService
         await audioService.addObserver(self)
+        await preloadSoundEffects()
+    }
+    
+    // MARK: - Sound Effects Preload
+    
+    /// Preload sound effects on initialization
+    private func preloadSoundEffects() async {
+        var effects: [SoundEffect] = []
+        
+        // Preload all sound effects with base volume 1.0
+        // (master volume controlled by player)
+        for name in ["bell", "gong", "count_down"] {
+            guard let url = trackURL(named: name) else {
+                print("[WARNING] Sound effect '\(name).mp3' not found")
+                continue
+            }
+            
+            do {
+                // Use volume 1.0 - master volume controlled by setSoundEffectVolume
+                if let effect = try await SoundEffect(url: url, fadeIn: 0.0, fadeOut: 0.3, volume: 1.0) {
+                    effects.append(effect)
+                }
+            } catch {
+                print("[ERROR] Failed to load sound effect '\(name).mp3': \(error)")
+            }
+        }
+        
+        preloadedEffects = effects
+        
+        // Preload into audio service cache
+        if !effects.isEmpty {
+            await audioService.preloadSoundEffects(effects)
+            print("[INFO] Preloaded \(effects.count) sound effects")
+            
+            // Set initial master volume
+            await audioService.setSoundEffectVolume(soundEffectVolume)
+        }
+    }
+    
+    /// Update sound effect master volume (no reload needed)
+    func setSoundEffectVolume(_ volume: Float) async {
+        soundEffectVolume = volume
+        
+        // Set master volume - applies immediately, no reload needed
+        await audioService.setSoundEffectVolume(volume)
     }
     
     // MARK: - Playback Control
@@ -80,11 +133,11 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     }
     
     func skipForward() async throws {
-        try await audioService.skipForward(by: 15)
+        try await audioService.skip(forward: 15)
     }
     
     func skipBackward() async throws {
-        try await audioService.skipBackward(by: 15)
+        try await audioService.skip(backward: 15)
     }
     
     func nextTrack() async throws {
@@ -149,9 +202,14 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
             volume: 0.5,
             fadeInDuration: 1.0,
             fadeOutDuration: 1.0,
-            applyFadeOnEachLoop: false  // Continuous ambient sound
+            fadeCurve: .linear
         )
-        try await audioService.startOverlay(url: url, configuration: config)
+        
+        // Set configuration first
+        try await audioService.setOverlayConfiguration(config)
+        
+        // Then play overlay
+        try await audioService.playOverlay(url)
         isOverlayPlaying = true
         selectedOverlayTrack = trackName
     }
@@ -165,13 +223,78 @@ class PlayerViewModel: AudioPlayerObserver, CrossfadeProgressObserver {
     func setOverlayLoopMode(enabled: Bool) async {
         overlayLoopEnabled = enabled
         let mode: OverlayConfiguration.LoopMode = enabled ? .infinite : .once
-        try? await audioService.setOverlayLoopMode(mode)
+        
+        // Get current config and update loop mode
+        if let currentConfig = await audioService.getOverlayConfiguration() {
+            var newConfig = currentConfig
+            newConfig.loopMode = mode
+            try? await audioService.setOverlayConfiguration(newConfig)
+        }
     }
     
     /// Set overlay loop delay dynamically
     func setOverlayLoopDelay(_ delay: TimeInterval) async {
         overlayLoopDelay = delay
-        try? await audioService.setOverlayLoopDelay(delay)
+        
+        // Get current config and update loop delay
+        if let currentConfig = await audioService.getOverlayConfiguration() {
+            var newConfig = currentConfig
+            newConfig.loopDelay = delay
+            try? await audioService.setOverlayConfiguration(newConfig)
+        }
+    }
+    
+    /// Set overlay volume (0.0 - 1.0)
+    func setOverlayVolume(_ volume: Float) async {
+        overlayVolume = volume
+        await audioService.setOverlayVolume(volume)
+    }
+    
+    // MARK: - Sound Effects Control
+    
+    /// Play sound effect by name
+    func playSoundEffect(named name: String) async throws {
+        guard let effect = preloadedEffects.first(where: { $0.track.url.lastPathComponent.contains(name) }) else {
+            errorMessage = "Sound effect '\(name)' not preloaded"
+            throw AudioPlayerError.fileLoadFailed(reason: "Sound effect not found: \(name)")
+        }
+        
+        currentEffect = effect
+        isSoundEffectPlaying = true
+        
+        await audioService.playSoundEffect(effect, fadeDuration: 0.1)
+        
+        // Auto-detect when effect finishes (approximate)
+        Task {
+            // Wait for effect duration + fade out
+            let duration = effect.fadeOutDuration + 0.5
+            try? await Task.sleep(for: .seconds(duration))
+            
+            // Check if still playing this effect
+            if let current = await audioService.currentSoundEffect, current.id == effect.id {
+                // Still playing
+            } else {
+                // Effect finished
+                await MainActor.run {
+                    isSoundEffectPlaying = false
+                    currentEffect = nil
+                }
+            }
+        }
+    }
+    
+    /// Stop current sound effect
+    func stopSoundEffect() async {
+        await audioService.stopSoundEffect(fadeDuration: 0.3)
+        isSoundEffectPlaying = false
+        currentEffect = nil
+    }
+    
+    /// Get available sound effect names
+    var availableSoundEffects: [String] {
+        preloadedEffects.map { effect in
+            effect.track.url.deletingPathExtension().lastPathComponent
+        }
     }
     
     // MARK: - AudioPlayerObserver

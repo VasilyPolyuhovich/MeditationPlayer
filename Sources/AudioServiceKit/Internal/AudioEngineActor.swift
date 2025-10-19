@@ -60,6 +60,9 @@ actor AudioEngineActor {
     /// **Future v4.0:** Consider extracting MainPlayerActor if position tracking can tolerate async overhead.
     internal var overlayPlayer: OverlayPlayerActor?
     
+    /// Current overlay configuration (persists across playOverlay calls)
+    private var overlayConfiguration: OverlayConfiguration = .default
+    
     // MARK: - Initialization
     
     init() {
@@ -141,6 +144,12 @@ actor AudioEngineActor {
         playerNodeA.stop()
         playerNodeB.stop()
         engine.stop()
+        isEngineRunning = false
+    }
+    
+    /// Reset engine running state after media services reset
+    /// Call this when audio services crash - engine.isRunning may be stale
+    func resetEngineRunningState() {
         isEngineRunning = false
     }
     
@@ -1092,24 +1101,23 @@ actor AudioEngineActor {
         try? await player.resume()
     }
     
-    /// Replace current overlay file with crossfade
-    /// - Parameter url: New audio file URL
-    /// - Throws: AudioPlayerError if no overlay is active
-    func replaceOverlay(url: URL) async throws {
-        guard let player = overlayPlayer else {
-            throw AudioPlayerError.invalidState(
-                current: "no overlay",
-                attempted: "replace"
-            )
-        }
-        
-        try await player.replaceFile(url: url)
-    }
-    
     /// Set overlay volume independently
     /// - Parameter volume: Volume level (0.0-1.0)
     func setOverlayVolume(_ volume: Float) async {
         await overlayPlayer?.setVolume(volume)
+    }
+    
+    /// Get current overlay configuration
+    /// - Returns: Current overlay configuration or nil if never set
+    func getOverlayConfiguration() -> OverlayConfiguration? {
+        return overlayConfiguration
+    }
+    
+    /// Set overlay configuration
+    /// - Parameter configuration: New configuration to use for overlay
+    /// - Note: Takes effect on next playOverlay() call
+    func setOverlayConfiguration(_ configuration: OverlayConfiguration) {
+        overlayConfiguration = configuration
     }
     
     // MARK: - Global Control

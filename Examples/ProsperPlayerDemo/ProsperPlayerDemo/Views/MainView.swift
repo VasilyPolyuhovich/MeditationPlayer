@@ -8,6 +8,7 @@ struct MainView: View {
     @State private var showPlaylists = false
     @State private var showSettings = false
     @State private var showOverlay = false
+    @State private var showSoundEffects = false
     @State private var showError = false
     
     var body: some View {
@@ -37,6 +38,7 @@ struct MainView: View {
                         },
                         onShowPlaylists: { showPlaylists = true },
                         onShowOverlay: { showOverlay = true },
+                        onShowSoundEffects: { showSoundEffects = true },
                         onShowSettings: { showSettings = true }
                     )
                     
@@ -58,6 +60,9 @@ struct MainView: View {
             }
             .sheet(isPresented: $showOverlay) {
                 OverlayView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $showSoundEffects) {
+                SoundEffectsView(viewModel: viewModel)
             }
             .sheet(isPresented: $showSettings) {
                 SettingsView(viewModel: viewModel)
@@ -143,6 +148,7 @@ struct QuickActions: View {
     let onNextPlaylist: () -> Void
     let onShowPlaylists: () -> Void
     let onShowOverlay: () -> Void
+    let onShowSoundEffects: () -> Void
     let onShowSettings: () -> Void
     
     var body: some View {
@@ -177,13 +183,22 @@ struct QuickActions: View {
                 .buttonStyle(.bordered)
                 
                 Button {
-                    onShowSettings()
+                    onShowSoundEffects()
                 } label: {
-                    Label("Settings", systemImage: "gearshape.fill")
+                    Label("Effects", systemImage: "speaker.wave.3.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
             }
+            
+            // Settings action
+            Button {
+                onShowSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
         }
     }
 }

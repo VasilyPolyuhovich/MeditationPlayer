@@ -41,6 +41,39 @@ struct OverlayView: View {
                 // MARK: - Overlay Controls (when playing)
                 if viewModel.isOverlayPlaying {
                     Section {
+                        // Volume Slider
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .foregroundStyle(.blue)
+                                Text("Overlay Volume")
+                                Spacer()
+                                Text("\(Int(viewModel.overlayVolume * 100))%")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                                    .monospacedDigit()
+                            }
+                            
+                            Slider(
+                                value: $viewModel.overlayVolume,
+                                in: 0.0...1.0,
+                                step: 0.05
+                            ) {
+                                Text("Volume")
+                            } minimumValueLabel: {
+                                Image(systemName: "speaker.fill")
+                                    .font(.caption2)
+                            } maximumValueLabel: {
+                                Image(systemName: "speaker.wave.3.fill")
+                                    .font(.caption2)
+                            }
+                            .onChange(of: viewModel.overlayVolume) { _, newValue in
+                                Task {
+                                    await viewModel.setOverlayVolume(newValue)
+                                }
+                            }
+                        }
+                        
                         // Loop Toggle
                         Toggle(isOn: $viewModel.overlayLoopEnabled) {
                             HStack {

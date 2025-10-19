@@ -38,23 +38,24 @@ public protocol AudioPlayerProtocol: Actor {
     func resume() async throws
     
     /// Stop playback and cleanup resources
-    /// - Parameter fadeDuration: Optional fade out duration (nil = instant stop)
-    func stop(fadeDuration: TimeInterval?) async
+    /// - Parameter fadeDuration: Fade out duration in seconds (default: 0.0 = instant stop)
+    func stop(fadeDuration: TimeInterval) async
     
     /// Finish playback with fade out
     /// - Parameter fadeDuration: Custom fade out duration (uses config default if nil)
     /// - Throws: AudioPlayerError if cannot finish in current state
+    /// - Note: This is an internal state machine detail, not for public use
     func finish(fadeDuration: TimeInterval?) async throws
     
     /// Skip forward by specified interval
-    /// - Parameter interval: Time interval in seconds (default: 15)
+    /// - Parameter forward: Time interval in seconds (default: 15)
     /// - Throws: AudioPlayerError if seek fails
-    func skipForward(by interval: TimeInterval) async throws
+    func skip(forward interval: TimeInterval) async throws
     
     /// Skip backward by specified interval
-    /// - Parameter interval: Time interval in seconds (default: 15)
+    /// - Parameter backward: Time interval in seconds (default: 15)
     /// - Throws: AudioPlayerError if seek fails
-    func skipBackward(by interval: TimeInterval) async throws
+    func skip(backward interval: TimeInterval) async throws
     
     /// Set volume level
     /// - Parameter volume: Volume level (0.0 - 1.0)
@@ -84,7 +85,7 @@ public protocol PlaylistAudioPlayerProtocol: AudioPlayerProtocol {
 }
 
 /// Protocol for observing player state changes
-public protocol AudioPlayerObserver: Sendable {
+public protocol AudioPlayerObserver: AnyObject, Sendable {
     /// Called when player state changes
     func playerStateDidChange(_ state: PlayerState) async
     

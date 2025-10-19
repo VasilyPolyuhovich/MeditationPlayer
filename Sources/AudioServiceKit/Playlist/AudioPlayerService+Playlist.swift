@@ -39,7 +39,7 @@ extension AudioPlayerService {
         // Check if playlist is now empty
         if await playlistManager.isEmpty {
             // Stop playback and disable controls
-            await stop(fadeDuration: nil)
+            await stop(fadeDuration: 0.0)
         } else if await playlistManager.isSingleTrack && self.configuration.repeatMode == .off {
             // Single track without looping - will stop after this track
             // No action needed, will stop naturally
@@ -56,14 +56,14 @@ extension AudioPlayerService {
             throw AudioPlayerError.invalidPlaylistIndex(index: index, count: count)
         }
         
-        guard let trackURL = await playlistManager.jumpTo(index: index) else {
+        guard let track = await playlistManager.jumpTo(index: index) else {
             throw AudioPlayerError.noActiveTrack
         }
         
-        Self.logger.info("Jumping to track \(index): \(trackURL.lastPathComponent)")
+        Self.logger.info("Jumping to track \(index): \(track.url.lastPathComponent)")
         
         // Crossfade to selected track
-        try await crossfadeToTrack(url: trackURL)
+        try await crossfadeToTrack(url: track.url)
     }
     
     /// Move track in playlist
@@ -88,7 +88,7 @@ extension AudioPlayerService {
     /// Get current playlist
     /// - Returns: Array of track URLs
     public func getCurrentPlaylist() async -> [URL] {
-        return await playlistManager.tracks
+        return await playlistManager.getPlaylist()
     }
     
     /// Get current track index in playlist
@@ -108,7 +108,7 @@ extension AudioPlayerService {
     /// Go to next track in playlist (manual)
     /// - Throws: AudioPlayerError if crossfade fails
     public func nextTrack() async throws {
-        guard let nextURL = await playlistManager.skipToNext() else {
+        guard let nextTrack = await playlistManager.skipToNext() else {
             // No next track - stop if not looping
             if configuration.repeatMode == .off {
                 Self.logger.info("Reached end of playlist, stopping")
@@ -117,25 +117,25 @@ extension AudioPlayerService {
             return
         }
         
-        Self.logger.info("Next track: \(nextURL.lastPathComponent)")
+        Self.logger.info("Next track: \(nextTrack.url.lastPathComponent)")
         
         // Crossfade to next track
-        try await crossfadeToTrack(url: nextURL)
+        try await crossfadeToTrack(url: nextTrack.url)
     }
     
     /// Go to previous track in playlist (manual)
     /// - Throws: AudioPlayerError if crossfade fails
     public func previousTrack() async throws {
-        guard let previousURL = await playlistManager.skipToPrevious() else {
+        guard let previousTrack = await playlistManager.skipToPrevious() else {
             // No previous track
             Self.logger.debug("Already at first track")
             return
         }
         
-        Self.logger.info("Previous track: \(previousURL.lastPathComponent)")
+        Self.logger.info("Previous track: \(previousTrack.url.lastPathComponent)")
         
         // Crossfade to previous track
-        try await crossfadeToTrack(url: previousURL)
+        try await crossfadeToTrack(url: previousTrack.url)
     }
     
     // MARK: - Internal Auto-Advance
@@ -143,7 +143,7 @@ extension AudioPlayerService {
     /// Auto-advance to next track (called from loop crossfade logic)
     /// - Returns: Next track URL or nil if should stop
     func autoAdvanceToNextTrack() async -> URL? {
-        return await playlistManager.getNextTrack()
+        return await playlistManager.getNextTrack()?.url
     }
     
     // MARK: - Private Helpers
@@ -166,10 +166,15 @@ extension AudioPlayerService {
         )
         updateCrossfadeProgress(prepareProgress)
         
-        // Use existing replaceTrack method
-        // NOTE: Do NOT set isTrackReplacementInProgress here!
-        // replaceTrack() will manage it and send proper progress updates
-        try await replaceTrack(url: url, crossfadeDuration: crossfadeDuration)
+        // Create Track from URL (validates file exists)
+        guard let track = Track(url: url) else {
+            throw AudioPlayerError.fileLoadFailed(reason: "Track file not found: \(url.lastPathComponent)")
+        }
+        
+        // Use internal replaceCurrentTrack method
+        // NOTE: Do NOT set activeCrossfadeOperation here!
+        // replaceCurrentTrack() will manage it and send proper progress updates
+        try await replaceCurrentTrack(track: track, crossfadeDuration: crossfadeDuration)
     }
     
 

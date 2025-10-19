@@ -137,7 +137,7 @@ actor OverlayPlayerActor {
   ///
   /// ## Behavior:
   /// - Starts loop cycle based on `configuration.loopMode`
-  /// - Applies fades according to `configuration.applyFadeOnEachLoop`
+  /// - Applies fades on each loop iteration (smooth transitions)
   /// - Respects `configuration.loopDelay` between iterations
   ///
   /// - Throws:
@@ -364,9 +364,8 @@ actor OverlayPlayerActor {
       // Check cancellation and state before each iteration
       guard !Task.isCancelled && state == .playing else { break }
       
-      // 1. Fade in (if configured)
-      let shouldFadeIn = configuration.applyFadeOnEachLoop || loopCount == 0
-      if shouldFadeIn && configuration.fadeInDuration > 0 {
+      // 1. Fade in on each iteration (smooth entry)
+      if configuration.fadeInDuration > 0 {
         await fadeVolume(
           from: 0.0,
           to: configuration.volume,
@@ -388,10 +387,8 @@ actor OverlayPlayerActor {
       
       guard !Task.isCancelled && state == .playing else { break }
       
-      // 4. Fade out (if configured)
-      let isLastIteration = isLastLoop()
-      let shouldFadeOut = configuration.applyFadeOnEachLoop || isLastIteration
-      if shouldFadeOut && configuration.fadeOutDuration > 0 {
+      // 4. Fade out on each iteration (smooth exit)
+      if configuration.fadeOutDuration > 0 {
         await fadeVolume(
           from: configuration.volume,
           to: 0.0,

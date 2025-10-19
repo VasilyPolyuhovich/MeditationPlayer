@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// Repeat mode for playback
 public enum RepeatMode: Sendable, Equatable {
@@ -15,6 +16,30 @@ public enum RepeatMode: Sendable, Equatable {
 /// Simplified player configuration with automatic fade calculations
 /// Replaces AudioConfiguration with more intuitive API
 public struct PlayerConfiguration: Sendable {
+    
+    // MARK: - Audio Session Presets
+    
+    /// Default audio session options for peaceful coexistence with other audio apps
+    /// 
+    /// **Configuration:**
+    /// - `.mixWithOthers`: Play alongside other apps (no audio session war)
+    /// - `.duckOthers`: iOS intelligently reduces other audio (polite request, not force)
+    /// - `.allowBluetoothA2DP`: High-quality Bluetooth audio support
+    /// - `.allowAirPlay`: AirPlay streaming support
+    /// 
+    /// This preset ensures the SDK coexists peacefully with:
+    /// - User's AVAudioPlayer instances
+    /// - System audio (alerts, notifications)
+    /// - Other music apps running in background
+    /// 
+    /// **Warning:** Only override if you understand iOS audio session behavior!
+    /// Custom options may cause conflicts with other audio sources.
+    public static let defaultAudioSessionOptions: [AVAudioSession.CategoryOptions] = [
+        .mixWithOthers,      // Coexist peacefully
+        .duckOthers,         // Politely request priority
+        .allowBluetoothA2DP, // Bluetooth support
+        .allowAirPlay        // AirPlay support
+    ]
     
     // MARK: - Crossfade Settings
     
@@ -62,10 +87,28 @@ public struct PlayerConfiguration: Sendable {
     
     // MARK: - Audio Session Settings
     
-    /// Mix with other audio apps (default: false - interrupts other audio)
-    /// When true, allows playing alongside other audio sources (music, podcasts, etc.)
-    /// When false, interrupts other audio sources (exclusive playback)
-    public let mixWithOthers: Bool
+    /// Audio session category options
+    /// 
+    /// **Default:** `PlayerConfiguration.defaultAudioSessionOptions`
+    /// - Peaceful coexistence with other audio apps
+    /// - High-quality Bluetooth and AirPlay support
+    /// 
+    /// **Custom Options:**
+    /// Only override if you have specific audio session requirements.
+    /// 
+    /// **Warning:** Custom options trigger a console warning to ensure intentional use.
+    /// 
+    /// **Example:**
+    /// ```swift
+    /// // Use defaults (recommended)
+    /// let config = PlayerConfiguration()
+    /// 
+    /// // Custom options (advanced)
+    /// let customConfig = PlayerConfiguration(
+    ///     audioSessionOptions: [.mixWithOthers, .duckOthers]
+    /// )
+    /// ```
+    public let audioSessionOptions: [AVAudioSession.CategoryOptions]
     
     // MARK: - Computed Properties
     
@@ -79,14 +122,32 @@ public struct PlayerConfiguration: Sendable {
         repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
         volume: Float = 1.0,
-        mixWithOthers: Bool = false
+        audioSessionOptions: [AVAudioSession.CategoryOptions] = PlayerConfiguration.defaultAudioSessionOptions
     ) {
         self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.repeatMode = repeatMode
         self.repeatCount = repeatCount
         self.volume = max(0.0, min(1.0, volume))
-        self.mixWithOthers = mixWithOthers
+        self.audioSessionOptions = audioSessionOptions
+        
+        // Warning: User is overriding default audio session options
+        if audioSessionOptions != PlayerConfiguration.defaultAudioSessionOptions {
+            print("")
+            print("⚠️ WARNING: Custom audio session options detected!")
+            print("  You are using custom AVAudioSession.CategoryOptions instead of defaults.")
+            print("  Default options: \(PlayerConfiguration.defaultAudioSessionOptions)")
+            print("  Your options:    \(audioSessionOptions)")
+            print("  ")
+            print("  This may cause conflicts with:")
+            print("    - Other audio apps (AVAudioPlayer, music apps)")
+            print("    - System audio (alerts, notifications)")
+            print("    - Bluetooth/AirPlay devices")
+            print("  ")
+            print("  Only use custom options if you understand iOS audio session behavior!")
+            print("  Recommended: Use PlayerConfiguration.defaultAudioSessionOptions")
+            print("")
+        }
     }
     
     // MARK: - Default Configuration

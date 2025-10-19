@@ -1,6 +1,6 @@
 # ProsperPlayer 🎵
 
-> Modern audio player SDK for iOS with advanced playback features, overlay audio system, and production-grade stability
+> Modern audio player SDK for iOS with advanced playback features, overlay audio system, sound effects, and production-grade stability
 
 ## 🚀 Quick Start
 
@@ -9,10 +9,10 @@
 let service = AudioPlayerService()
 await service.setup()
 
-// Configure playback with enhanced audio stability
+// Configure playback
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
-    volume: 100,
+    volume: 0.8,  // 0.0-1.0
     repeatMode: .playlist
 )
 
@@ -22,12 +22,17 @@ try await service.loadPlaylist(trackURLs, configuration: config)
 // Control playback
 try await service.pause()
 try await service.resume()
-try await service.nextTrack()
-try await service.skipForward(by: 15.0)
+try await service.skipToNext()
+try await service.skip(forward: 15.0)
 
 // Overlay audio (ambient sounds, voiceovers)
 let overlayConfig = OverlayConfiguration.ambient
-try await service.startOverlay(url: rainURL, configuration: overlayConfig)
+try await service.playOverlay(url: rainURL, configuration: overlayConfig)
+
+// Sound effects
+let bell = SoundEffect(url: bellURL, volume: 0.8)
+await service.preloadSoundEffects([bell])
+await service.playSoundEffect(bell)
 ```
 
 ## 🎯 Key Features
@@ -35,16 +40,25 @@ try await service.startOverlay(url: rainURL, configuration: overlayConfig)
 ### Audio Playback
 - ✅ High-quality audio with AVAudioEngine (8192-sample buffers for stability)
 - ✅ Dual-player crossfade architecture with Equal-Power algorithm
-- ✅ **Playlist management** with auto-advance
+- ✅ **Playlist management** with auto-advance and cyclic navigation
 - ✅ 5 fade curve types (Equal-Power, Linear, Logarithmic, Exponential, S-Curve)
 - ✅ Loop playback with seamless crossfade
 - ✅ **Production-grade stability** (optimized for Bluetooth/AirPods)
+- ✅ Type-safe `Track` model
 
-### Overlay Audio System 🆕
+### Overlay Audio System
 - ✅ **Independent audio layer** - plays alongside main track
-- ✅ **Dynamic loop controls** - toggle infinite loop in runtime
+- ✅ **Unified API** - `playOverlay()` for start/replace operations
+- ✅ **Dynamic configuration** - adjust volume and loop settings in runtime
 - ✅ **Configurable delays** - adjust timing between iterations (0-30s)
-- ✅ **Hot file swapping** - replace overlay with crossfade
+- ✅ **Preset configurations** - `.default`, `.ambient`, `.bell()`
+
+### Sound Effects 🆕
+- ✅ **LRU cache** - auto-manages up to 10 effects
+- ✅ **Instant playback** - <5ms latency for preloaded effects
+- ✅ **Master volume** - adjust all effects without reload
+- ✅ **Batch operations** - preload/unload multiple effects
+- ✅ **Auto-preload** - smart loading with warnings
 
 ### Platform Integration
 - ✅ Swift 6 strict concurrency compliance
@@ -61,23 +75,24 @@ try await service.startOverlay(url: rainURL, configuration: overlayConfig)
 │  - State management                     │
 │  - Playlist logic                       │
 │  - Overlay coordination                 │
+│  - Sound effects management             │
 │  - Public API                           │
 │  - Observer pattern                     │
 └────────────┬────────────────────────────┘
              │
-     ┌───────┴────────┐
-     │                │
-┌────▼────────┐  ┌───▼──────────────┐
-│AudioEngine  │  │PlaylistManager   │
-│Actor        │  │(Actor)           │
-│             │  │                  │
-│- Dual-player│  │- Track queue     │
-│- Crossfade  │  │- Auto-advance    │
-│- Buffers    │  │- Navigation      │
-│- Overlay ✨ │  └──────────────────┘
+     ┌───────┴────────┬──────────────┐
+     │                │              │
+┌────▼────────┐  ┌───▼──────────┐  ┌▼──────────────┐
+│AudioEngine  │  │PlaylistMgr   │  │SoundEffects   │
+│Actor        │  │(Actor)       │  │Actor 🆕       │
+│             │  │              │  │               │
+│- Dual-player│  │- Track queue │  │- LRU cache    │
+│- Crossfade  │  │- Auto-advance│  │- Master vol   │
+│- Buffers    │  │- Navigation  │  │- Batch ops    │
+│- Overlay ✨ │  └──────────────┘  └───────────────┘
 └─────────────┘
       │
-      └──► OverlayPlayerActor 🆕
+      └──► OverlayPlayerActor
            - Independent lifecycle
            - Loop with delay
            - Configurable fades
@@ -105,19 +120,21 @@ try await service.startOverlay(url: rainURL, configuration: overlayConfig)
 
 ### AudioServiceCore
 Core domain models and protocols:
-- `PlayerConfiguration` - Simplified playback configuration
-- `OverlayConfiguration` 🆕 - Overlay audio settings (loop, delay, fades)
+- `PlayerConfiguration` - Immutable playback configuration
+- `OverlayConfiguration` - Overlay audio settings (loop, delay, fades)
+- `Track` 🆕 - Type-safe track model
+- `SoundEffect` 🆕 - Sound effect descriptor
 - `AudioPlayerError` - Error types
-- `PlayerState` / `OverlayState` 🆕 - State machine states
-- `SendableTypes` - Swift 6 Sendable types
+- `PlayerState` / `OverlayState` - State machine states
 
 ### AudioServiceKit
 Main implementation:
 - `AudioPlayerService` - Public API (actor-isolated)
 - `PlaylistManager` - Playlist management
 - `AudioEngineActor` - AVAudioEngine wrapper with enhanced stability
-- `OverlayPlayerActor` 🆕 - Independent overlay audio system
-- `AudioSessionManager` 🆕 - Advanced session configuration
+- `OverlayPlayerActor` - Independent overlay audio system
+- `SoundEffectsPlayerActor` 🆕 - Sound effects with LRU cache
+- `AudioSessionManager` - Advanced session configuration
 - `RemoteCommandManager` - Lock Screen controls
 
 ## 🚦 Installation
@@ -133,7 +150,7 @@ Main implementation:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/VasilyPolyuhovich/MeditationPlayer.git", branch: "main")
+    .package(url: "https://github.com/VasilyPolyuhovich/ProsperPlayer.git", branch: "main")
 ]
 ```
 
@@ -145,15 +162,10 @@ cd ProsperPlayer
 swift build
 ```
 
-## 📚 Documentation
+## 📚 Examples
 
-### Technical Reference
+### Basic Playlist
 
-COMING
-
-### Examples
-
-**Basic Playlist:**
 ```swift
 let service = AudioPlayerService()
 await service.setup()
@@ -162,34 +174,45 @@ let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
     fadeCurve: .equalPower,
     repeatMode: .playlist,
-    volume: 100
+    volume: 0.8  // 0.0-1.0
 )
 
+// Load with URLs
 try await service.loadPlaylist(trackURLs, configuration: config)
+
+// Or load with Track models (type-safe)
+let tracks = trackURLs.map { Track(url: $0) }
+try await service.loadPlaylist(tracks, configuration: config)
 ```
 
-**Overlay Audio (Ambient Sounds):** 🆕
+### Overlay Audio (Ambient Sounds)
+
 ```swift
 // Start continuous rain sound
 let config = OverlayConfiguration.ambient  // Infinite loop, 30% volume
-try await service.startOverlay(url: rainURL, configuration: config)
+try await service.playOverlay(url: rainURL, configuration: config)
 
-// Adjust loop settings in runtime
-await service.setOverlayLoopMode(.infinite)  // Toggle infinite loop
-await service.setOverlayLoopDelay(5.0)       // 5 seconds between iterations
+// Or with Track model
+let rainTrack = Track(url: rainURL)
+try await service.playOverlay(rainTrack, configuration: config)
 
-// Replace with ocean sound (smooth crossfade)
-try await service.replaceOverlay(url: oceanURL)
+// Adjust settings in runtime
+await service.setOverlayVolume(0.5)
+await service.setOverlayConfiguration(.default)
+
+// Replace with ocean sound (reuses configuration)
+try await service.playOverlay(url: oceanURL)
 
 // Stop overlay (main track continues)
 await service.stopOverlay()
 ```
 
-**Timer Bell (Periodic Sound):** 🆕
+### Timer Bell (Periodic Sound)
+
 ```swift
 // Bell rings 3 times with 5-minute intervals
 let config = OverlayConfiguration.bell(times: 3, interval: 300)
-try await service.startOverlay(url: bellURL, configuration: config)
+try await service.playOverlay(url: bellURL, configuration: config)
 
 // Timeline:
 // 0:00  → fadeIn → DING → fadeOut → [5 min silence]
@@ -197,46 +220,50 @@ try await service.startOverlay(url: bellURL, configuration: config)
 // 10:00 → fadeIn → DING → fadeOut
 ```
 
-**Custom Overlay Configuration:** 🆕
+### Sound Effects 🆕
+
 ```swift
-let config = OverlayConfiguration(
-    loopMode: .count(10),         // Play 10 times
-    loopDelay: 2.0,               // 2 seconds between iterations
-    volume: 0.4,                  // 40% volume
-    fadeInDuration: 1.5,          // 1.5s fade in
-    fadeOutDuration: 1.5,         // 1.5s fade out
-    fadeCurve: .equalPower,       // Smooth fades
-    applyFadeOnEachLoop: true     // Fade on every iteration
-)
+// Create sound effects
+let bell = SoundEffect(url: bellURL, volume: 1.0, fadeIn: 0.1, fadeOut: 0.3)
+let gong = SoundEffect(url: gongURL, volume: 1.0, fadeIn: 0.1, fadeOut: 0.3)
+
+// Batch preload (recommended)
+await service.preloadSoundEffects([bell, gong])
+
+// Play instantly (<5ms latency)
+await service.playSoundEffect(bell, fadeDuration: 0.1)
+
+// Master volume control (no reload needed!)
+await service.setSoundEffectVolume(0.5)  // 50% of original volume
+
+// Manual cleanup (optional - LRU handles this)
+await service.unloadSoundEffects([bell])
 ```
 
-**Track Navigation:**
+### Track Navigation
+
 ```swift
 // Auto-advance enabled by default
 // Manual navigation:
-try await service.nextTrack()
-try await service.previousTrack()
-try await service.jumpToTrack(at: 2)
+try await service.skipToNext()     // Cyclic (wraps to first)
+try await service.skipToPrevious() // Cyclic (wraps to last)
+
+// Skip within track
+try await service.skip(forward: 15.0)
+try await service.skip(backward: 15.0)
+
+// Seek with fade
+try await service.seek(to: 60.0, fadeDuration: 0.5)
 ```
 
-**Single Track Looping:**
-```swift
-let config = PlayerConfiguration(
-    crossfadeDuration: 10.0,
-    repeatMode: .playlist,
-    repeatCount: 5  // Loop 5 times
-)
+### State Observation
 
-try await service.loadPlaylist([trackURL], configuration: config)
-```
-
-**State Observation:**
 ```swift
 actor Observer: AudioPlayerObserver {
     func playerStateDidChange(_ state: PlayerState) async {
         print("State: \(state)")
     }
-    
+
     func playbackPositionDidUpdate(_ position: PlaybackPosition) async {
         print("Position: \(position.currentTime)")
     }
@@ -247,46 +274,55 @@ await service.addObserver(Observer())
 
 ## 🎮 Full API Reference
 
-### Main Player API
+### Playlist Management
 
 ```swift
-// Playlist management
+// Load playlist
 try await service.loadPlaylist([url1, url2, url3], configuration: config)
-await service.addTrackToPlaylist(url4)
-try await service.removeTrackFromPlaylist(at: 1)
-try await service.jumpToTrack(at: 2)
+try await service.loadPlaylist([track1, track2], configuration: config)
 
-// Playback control
+// Replace playlist
+try await service.replacePlaylist([url4, url5])
+try await service.replacePlaylist([track4, track5])
+
+// Query
+let playlist = await service.playlist  // Property, not getter!
+```
+
+### Playback Control
+
+```swift
 try await service.startPlaying(fadeDuration: 3.0)
 try await service.pause()
 try await service.resume()
-await service.stop(fadeDuration: 3.0)  // Smooth fade-out
-
-// Navigation
-try await service.nextTrack()
-try await service.previousTrack()
-try await service.skipForward(by: 15)
-try await service.skipBackward(by: 15)
-
-// Configuration
-await service.setVolume(0.8)
-await service.setRepeatMode(.playlist)
-
-// State query
-let tracks = await service.getCurrentPlaylist()
-let index = await service.getCurrentTrackIndex()
-let state = await service.getState()
+await service.stop(fadeDuration: 3.0)  // Non-optional parameter
 ```
 
-### Overlay API 🆕
+### Navigation
 
 ```swift
-// Start/Stop
-try await service.startOverlay(url: URL, configuration: OverlayConfiguration)
-await service.stopOverlay()
+try await service.skipToNext()
+try await service.skipToPrevious()
+try await service.skip(forward: 15.0)
+try await service.skip(backward: 15.0)
+try await service.seek(to: position, fadeDuration: 0.5)
+```
 
-// Hot swapping
-try await service.replaceOverlay(url: newURL)
+### Configuration
+
+```swift
+await service.setVolume(0.8)
+let repeatMode = await service.repeatMode  // Property
+let repeatCount = await service.repeatCount // Property
+```
+
+### Overlay API
+
+```swift
+// Start/Replace (unified API)
+try await service.playOverlay(url: URL, configuration: OverlayConfiguration)
+try await service.playOverlay(track: Track, configuration: OverlayConfiguration)
+await service.stopOverlay(fadeDuration: 1.0)
 
 // Playback control
 await service.pauseOverlay()
@@ -294,17 +330,40 @@ await service.resumeOverlay()
 
 // Dynamic configuration
 await service.setOverlayVolume(0.5)
-try await service.setOverlayLoopMode(.infinite)
-try await service.setOverlayLoopDelay(10.0)
+await service.setOverlayConfiguration(.ambient)
+await service.setOverlayLoopDelay(10.0)
 
-// State query
-let state = await service.getOverlayState()
+// Query
+let state = await service.overlayState  // Property
+let config = await service.getOverlayConfiguration()
 ```
 
-### Global Control 🆕
+### Sound Effects API 🆕
 
 ```swift
-// Pause/Resume both main + overlay
+// Batch preload
+await service.preloadSoundEffects([effect1, effect2, effect3])
+
+// Play (auto-preloads if not in cache)
+await service.playSoundEffect(effect, fadeDuration: 0.1)
+
+// Stop current
+await service.stopSoundEffect(fadeDuration: 0.3)
+
+// Master volume (dynamic, no reload!)
+await service.setSoundEffectVolume(0.7)
+
+// Manual cleanup
+await service.unloadSoundEffects([effect1, effect2])
+
+// Query
+let current = await service.currentSoundEffect  // Property
+```
+
+### Global Control
+
+```swift
+// Pause/Resume main + overlay + sound effects
 await service.pauseAll()
 await service.resumeAll()
 
@@ -312,9 +371,9 @@ await service.resumeAll()
 await service.stopAll()
 ```
 
-## 🎛️ Audio Stability Configuration 🆕
+## 🎛️ Audio Stability Configuration
 
-ProsperPlayer v3.0 includes production-grade audio stability optimizations:
+ProsperPlayer includes production-grade audio stability optimizations:
 
 ### Advanced AudioSession Setup
 ```swift
@@ -330,19 +389,11 @@ ProsperPlayer v3.0 includes production-grade audio stability optimizations:
   - Bluetooth headphones / AirPods
   - Heavy UI operations (scrolling, animations)
   - System load and multi-app audio conflicts
-  - Network audio streams
 
 ### Trade-offs
-- **Latency**: +93ms vs previous (acceptable for meditation/ambient apps)
+- **Latency**: +93ms vs smaller buffers (acceptable for meditation/ambient apps)
 - **Stability**: Zero audio artifacts under normal conditions
 - **CPU Usage**: Minimal increase (<1%)
-
-**When to use:**
-- ✅ Meditation/mindfulness apps
-- ✅ Ambient/background audio
-- ✅ Bluetooth/AirPods primary usage
-- ❌ Real-time music apps (use smaller buffers)
-- ❌ Gaming audio (latency-sensitive)
 
 ## 🧪 Testing
 
@@ -369,51 +420,22 @@ swift test -Xswiftc -sanitize=thread
    - Phone calls (interruption handling)
    - System alerts
 
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-**Development workflow:**
-1. Fork repository
-2. Create feature branch
-3. Implement changes
-4. Add tests (run on device)
-5. Submit pull request
-
 ## 📊 Performance
-
-### Crossfade Optimization (v2.6.0)
-
-| Duration | Steps | CPU Usage | Improvement |
-|----------|-------|-----------|-------------|
-| 1s       | 100   | 1%        | Baseline    |
-| 10s      | 300   | 3%        | 3.3× faster |
-| 30s      | 600   | 6%        | **5× faster** |
-
-### Audio Stability (v3.0.0) 🆕
-
-| Metric | v2.x | v3.0 | Improvement |
-|--------|------|------|-------------|
-| Buffer Size | 4096 samples | 8192 samples | **2× larger** |
-| Bluetooth Artifacts | Occasional | Zero* | **100% reduction** |
-| Latency | 93ms | 186ms | Trade-off for stability |
-| CPU Overhead | Baseline | +0.5% | Negligible |
-
-*Under normal conditions with iOS 15+ on recent devices
 
 ### Memory Footprint
 
 - Single track: ~10MB (typical 5min @ 128kbps)
 - During crossfade: ~20MB (dual-player)
 - With overlay: ~30MB (triple-player)
+- Sound effects cache: ~5-50MB (10 effects max)
 - Post-crossfade: ~10MB (old track released)
 
-### Overlay System Overhead 🆕
+### Sound Effects Performance 🆕
 
-- Idle overhead: ~100KB (actor + nodes)
-- Active playback: +10MB per overlay file
-- Loop delay: Zero CPU (async Task.sleep)
-- Dynamic config: <1ms (actor hop)
+- Preloaded latency: <5ms (instant)
+- Auto-preload latency: 50-200ms (disk read)
+- LRU cache: 10 effects (configurable)
+- Memory per effect: ~50-500KB (depends on duration)
 
 ## 📄 License
 
@@ -421,7 +443,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📮 Contact
 
-- Issues: [GitHub Issues](https://github.com/VasilyPolyuhovich/MeditationPlayer/issues)
+- Issues: [GitHub Issues](https://github.com/VasilyPolyuhovich/ProsperPlayer/issues)
 
 ## 🙏 Acknowledgments
 
@@ -432,30 +454,32 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 🆕 What's New in v3.0
+## 🆕 What's New in v4.1
 
-### Overlay Audio System
-- **Independent audio layer** for ambient sounds and voiceovers
-- **Dynamic loop controls** - change settings without restarting
-- **Configurable delays** between iterations (0-30s)
-- **Hot file swapping** with smooth crossfades
-- **Preset configurations** for common use cases
+### Sound Effects System
+- **LRU cache** with automatic management (10 effects limit)
+- **Master volume control** - adjust all effects instantly without reload
+- **Batch operations** - preload/unload multiple effects at once
+- **Auto-preload** - smart loading with console warnings
+- **Instant playback** - <5ms latency for preloaded effects
 
-### Audio Stability Improvements
-- **2× larger buffers** (8192 samples) for Bluetooth stability
-- **Advanced AudioSession configuration** minimizes interruptions
-- **Zero artifacts** with AirPods, Bluetooth, system load
-- **Production-tested** under heavy UI operations
+### API Improvements
+- **Unified Overlay API** - `playOverlay()` replaces start/replace
+- **Track model** - type-safe audio file handling
+- **Properties** - `repeatMode`, `playlist`, `currentSoundEffect` instead of getters
+- **Renamed methods** - `skip(forward:)`, `skip(backward:)`, `seek(to:fadeDuration:)`
+- **Reduced API surface** - removed 15 deprecated methods (-25%)
 
-### Breaking Changes
-- Minimum iOS version: 15.0 (was 14.0)
-- Swift 6 required (strict concurrency)
-- `PlayerConfiguration` API slightly changed (see Migration Guide)
-
+### Bug Fixes
+- Fixed telephone call interruption handling
+- Fixed Bluetooth route change crashes (300ms debounce)
+- Fixed media services reset position preservation
+- Fixed AVAudioEngine overlay node crashes
+- Fixed state oscillation during crossfade pause
 
 ---
 
-**Version**: 4.0.0  
-**Platform**: iOS 15+  
+**Version**: 4.1.0
+**Platform**: iOS 15+
 **Build**: [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

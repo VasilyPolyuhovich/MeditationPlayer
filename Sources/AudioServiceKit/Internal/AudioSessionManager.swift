@@ -8,10 +8,12 @@ actor AudioSessionManager {
     private let session: AVAudioSession
     private var isConfigured = false
     private var isActive = false
+    private var isActivating = false  // Reentrancy guard for activate()
     
     // Callbacks for handling session events
     private var interruptionHandler: (@Sendable (Bool) -> Void)?
     private var routeChangeHandler: (@Sendable (AVAudioSession.RouteChangeReason) -> Void)?
+    private var mediaServicesResetHandler: (@Sendable () -> Void)?
     
     // MARK: - Initialization
     
@@ -25,7 +27,7 @@ actor AudioSessionManager {
         setupNotificationObservers()
     }
     
-    func configure(mixWithOthers: Bool = false) throws {
+    func configure(options: [AVAudioSession.CategoryOptions]) throws {
         guard !isConfigured else { return }
         
         do {
@@ -48,13 +50,19 @@ actor AudioSessionManager {
             }
             
             // 4. Set category to playback for background audio
-            // Add .mixWithOthers option if requested
-            let options: AVAudioSession.CategoryOptions = mixWithOthers ? [.mixWithOthers] : []
+            // Options passed from PlayerConfiguration.audioSessionOptions
+            // Default: Peaceful coexistence (.mixWithOthers + .duckOthers + Bluetooth + AirPlay)
+            // Custom: User can override (triggers warning in PlayerConfiguration.init)
             
+            // Combine array of options into single OptionSet
+            let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
+                result.formUnion(option)
+            }
+
             try session.setCategory(
                 .playback,
                 mode: .default,
-                options: options
+                options: categoryOptions
             )
             
             // 5. Validate actual vs preferred settings
@@ -90,11 +98,23 @@ actor AudioSessionManager {
             )
         }
         
+        // Already active - skip
         guard !isActive else { return }
+        
+        // Reentrancy guard - prevent concurrent activation attempts
+        // Critical for multithreading safety with rapid route changes
+        guard !isActivating else {
+            print("[AudioSession] ⚠️ WARNING: Concurrent activate() blocked - already activating")
+            return
+        }
+        
+        isActivating = true
+        defer { isActivating = false }
         
         do {
             try session.setActive(true)
             isActive = true
+            print("[AudioSession] ✅ Session activated successfully")
         } catch {
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "Failed to activate audio session: \(error.localizedDescription)"
@@ -123,6 +143,10 @@ actor AudioSessionManager {
     
     func setRouteChangeHandler(_ handler: @escaping @Sendable (AVAudioSession.RouteChangeReason) -> Void) {
         self.routeChangeHandler = handler
+    }
+    
+    func setMediaServicesResetHandler(_ handler: @escaping @Sendable () -> Void) {
+        self.mediaServicesResetHandler = handler
     }
     
     // MARK: - Notification Observers
@@ -174,6 +198,19 @@ actor AudioSessionManager {
                 await self?.handleRouteChange(reason: reason)
             }
         }
+        
+        // Media services reset notifications
+        // This fires when audio services crash/restart (rare but critical)
+        // Also fires when external AVAudioPlayer interferes with our AVAudioEngine
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.mediaServicesWereResetNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            Task {
+                await self?.handleMediaServicesReset()
+            }
+        }
     }
     
     // MARK: - Interruption Handling
@@ -203,6 +240,23 @@ actor AudioSessionManager {
     
     private func handleRouteChange(reason: AVAudioSession.RouteChangeReason) {
         routeChangeHandler?(reason)
+    }
+    
+    // MARK: - Media Services Reset Handling
+    
+    private func handleMediaServicesReset() {
+        print("[AudioSession] ⚠️ CRITICAL: Media services were reset!")
+        print("[AudioSession] This may happen when:")
+        print("[AudioSession]   - Audio services crash/restart")
+        print("[AudioSession]   - External AVAudioPlayer interferes with our engine")
+        print("[AudioSession]   - System audio reconfiguration")
+        
+        // Reset our internal state flags
+        isActive = false
+        isActivating = false
+        
+        // Notify the service to reconfigure and restart
+        mediaServicesResetHandler?()
     }
     
     // MARK: - Current Route Info

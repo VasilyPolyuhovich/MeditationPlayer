@@ -14,6 +14,8 @@ This demo showcases:
 - ✅ Real-time position tracking
 - ✅ Configurable fade curves
 - ✅ Repeat modes (off, single track, playlist)
+- ✅ Sound Effects with LRU cache & auto-preload
+- ✅ Overlay player for ambient sounds
 - ✅ Background playback ready
 
 ## 📁 Project Structure
@@ -27,27 +29,42 @@ ProsperPlayerDemo/
 ├── Views/
 │   ├── MainView.swift                  # Player UI
 │   ├── PlaylistsView.swift             # Hot swap demo
+│   ├── OverlayView.swift               # Ambient overlay demo
+│   ├── SoundEffectsView.swift          # Sound effects demo
 │   └── SettingsView.swift              # SDK configuration
 ├── Components/
 │   ├── PlayerControls.swift            # Play/pause/skip
 │   ├── PositionTracker.swift           # Progress bar
 │   └── CrossfadeVisualizer.swift       # Live crossfade indicator
-└── Assets/
-    ├── voiceover1.mp3                  # Test audio
-    ├── voiceover2.mp3                  # Test audio
-    └── voiceover3.mp3                  # Test audio
+└── Resources/
+    ├── sample1.mp3                     # Main track
+    ├── sample2.mp3                     # Main track
+    ├── sample3.mp3                     # Main track
+    ├── sample4.mp3                     # Main track
+    ├── voiceover1.mp3                  # Overlay track
+    ├── voiceover2.mp3                  # Overlay track
+    ├── voiceover3.mp3                  # Overlay track
+    ├── bell.mp3                        # Sound effect (add manually)
+    ├── gong.mp3                        # Sound effect (add manually)
+    └── count_down.mp3                  # Sound effect (add manually)
 ```
 
 ## 🚀 Quick Start
 
 ### 1. Add Audio Files
 
-Copy 3 MP3 files to `ProsperPlayerDemo/` and rename them:
-- `voiceover1.mp3`
-- `voiceover2.mp3`
-- `voiceover3.mp3`
+**Main Tracks (already included):**
+- `sample1.mp3`, `sample2.mp3`, `sample3.mp3`, `sample4.mp3`
 
-> **Tip:** You can copy from `../MeditationDemo/MeditationDemo/MeditationDemo/sample*.mp3`
+**Overlay Tracks (already included):**
+- `voiceover1.mp3`, `voiceover2.mp3`, `voiceover3.mp3`
+
+**Sound Effects (add manually):**
+- `bell.mp3` - Short bell sound (1-2 seconds)
+- `gong.mp3` - Meditation gong (2-3 seconds)
+- `count_down.mp3` - 3-2-1 countdown (3-5 seconds)
+
+> **See:** `SOUND_EFFECTS_SETUP.md` for detailed instructions
 
 ### 2. Create Xcode Project
 
@@ -97,6 +114,7 @@ Drag all folders to Xcode project:
 - Volume control
 - Play/pause/skip buttons
 - Live crossfade indicator (when active)
+- Quick access to all features
 
 ### Playlists View
 - Hot swap demonstration
@@ -104,10 +122,25 @@ Drag all folders to Xcode project:
 - Preset playlists
 - Current playlist display
 
+### Sound Effects View
+- 3 preloaded sound effects (bell, gong, countdown)
+- Instant playback with zero latency
+- LRU cache visualization
+- Auto-preload demonstration
+- One-tap triggers for meditation timers
+
+### Overlay View
+- Ambient sound playback
+- Independent volume control
+- Loop configuration (infinite, count, once)
+- Dynamic loop delay adjustment
+- Simultaneous playback with main track
+
 ### Settings View
 - Crossfade duration (1-30s)
 - Fade curve selection
 - Repeat mode configuration
+- Volume fade settings
 - SDK technical info
 
 ## 📝 Key Code Patterns
@@ -119,7 +152,25 @@ try await viewModel.loadPlaylist(["voiceover1", "voiceover2"])
 
 ### Hot Swap (with crossfade)
 ```swift
-try await viewModel.replacePlaylist(["voiceover3", "voiceover1"])
+try await viewModel.replacePlaylist(["sample3", "sample1"])
+```
+
+### Sound Effects (instant playback)
+```swift
+// Auto-preloaded on app launch
+try await viewModel.playSoundEffect(named: "bell")
+
+// Stop current effect
+await viewModel.stopSoundEffect()
+```
+
+### Overlay Player (ambient sounds)
+```swift
+// Play with custom configuration
+try await viewModel.playOverlay("voiceover1")
+
+// Stop overlay
+await viewModel.stopOverlay()
 ```
 
 ### Observing State

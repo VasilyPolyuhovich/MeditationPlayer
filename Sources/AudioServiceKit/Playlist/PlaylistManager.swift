@@ -8,7 +8,7 @@ actor PlaylistManager {
     // MARK: - Properties
     
     /// Current playlist tracks
-    private(set) var tracks: [URL] = []
+    private(set) var tracks: [Track] = []
     
     /// Current track index in playlist
     private(set) var currentIndex: Int = 0
@@ -28,31 +28,65 @@ actor PlaylistManager {
     // MARK: - Playlist Management
     
     /// Load new playlist and reset state
-    /// - Parameter tracks: Array of track URLs
-    func load(tracks: [URL]) {
+    /// - Parameter tracks: Array of tracks
+    func load(tracks: [Track]) {
         self.tracks = tracks
         self.currentIndex = 0
         self.currentRepeatCount = 0
     }
     
+    /// Load new playlist from URLs (backward compatibility)
+    /// - Parameter tracks: Array of track URLs
+    /// - Note: Invalid URLs (files not found) are automatically filtered out
+    func load(tracks urls: [URL]) {
+        let validTracks = urls.toTracks()
+        if validTracks.count < urls.count {
+            print("[PlaylistManager] ⚠️ Warning: \(urls.count - validTracks.count) tracks filtered out (files not found)")
+        }
+        self.load(tracks: validTracks)
+    }
+    
     /// Add track to end of playlist
+    /// - Parameter track: Track to add
+    func addTrack(_ track: Track) {
+        tracks.append(track)
+    }
+    
+    /// Add track from URL (backward compatibility)
     /// - Parameter url: Track URL to add
+    /// - Note: Silently fails if file doesn't exist
     func addTrack(_ url: URL) {
-        tracks.append(url)
+        guard let track = Track(url: url) else {
+            print("[PlaylistManager] ⚠️ Warning: Track not added - file not found: \(url.lastPathComponent)")
+            return
+        }
+        tracks.append(track)
     }
     
     /// Insert track at specific position
     /// - Parameters:
-    ///   - url: Track URL to insert
+    ///   - track: Track to insert
     ///   - index: Position to insert at
-    func insertTrack(_ url: URL, at index: Int) {
+    func insertTrack(_ track: Track, at index: Int) {
         guard index <= tracks.count else { return }
-        tracks.insert(url, at: index)
+        tracks.insert(track, at: index)
         
         // Adjust current index if insertion affects it
         if index <= currentIndex {
             currentIndex += 1
         }
+    }
+    
+    /// Insert track from URL (backward compatibility)
+    /// - Parameters:
+    ///   - url: Track URL to insert
+    ///   - index: Position to insert at
+    func insertTrack(_ url: URL, at index: Int) {
+        guard let track = Track(url: url) else {
+            print("[PlaylistManager] ⚠️ Warning: Track not inserted - file not found: \(url.lastPathComponent)")
+            return
+        }
+        insertTrack(track, at: index)
     }
     
     /// Remove track at index
@@ -113,31 +147,54 @@ actor PlaylistManager {
     /// Replace entire playlist and reset state
     /// - Parameter tracks: New playlist tracks
     /// - Note: Resets currentIndex to 0 and repeatCount to 0
-    /// - Note: Used by swapPlaylist() API for hot playlist replacement
-    func replacePlaylist(_ tracks: [URL]) {
+    /// - Note: Used by replacePlaylist() API for hot playlist replacement
+    func replacePlaylist(_ tracks: [Track]) {
         self.tracks = tracks
         self.currentIndex = 0
         self.currentRepeatCount = 0
     }
     
-    /// Get current playlist
+    /// Replace playlist from URLs (backward compatibility)
+    /// - Parameter tracks: New playlist track URLs
+    /// - Note: Invalid URLs are automatically filtered out
+    func replacePlaylist(_ urls: [URL]) {
+        let validTracks = urls.toTracks()
+        if validTracks.count < urls.count {
+            print("[PlaylistManager] ⚠️ Warning: \(urls.count - validTracks.count) tracks filtered out (files not found)")
+        }
+        self.replacePlaylist(validTracks)
+    }
+    
+    /// Get current playlist tracks (NEW)
+    /// - Returns: Array of all tracks in current playlist
+    func getTracks() -> [Track] {
+        return tracks
+    }
+    
+    /// Get current playlist URLs (backward compatibility)
     /// - Returns: Array of all track URLs in current playlist
     func getPlaylist() -> [URL] {
-        return tracks
+        return tracks.urls
     }
     
     // MARK: - Navigation
     
-    /// Get current track URL
-    /// - Returns: Current track URL or nil if playlist empty
-    func getCurrentTrack() -> URL? {
+    /// Get current track
+    /// - Returns: Current track or nil if playlist empty
+    func getCurrentTrack() -> Track? {
         guard currentIndex < tracks.count else { return nil }
         return tracks[currentIndex]
     }
     
+    /// Get current track URL (backward compatibility)
+    /// - Returns: Current track URL or nil if playlist empty
+    func getCurrentTrackURL() -> URL? {
+        return getCurrentTrack()?.url
+    }
+    
     /// Get next track according to repeat mode
-    /// - Returns: Next track URL, nil if should stop
-    func getNextTrack() -> URL? {
+    /// - Returns: Next track, nil if should stop
+    func getNextTrack() -> Track? {
         guard !tracks.isEmpty else { return nil }
         
         switch configuration.repeatMode {
@@ -146,7 +203,7 @@ actor PlaylistManager {
             return getNextTrackSequential()
             
         case .singleTrack:
-            // Loop current track - return same URL
+            // Loop current track - return same track
             return tracks[currentIndex]
             
         case .playlist:
@@ -177,17 +234,17 @@ actor PlaylistManager {
     
     /// Jump to specific track index
     /// - Parameter index: Target index
-    /// - Returns: Track URL at index, nil if invalid
+    /// - Returns: Track at index, nil if invalid
     @discardableResult
-    func jumpTo(index: Int) -> URL? {
+    func jumpTo(index: Int) -> Track? {
         guard index < tracks.count else { return nil }
         currentIndex = index
         return tracks[currentIndex]
     }
     
     /// Jump to next track (manual skip forward)
-    /// - Returns: Next track URL, nil if at end in sequential mode
-    func skipToNext() -> URL? {
+    /// - Returns: Next track, nil if at end in sequential mode
+    func skipToNext() -> Track? {
         guard !tracks.isEmpty else { return nil }
         
         if tracks.count == 1 {
@@ -201,8 +258,8 @@ actor PlaylistManager {
     }
     
     /// Jump to previous track (manual skip backward)
-    /// - Returns: Previous track URL, nil if at start in sequential mode
-    func skipToPrevious() -> URL? {
+    /// - Returns: Previous track, nil if at start in sequential mode
+    func skipToPrevious() -> Track? {
         guard !tracks.isEmpty else { return nil }
         
         if tracks.count == 1 {
@@ -245,7 +302,7 @@ actor PlaylistManager {
     // MARK: - Private Helpers
     
     /// Get next track in looping mode (playlist repeat)
-    private func getNextTrackLooping() -> URL? {
+    private func getNextTrackLooping() -> Track? {
         // Single track - always return it (loop on same track)
         if tracks.count == 1 {
             return tracks[0]
@@ -269,7 +326,7 @@ actor PlaylistManager {
     }
     
     /// Get next track in sequential mode (play once)
-    private func getNextTrackSequential() -> URL? {
+    private func getNextTrackSequential() -> Track? {
         // Check if we're at the end
         if currentIndex + 1 < tracks.count {
             currentIndex += 1

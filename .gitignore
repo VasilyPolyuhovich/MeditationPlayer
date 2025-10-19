@@ -117,6 +117,7 @@ docs/.build/
 
 # Claude instructions and context files
 .claude_instructions
+CLAUDE.md
 PROJECT_CONTEXT.md
 CHAT_SESSIONS.md
 DECISIONS_LOG.md
@@ -203,3 +204,4 @@ Temp/
 # Tests/
 # Examples/
 # Documentation/01_Architecture.md through 07_Migration_Guide.md
+*.backup.*
