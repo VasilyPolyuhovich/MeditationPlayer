@@ -14,12 +14,22 @@ protocol AudioStateProtocol: Sendable {
     
     /// Called when exiting this state
     func willExit(to nextState: any AudioStateProtocol, context: AudioStateMachineContext) async
+    
+    // MARK: - Side Effect Hooks
+    
+    /// Called on state entry - for side effects
+    func onEnter(context: AudioStateMachineContext) async
+    
+    /// Called on state exit - for cleanup
+    func onExit(context: AudioStateMachineContext) async
 }
 
 /// Default implementations
 extension AudioStateProtocol {
     func didEnter(from previousState: (any AudioStateProtocol)?, context: AudioStateMachineContext) async {}
     func willExit(to nextState: any AudioStateProtocol, context: AudioStateMachineContext) async {}
+    func onEnter(context: AudioStateMachineContext) async {}
+    func onExit(context: AudioStateMachineContext) async {}
 }
 
 /// Context protocol for state machine to communicate with player
@@ -41,4 +51,13 @@ protocol AudioStateMachineContext: Actor {
     
     /// Request to start fade out
     func startFadeOut(duration: TimeInterval) async
+    
+    /// Transition to finished state after fade out
+    func transitionToFinished() async
+    
+    /// Transition to playing state (called from PreparingState)
+    func transitionToPlaying() async
+    
+    /// Transition to failed state (called from PreparingState)
+    func transitionToFailed(error: AudioPlayerError) async
 }

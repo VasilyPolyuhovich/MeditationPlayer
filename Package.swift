@@ -46,5 +46,5 @@ let package = Package(
             dependencies: ["AudioServiceKit", "AudioServiceCore"]
         )
     ],
-    swiftLanguageVersions: [.v6]
+    swiftLanguageModes: [.v6]
 )

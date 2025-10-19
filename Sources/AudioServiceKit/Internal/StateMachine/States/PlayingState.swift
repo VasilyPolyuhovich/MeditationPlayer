@@ -6,8 +6,15 @@ struct PlayingState: AudioStateProtocol {
     var playerState: PlayerState { .playing }
     
     func isValidTransition(to state: any AudioStateProtocol) -> Bool {
+        // Always allow transition to finished (for stop)
+        if state.playerState == .finished {
+            return true
+        }
+        
         switch state.playerState {
-        case .paused, .fadingOut, .finished, .failed:
+        case .preparing:  // Allow reset during playback
+            return true
+        case .paused, .fadingOut, .failed:
             return true
         default:
             return false

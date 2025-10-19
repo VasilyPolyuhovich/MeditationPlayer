@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		D90E95512E917F5B0004C1C1 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D90E95502E917F5B0004C1C1 /* AudioServiceCore */; };
 		D90E95532E917F5B0004C1C1 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D90E95522E917F5B0004C1C1 /* AudioServiceKit */; };
+		D986179D2E955379001E8AF3 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D986179C2E955379001E8AF3 /* AudioServiceCore */; };
+		D986179F2E955379001E8AF3 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D986179E2E955379001E8AF3 /* AudioServiceKit */; };
+		D98617AA2E959A81001E8AF3 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D98617A92E959A81001E8AF3 /* AudioServiceCore */; };
+		D98617AC2E959A81001E8AF3 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D98617AB2E959A81001E8AF3 /* AudioServiceKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +46,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				D90E95532E917F5B0004C1C1 /* AudioServiceKit in Frameworks */,
+				D986179D2E955379001E8AF3 /* AudioServiceCore in Frameworks */,
+				D98617AA2E959A81001E8AF3 /* AudioServiceCore in Frameworks */,
+				D986179F2E955379001E8AF3 /* AudioServiceKit in Frameworks */,
+				D98617AC2E959A81001E8AF3 /* AudioServiceKit in Frameworks */,
 				D90E95512E917F5B0004C1C1 /* AudioServiceCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -87,6 +95,10 @@
 			packageProductDependencies = (
 				D90E95502E917F5B0004C1C1 /* AudioServiceCore */,
 				D90E95522E917F5B0004C1C1 /* AudioServiceKit */,
+				D986179C2E955379001E8AF3 /* AudioServiceCore */,
+				D986179E2E955379001E8AF3 /* AudioServiceKit */,
+				D98617A92E959A81001E8AF3 /* AudioServiceCore */,
+				D98617AB2E959A81001E8AF3 /* AudioServiceKit */,
 			);
 			productName = MeditationDemo;
 			productReference = D90E953F2E917F050004C1C1 /* MeditationDemo.app */;
@@ -117,7 +129,7 @@
 			mainGroup = D90E95362E917F050004C1C1;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D90E954F2E917F5A0004C1C1 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */,
+				D98617A82E959A81001E8AF3 /* XCRemoteSwiftPackageReference "MeditationPlayer" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D90E95402E917F050004C1C1 /* Products */;
@@ -352,12 +364,16 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		D90E954F2E917F5A0004C1C1 /* XCLocalSwiftPackageReference "../../../../ProsperPlayer" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../../../ProsperPlayer;
+/* Begin XCRemoteSwiftPackageReference section */
+		D98617A82E959A81001E8AF3 /* XCRemoteSwiftPackageReference "MeditationPlayer" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/VasilyPolyuhovich/MeditationPlayer";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
 		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		D90E95502E917F5B0004C1C1 /* AudioServiceCore */ = {
@@ -366,6 +382,24 @@
 		};
 		D90E95522E917F5B0004C1C1 /* AudioServiceKit */ = {
 			isa = XCSwiftPackageProductDependency;
+			productName = AudioServiceKit;
+		};
+		D986179C2E955379001E8AF3 /* AudioServiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioServiceCore;
+		};
+		D986179E2E955379001E8AF3 /* AudioServiceKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AudioServiceKit;
+		};
+		D98617A92E959A81001E8AF3 /* AudioServiceCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D98617A82E959A81001E8AF3 /* XCRemoteSwiftPackageReference "MeditationPlayer" */;
+			productName = AudioServiceCore;
+		};
+		D98617AB2E959A81001E8AF3 /* AudioServiceKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D98617A82E959A81001E8AF3 /* XCRemoteSwiftPackageReference "MeditationPlayer" */;
 			productName = AudioServiceKit;
 		};
 /* End XCSwiftPackageProductDependency section */

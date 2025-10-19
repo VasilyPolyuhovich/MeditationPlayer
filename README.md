@@ -1,260 +1,279 @@
-# Prosper Player - iOS Audio Service
+# ProsperPlayer 🎵
 
-Modern, thread-safe audio player service for iOS 18+ built with Swift 6, AVAudioEngine, and strict concurrency.
+> Modern audio player SDK for iOS with advanced playback features
 
-## Features
+## 🚀 Quick Start
 
-✅ **Swift 6 Concurrency** - Actor-isolated design for data-race safety  
-✅ **Zero Compiler Warnings** - Full strict concurrency compliance  
-✅ **Dual-Player Architecture** - Seamless crossfading between audio files  
-✅ **Background Playback** - Continue playing when app is in background  
-✅ **Lock Screen Controls** - Play, pause, skip forward/backward (15s)  
-✅ **Audio Session Management** - Handle interruptions, route changes  
-✅ **State Machine** - GameplayKit-based formal state management  
-✅ **Protocol-Oriented** - Extensible architecture for custom features  
-✅ **Configurable** - Crossfade duration, fade in/out, volume, repeat count  
+```swift
+// Initialize service
+let service = AudioPlayerService()
+await service.setup()
 
-## Architecture
+// Configure playback
+let config = PlayerConfiguration(
+    crossfadeDuration: 10.0,
+    volume: 100,
+    repeatMode: .playlist
+)
 
-```
-AudioServiceKit/
-├── AudioServiceCore/          # Domain layer (protocols, models)
-│   ├── Protocols/
-│   │   ├── AudioPlayerProtocol.swift
-│   │   ├── AudioSource.swift
-│   │   └── AudioFeature.swift
-│   └── Models/
-│       ├── PlayerState.swift
-│       ├── AudioConfiguration.swift
-│       ├── AudioPlayerError.swift
-│       └── SendableTypes.swift
-│
-└── AudioServiceKit/           # Implementation layer
-    ├── Public/
-    │   └── AudioPlayerService.swift
-    └── Internal/
-        ├── AudioEngineActor.swift
-        ├── AudioSessionManager.swift
-        ├── RemoteCommandManager.swift
-        └── StateMachine/
-            ├── AudioStateMachine.swift
-            └── States/
-                ├── PreparingState.swift
-                ├── PlayingState.swift
-                ├── PausedState.swift
-                ├── FadingOutState.swift
-                ├── FinishedState.swift
-                └── FailedState.swift
+// Start playlist playback
+try await service.loadPlaylist(trackURLs, configuration: config)
+
+// Control playback
+try await service.pause()
+try await service.resume()
+try await service.nextTrack()
+try await service.skipForward(by: 15.0)
 ```
 
-## Installation
+## 🎯 Key Features
+
+- ✅ High-quality audio playback with AVAudioEngine
+- ✅ Dual-player crossfade architecture
+- ✅ **Playlist management** with auto-advance
+- ✅ 5 fade curve types (Equal-Power, Linear, Logarithmic, Exponential, S-Curve)
+- ✅ Loop playback with seamless crossfade
+- ✅ Swift 6 strict concurrency compliance
+- ✅ Background audio & Lock Screen controls
+- ✅ Skip forward/backward (±15s)
+- ✅ Click-free seek with fade
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────┐
+│      AudioPlayerService (Actor)         │
+│  - State management                     │
+│  - Playlist logic                       │
+│  - Public API                           │
+│  - Observer pattern                     │
+└────────────┬────────────────────────────┘
+             │
+     ┌───────┴────────┐
+     │                │
+┌────▼────────┐  ┌───▼──────────────┐
+│AudioEngine  │  │PlaylistManager   │
+│Actor        │  │(Actor)           │
+│             │  │                  │
+│- Dual-player│  │- Track queue     │
+│- Crossfade  │  │- Auto-advance    │
+│- Buffers    │  │- Navigation      │
+└─────────────┘  └──────────────────┘
+```
+
+**Design principles:**
+- Actor isolation (Swift 6 data race prevention)
+- Dual-player pattern (seamless crossfades)
+- Sample-accurate synchronization (AVAudioTime)
+- Equal-Power algorithm (constant perceived loudness)
+- SDK-level playlist management
+
+See [Architecture Documentation](Documentation/01_Architecture.md) for details.
+
+## 🛠️ Tech Stack
+
+- **Language**: Swift 6.0
+- **UI Framework**: SwiftUI
+- **Concurrency**: Swift Concurrency (async/await, actors)
+- **Audio**: AVFoundation (AVAudioEngine, AVAudioSession)
+- **Package Manager**: Swift Package Manager
+- **Platform**: iOS 15+
+
+## 📦 Modules
+
+### AudioServiceCore
+Core domain models and protocols:
+- `PlayerConfiguration` - Simplified playback configuration
+- `AudioPlayerError` - Error types
+- `PlayerState` - State machine states
+- `SendableTypes` - Swift 6 Sendable types
+
+### AudioServiceKit
+Main implementation:
+- `AudioPlayerService` - Public API (actor-isolated)
+- `PlaylistManager` - Playlist management
+- `AudioEngineActor` - AVAudioEngine wrapper
+- `RemoteCommandManager` - Lock Screen controls
+
+## 🚦 Installation
+
+### Requirements
+
+- Xcode 15.0+
+- iOS 15.0+
+- Swift 6.0+
+- **Physical device recommended** for audio testing
 
 ### Swift Package Manager
 
-Add to your `Package.swift`:
-
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/ProsperPlayer.git", from: "1.0.0")
+    .package(url: "https://github.com/[your-org]/ProsperPlayer.git", from: "2.11.0")
 ]
 ```
 
-Or in Xcode: File → Add Package Dependencies
+### Manual
 
-## Quick Start
+```bash
+git clone [repository-url]
+cd ProsperPlayer
+swift build
+```
 
+## 📚 Documentation
+
+### Technical Reference
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](Documentation/01_Architecture.md) | System design, actors, dual-player pattern |
+| [API Reference](Documentation/02_API_Reference.md) | Complete API, playlist methods, thread safety |
+| [Crossfading](Documentation/03_Crossfading.md) | Equal-Power algorithm, synchronization |
+| [Fade Curves](Documentation/04_Fade_Curves.md) | Mathematical analysis (5 curve types) |
+| [Concurrency](Documentation/05_Concurrency.md) | Swift 6 patterns, actor isolation |
+| [Configuration](Documentation/06_Configuration.md) | PlayerConfiguration reference |
+| [Migration Guide](Documentation/07_Migration_Guide.md) | Version upgrade path |
+
+### Examples
+
+**Playlist playback:**
 ```swift
-import AudioServiceKit
-import AudioServiceCore
+let service = AudioPlayerService()
+await service.setup()
 
-// Create player service
-let audioService = AudioPlayerService()
-
-// Configure playback
-let config = AudioConfiguration(
+let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
-    fadeInDuration: 3.0,
-    fadeOutDuration: 6.0,
-    volume: 1.0,
-    repeatCount: nil,
-    enableLooping: true
+    fadeCurve: .equalPower,
+    repeatMode: .playlist,
+    volume: 100
 )
 
-// Start playing
-try await audioService.startPlaying(
-    url: audioFileURL,
-    configuration: config
-)
-
-// Control playback
-try await audioService.pause()
-try await audioService.resume()
-try await audioService.skipForward(by: 15.0)
-try await audioService.skipBackward(by: 15.0)
-await audioService.setVolume(0.8)
-try await audioService.finish(fadeDuration: 6.0)
+try await service.loadPlaylist(trackURLs, configuration: config)
 ```
 
-## Configuration
-
+**Track navigation:**
 ```swift
-let config = AudioConfiguration(
-    crossfadeDuration: 10.0,      // 1-30 seconds
-    fadeInDuration: 3.0,          // Start fade in duration
-    fadeOutDuration: 6.0,         // End fade out duration
-    volume: 1.0,                  // 0.0 - 1.0
-    repeatCount: nil,             // nil = infinite loop
-    enableLooping: true,          // Enable seamless looping
-    fadeCurve: .equalPower        // Fade curve type (DEFAULT)
-)
+// Auto-advance enabled by default
+// Manual navigation:
+try await service.nextTrack()
+try await service.previousTrack()
+try await service.jumpToTrack(at: 2)
 ```
 
-### Fade Curves
-
-Prosper Player supports 5 types of fade curves for smooth transitions:
-
-- **`.equalPower`** (DEFAULT) - Maintains constant perceived loudness. Best for audio crossfading.
-- **`.linear`** - Simple linear fade. Not recommended for audio (has -3dB power dip).
-- **`.logarithmic`** - Fast start, slow end. Good for fade-in from silence.
-- **`.exponential`** - Slow start, fast end. Good for dramatic fade-outs.
-- **`.sCurve`** - Smooth S-shaped curve. Good for UI animations.
-
-**Recommendation:** Always use `.equalPower` for audio. It's the professional standard!
-
-See [Documentation/FadeCurves.md](Documentation/FadeCurves.md) for detailed explanation.
-
-## Background Playback Setup
-
-1. **Add Background Mode Capability**
-   - Open Xcode project
-   - Select target → Signing & Capabilities
-   - Add "Background Modes" capability
-   - Enable "Audio, AirPlay, and Picture in Picture"
-
-2. **Or manually add to Info.plist:**
-```xml
-<key>UIBackgroundModes</key>
-<array>
-    <string>audio</string>
-</array>
-```
-
-## State Management
-
-The player uses GameplayKit state machine with these states:
-
-- **preparing** - Loading and preparing audio
-- **playing** - Active playback
-- **paused** - Playback paused
-- **fadingOut** - Fading out before stopping
-- **finished** - Playback completed
-- **failed** - Error occurred
-
-## Observing State Changes
-
+**Single track looping:**
 ```swift
-// Implement observer
-class MyObserver: AudioPlayerObserver {
+let config = PlayerConfiguration(
+    crossfadeDuration: 10.0,
+    repeatMode: .playlist,
+    repeatCount: 5  // Loop 5 times
+)
+
+try await service.loadPlaylist([trackURL], configuration: config)
+```
+
+**State observation:**
+```swift
+actor Observer: AudioPlayerObserver {
     func playerStateDidChange(_ state: PlayerState) async {
         print("State: \(state)")
     }
     
     func playbackPositionDidUpdate(_ position: PlaybackPosition) async {
-        print("Position: \(position.currentTime) / \(position.duration)")
-    }
-    
-    func playerDidEncounterError(_ error: AudioPlayerError) async {
-        print("Error: \(error)")
+        print("Position: \(position.currentTime)")
     }
 }
 
-// Register observer
-await audioService.addObserver(MyObserver())
+await service.addObserver(Observer())
 ```
 
-## SwiftUI Integration
+## 🎮 Playlist API
 
 ```swift
-import SwiftUI
-import AudioServiceKit
+// Load and play playlist
+try await service.loadPlaylist([url1, url2, url3], configuration: config)
 
-@main
-struct MyApp: App {
-    @State private var audioService = AudioPlayerService()
-    
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environment(\.audioService, audioService)
-        }
-    }
-}
+// Add track to playlist
+await service.addTrackToPlaylist(url4)
+
+// Remove track
+try await service.removeTrackFromPlaylist(at: 1)
+
+// Jump to specific track
+try await service.jumpToTrack(at: 2)
+
+// Navigation
+try await service.nextTrack()
+try await service.previousTrack()
+
+// Get current state
+let tracks = await service.getCurrentPlaylist()
+let index = await service.getCurrentTrackIndex()
 ```
 
-## Demo App
+## 🧪 Testing
 
-See `Examples/MeditationDemo` for a complete working example with:
-- Play/Pause/Resume controls
-- Skip forward/backward (15 seconds)
-- Volume control
-- Playback position display
-- State visualization
+**Run tests on physical device recommended** (simulator may lack audio access):
 
-## Requirements
+```bash
+# Run all tests
+swift test
 
-- iOS 18.0+
-- Swift 6.0+
-- Xcode 16.0+
+# Run specific test
+swift test --filter AudioPlayerServiceTests
 
-## Future Enhancements
+# With Thread Sanitizer
+swift test -Xswiftc -sanitize=thread
+```
 
-The architecture is designed for easy extension:
+**Manual testing:**
+1. Open `Examples/MeditationDemo`
+2. Run on physical iOS device
+3. Follow `TESTING_CHECKLIST_S10.md`
 
-- **Phase-based playback** (induction, intentions, returning)
-- **On-the-fly audio theme switching** with crossfading
-- **Advanced audio source** (streaming, generated)
-- **Custom audio features** via plugin architecture
+## 🤝 Contributing
 
-## Technical Details
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Thread Safety
-- All AVAudioEngine operations isolated in `AudioEngineActor`
-- Swift 6 strict concurrency enforced
-- Sendable types for cross-actor data transfer
-- No data races by design
+**Development workflow:**
+1. Fork repository
+2. Create feature branch
+3. Implement changes
+4. Add tests (run on device)
+5. Submit pull request
 
-### Dual-Player Crossfading
-- Two AVAudioPlayerNode with individual mixers
-- Volume-based crossfading (10ms steps)
-- Synchronized timing via AVAudioTime
-- Seamless transitions between files
+## 📊 Performance
 
-### Audio Session
-- Automatic interruption handling (calls, alarms)
-- Route change detection (headphones plug/unplug)
-- Background audio support
-- Configuration change recovery
+### Crossfade Optimization (v2.6.0)
 
-### Performance
-- Zero allocations in audio render thread
-- Efficient buffer scheduling
-- Minimal CPU usage during crossfades
-- Memory-efficient file loading
+| Duration | Steps | CPU Usage | Improvement |
+|----------|-------|-----------|-------------|
+| 1s       | 100   | 1%        | Baseline    |
+| 10s      | 300   | 3%        | 3.3× faster |
+| 30s      | 600   | 6%        | **5× faster** |
 
-## License
+### Memory Footprint
 
-MIT License - See LICENSE file for details
+- Single track: ~10MB (typical 5min @ 128kbps)
+- During crossfade: ~20MB (dual-player)
+- Post-crossfade: ~10MB (old track released)
 
-## Contributing
+## 📄 License
 
-Contributions welcome! Please read CONTRIBUTING.md first.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Support
+## 📮 Contact
 
-For issues and questions:
-- GitHub Issues: [Project Issues](https://github.com/yourusername/ProsperPlayer/issues)
-- Documentation: [Wiki](https://github.com/yourusername/ProsperPlayer/wiki)
+- Issues: [GitHub Issues](https://github.com/[your-org]/ProsperPlayer/issues)
+- Documentation: [Technical Docs](Documentation/)
+
+## 🙏 Acknowledgments
+
+- Equal-Power crossfade algorithm based on AES standards
+- Swift 6 strict concurrency patterns
+- AVFoundation best practices (WWDC 2014-2024)
 
 ---
 
-Built with ❤️ using Swift 6 and AVAudioEngine
+**Version**: 2.11.0  
+**Platform**: iOS 15+  
+**Build**: [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)

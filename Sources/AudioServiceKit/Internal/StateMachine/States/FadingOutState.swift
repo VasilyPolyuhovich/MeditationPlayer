@@ -25,7 +25,7 @@ struct FadingOutState: AudioStateProtocol {
         // Wait for fade to complete
         try? await Task.sleep(nanoseconds: UInt64(fadeDuration * 1_000_000_000))
         
-        // Transition to finished
-        await context.stateDidChange(to: .finished)
+        // Properly transition to finished through context
+        await context.transitionToFinished()
     }
 }

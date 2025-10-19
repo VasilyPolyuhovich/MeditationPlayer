@@ -1,29 +1,28 @@
 import SwiftUI
 import AudioServiceKit
-import AudioServiceCore
 
 @main
 struct MeditationDemoApp: App {
-    // Create audio player service
     @State private var audioService = AudioPlayerService()
+    @State private var viewModel: AudioPlayerViewModel?
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(\.audioService, audioService)
+            Group {
+                if let viewModel {
+                    ContentView(viewModel: viewModel)
+                } else {
+                    ProgressView("Initializing Audio Engine...")
+                        .controlSize(.large)
+                }
+            }
+            .task {
+                // Setup audio service (actor initialization)
+                await audioService.setup()
+                
+                // Create ViewModel on MainActor
+                viewModel = AudioPlayerViewModel(audioService: audioService)
+            }
         }
-    }
-}
-
-// MARK: - Environment Key
-
-private struct AudioServiceKey: EnvironmentKey {
-    static let defaultValue: AudioPlayerService = AudioPlayerService()
-}
-
-extension EnvironmentValues {
-    var audioService: AudioPlayerService {
-        get { self[AudioServiceKey.self] }
-        set { self[AudioServiceKey.self] = newValue }
     }
 }

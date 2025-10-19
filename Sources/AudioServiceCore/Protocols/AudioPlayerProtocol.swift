@@ -6,7 +6,7 @@ public protocol AudioPlayerProtocol: Actor {
     var state: PlayerState { get }
     
     /// Current configuration
-    var configuration: AudioConfiguration { get }
+    var configuration: PlayerConfiguration { get }
     
     /// Current track information (if available)
     var currentTrack: TrackInfo? { get }
@@ -19,7 +19,7 @@ public protocol AudioPlayerProtocol: Actor {
     ///   - url: URL of local audio file
     ///   - configuration: Playback configuration
     /// - Throws: AudioPlayerError if playback cannot start
-    func startPlaying(url: URL, configuration: AudioConfiguration) async throws
+    func startPlaying(url: URL, configuration: PlayerConfiguration) async throws
     
     /// Pause playback
     /// - Throws: AudioPlayerError if cannot pause in current state
@@ -30,7 +30,8 @@ public protocol AudioPlayerProtocol: Actor {
     func resume() async throws
     
     /// Stop playback and cleanup resources
-    func stop() async
+    /// - Parameter fadeDuration: Optional fade out duration (nil = instant stop)
+    func stop(fadeDuration: TimeInterval?) async
     
     /// Finish playback with fade out
     /// - Parameter fadeDuration: Custom fade out duration (uses config default if nil)

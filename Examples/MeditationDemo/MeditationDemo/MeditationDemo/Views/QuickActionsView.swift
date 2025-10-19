@@ -1,0 +1,158 @@
+import SwiftUI
+import AudioServiceCore
+import AudioServiceKit
+
+/// Quick access buttons for frequently used features
+struct QuickActionsView: View {
+    let viewModel: AudioPlayerViewModel
+    @State private var showPlaylistManager = false
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            // Header
+            HStack {
+                Image(systemName: "bolt.fill")
+                    .foregroundStyle(.yellow)
+                Text("Quick Actions")
+                    .font(.headline)
+                Spacer()
+            }
+            
+            // Action Buttons
+            HStack(spacing: 12) {
+                // Swap Playlist Button
+                Button {
+                    showPlaylistManager = true
+                } label: {
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                        
+                        Text("Swap\nPlaylist")
+                            .font(.caption)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                
+                // Repeat Mode Badge
+                if viewModel.repeatMode != .off {
+                    VStack(spacing: 8) {
+                        Image(systemName: "repeat")
+                            .font(.title2)
+                            .foregroundStyle(.green)
+                        
+                        VStack(spacing: 2) {
+                            Text(repeatModeText)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                            
+                            if viewModel.repeatMode == .singleTrack && viewModel.currentRepeatCount > 0 {
+                                Text("×\(viewModel.currentRepeatCount)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.primary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(.green.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                
+                // Volume Quick Control
+                VStack(spacing: 8) {
+                    Image(systemName: volumeIcon)
+                        .font(.title2)
+                        .foregroundStyle(.purple)
+                    
+                    VStack(spacing: 2) {
+                        Text("Volume")
+                            .font(.caption2)
+                        Text("\(viewModel.volume)%")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                    }
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            
+            // Volume Slider (compact)
+            HStack(spacing: 12) {
+                Image(systemName: "speaker.wave.1")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                Slider(value: Binding(
+                    get: { Double(viewModel.volume) },
+                    set: { newValue in
+                        let intValue = Int(newValue)
+                        Task { await viewModel.setVolume(intValue) }
+                    }
+                ), in: 0...100, step: 1)
+                
+                Image(systemName: "speaker.wave.3")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(radius: 2)
+        .sheet(isPresented: $showPlaylistManager) {
+            PlaylistManagerView(viewModel: viewModel)
+        }
+    }
+    
+    // MARK: - Helpers
+    
+    private var repeatModeText: String {
+        switch viewModel.repeatMode {
+        case .off:
+            return ""
+        case .singleTrack:
+            return "Single\nTrack"
+        case .playlist:
+            return "Playlist\nLoop"
+        }
+    }
+    
+    private var volumeIcon: String {
+        if viewModel.volume == 0 {
+            return "speaker.slash.fill"
+        } else if viewModel.volume < 33 {
+            return "speaker.wave.1.fill"
+        } else if viewModel.volume < 66 {
+            return "speaker.wave.2.fill"
+        } else {
+            return "speaker.wave.3.fill"
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    @Previewable @State var viewModel = AudioPlayerViewModel(
+        audioService: AudioPlayerService(
+            configuration: PlayerConfiguration()
+        )
+    )
+    
+    QuickActionsView(viewModel: viewModel)
+        .padding()
+}

@@ -2,20 +2,19 @@ import MediaPlayer
 import AudioServiceCore
 
 /// Manager for handling remote control commands and Now Playing info
-final class RemoteCommandManager: @unchecked Sendable {
+/// All operations are @MainActor isolated for thread safety
+@MainActor
+final class RemoteCommandManager: Sendable {
     // MARK: - Properties
     
+    // FIXED: Removed 'nonisolated' - these MUST be MainActor isolated
+    // MPRemoteCommandCenter and MPNowPlayingInfoCenter are UIKit types that require MainActor
     private let commandCenter: MPRemoteCommandCenter
     private let nowPlayingCenter: MPNowPlayingInfoCenter
     
-    // Command handlers
-    private var playHandler: (@Sendable () async -> Void)?
-    private var pauseHandler: (@Sendable () async -> Void)?
-    private var skipForwardHandler: (@Sendable (TimeInterval) async -> Void)?
-    private var skipBackwardHandler: (@Sendable (TimeInterval) async -> Void)?
-    
     // MARK: - Initialization
     
+    // FIXED: Removed 'nonisolated' from init - must be MainActor
     init() {
         self.commandCenter = MPRemoteCommandCenter.shared()
         self.nowPlayingCenter = MPNowPlayingInfoCenter.default()
@@ -23,32 +22,28 @@ final class RemoteCommandManager: @unchecked Sendable {
     
     // MARK: - Setup Commands
     
-    @MainActor
     func setupCommands(
         playHandler: @escaping @Sendable () async -> Void,
         pauseHandler: @escaping @Sendable () async -> Void,
         skipForwardHandler: @escaping @Sendable (TimeInterval) async -> Void,
         skipBackwardHandler: @escaping @Sendable (TimeInterval) async -> Void
     ) {
-        self.playHandler = playHandler
-        self.pauseHandler = pauseHandler
-        self.skipForwardHandler = skipForwardHandler
-        self.skipBackwardHandler = skipBackwardHandler
+        // All command setup must happen on MainActor
         
         // Enable play command
         commandCenter.playCommand.isEnabled = true
-        commandCenter.playCommand.addTarget { [weak self] _ in
+        commandCenter.playCommand.addTarget { _ in
             Task { @MainActor in
-                await self?.playHandler?()
+                await playHandler()
             }
             return .success
         }
         
         // Enable pause command
         commandCenter.pauseCommand.isEnabled = true
-        commandCenter.pauseCommand.addTarget { [weak self] _ in
+        commandCenter.pauseCommand.addTarget { _ in
             Task { @MainActor in
-                await self?.pauseHandler?()
+                await pauseHandler()
             }
             return .success
         }
@@ -56,10 +51,10 @@ final class RemoteCommandManager: @unchecked Sendable {
         // Enable skip forward command (15 seconds)
         commandCenter.skipForwardCommand.isEnabled = true
         commandCenter.skipForwardCommand.preferredIntervals = [15.0]
-        commandCenter.skipForwardCommand.addTarget { [weak self] event in
+        commandCenter.skipForwardCommand.addTarget { event in
             if let skipEvent = event as? MPSkipIntervalCommandEvent {
                 Task { @MainActor in
-                    await self?.skipForwardHandler?(skipEvent.interval)
+                    await skipForwardHandler(skipEvent.interval)
                 }
             }
             return .success
@@ -68,10 +63,10 @@ final class RemoteCommandManager: @unchecked Sendable {
         // Enable skip backward command (15 seconds)
         commandCenter.skipBackwardCommand.isEnabled = true
         commandCenter.skipBackwardCommand.preferredIntervals = [15.0]
-        commandCenter.skipBackwardCommand.addTarget { [weak self] event in
+        commandCenter.skipBackwardCommand.addTarget { event in
             if let skipEvent = event as? MPSkipIntervalCommandEvent {
                 Task { @MainActor in
-                    await self?.skipBackwardHandler?(skipEvent.interval)
+                    await skipBackwardHandler(skipEvent.interval)
                 }
             }
             return .success
@@ -85,7 +80,6 @@ final class RemoteCommandManager: @unchecked Sendable {
         commandCenter.seekForwardCommand.isEnabled = false
     }
     
-    @MainActor
     func removeCommands() {
         commandCenter.playCommand.removeTarget(nil)
         commandCenter.pauseCommand.removeTarget(nil)
@@ -100,7 +94,6 @@ final class RemoteCommandManager: @unchecked Sendable {
     
     // MARK: - Now Playing Info
     
-    @MainActor
     func updateNowPlayingInfo(
         title: String?,
         artist: String?,
@@ -125,7 +118,6 @@ final class RemoteCommandManager: @unchecked Sendable {
         nowPlayingCenter.nowPlayingInfo = nowPlayingInfo
     }
     
-    @MainActor
     func updatePlaybackPosition(
         elapsedTime: TimeInterval,
         playbackRate: Double
@@ -138,7 +130,6 @@ final class RemoteCommandManager: @unchecked Sendable {
         nowPlayingCenter.nowPlayingInfo = info
     }
     
-    @MainActor
     func clearNowPlayingInfo() {
         nowPlayingCenter.nowPlayingInfo = nil
     }

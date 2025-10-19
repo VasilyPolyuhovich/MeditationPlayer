@@ -25,15 +25,18 @@ actor AudioSessionManager {
         setupNotificationObservers()
     }
     
-    func configure() throws {
+    func configure(mixWithOthers: Bool = false) throws {
         guard !isConfigured else { return }
         
         do {
             // Set category to playback for background audio
+            // Add .mixWithOthers option if requested
+            let options: AVAudioSession.CategoryOptions = mixWithOthers ? [.mixWithOthers] : []
+            
             try session.setCategory(
                 .playback,
                 mode: .default,
-                options: []
+                options: options
             )
             
             isConfigured = true
