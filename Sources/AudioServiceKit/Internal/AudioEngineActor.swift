@@ -110,7 +110,7 @@ actor AudioEngineActor {
         // AVAudioMixerNode will automatically convert mono files to stereo if needed
         let sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
-            throw AudioPlayerError.engineSetupFailed(reason: "Failed to create stereo audio format")
+            throw AudioPlayerError.engineStartFailed(reason: "Failed to create stereo audio format")
         }
         
         // 🔍 DIAGNOSTIC: Log engine format
