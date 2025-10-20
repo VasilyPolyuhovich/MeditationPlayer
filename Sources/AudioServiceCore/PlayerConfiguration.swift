@@ -44,7 +44,8 @@ public struct PlayerConfiguration: Sendable {
     public static let defaultAudioSessionOptions: [AVAudioSession.CategoryOptions] = [
         .mixWithOthers,      // Coexist peacefully with other audio
         .allowBluetoothA2DP, // Bluetooth support (headsets, speakers)
-        .allowAirPlay        // AirPlay streaming support
+        .allowAirPlay,       // AirPlay streaming support
+        .defaultToSpeaker    // Use loudspeaker instead of ear speaker (for .playAndRecord category)
     ]
     
     // MARK: - Crossfade Settings
