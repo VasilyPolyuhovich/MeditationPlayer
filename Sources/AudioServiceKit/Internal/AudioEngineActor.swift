@@ -104,8 +104,14 @@ actor AudioEngineActor {
         engine.attach(playerNodeD)
         engine.attach(mixerNodeD)
         
-        // Get the standard format from output
-        let format = engine.outputNode.outputFormat(forBus: 0)
+        // Use explicit stereo format (2 channels)
+        // CRITICAL: With .playAndRecord category, outputNode may return mono (1ch)
+        // We force stereo to ensure compatibility with all audio files
+        // AVAudioMixerNode will automatically convert mono files to stereo if needed
+        let sampleRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else {
+            throw AudioPlayerError.engineSetupFailed(reason: "Failed to create stereo audio format")
+        }
         
         // 🔍 DIAGNOSTIC: Log engine format
         print("[AudioEngine] Setup format: \(format.sampleRate)Hz, \(format.channelCount)ch")
