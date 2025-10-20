@@ -55,18 +55,20 @@ actor AudioSessionManager {
     // MARK: - Configuration
     
     /// Configure AVAudioSession with specified options.
-    /// - Parameter options: Category options for audio session
+    /// - Parameters:
+    ///   - options: Category options for audio session
+    ///   - force: Force reconfiguration even if already configured (for media services reset)
     /// - Throws: AudioPlayerError if configuration fails
     ///
     /// **Important**: Can only be called once. Subsequent calls with different options will log a warning.
-    func configure(options: [AVAudioSession.CategoryOptions]) throws {
+    func configure(options: [AVAudioSession.CategoryOptions], force: Bool = false) throws {
         // Combine array into single OptionSet
         let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
             result.formUnion(option)
         }
         
-        // Already configured - check for conflicts
-        guard !isConfigured else {
+        // Already configured - check for conflicts (unless force)
+        guard !isConfigured || force else {
             if let existingOptions = configuredOptions, existingOptions != categoryOptions {
                 print("[AudioSession] ⚠️ WARNING: Attempting to reconfigure with different options!")
                 print("[AudioSession] Existing: \(existingOptions.rawValue), New: \(categoryOptions.rawValue)")
@@ -85,6 +87,8 @@ actor AudioSessionManager {
         
         do {
             // MARK: Advanced Configuration for Maximum Stability
+            // NOTE: Apple docs say setCategory() CAN be called on active session
+            // DO NOT deactivate before configure - it can interfere with other audio
             
             // 1. Set preferred buffer duration (larger = more stable, higher latency)
             // 0.02s (20ms) provides excellent stability while keeping latency acceptable

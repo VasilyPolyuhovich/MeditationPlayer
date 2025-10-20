@@ -5,6 +5,52 @@ All notable changes to ProsperPlayer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.3] - 2025-10-20
+
+### Fixed
+- **Critical**: Removed `setActive(false)` before `setCategory()` that caused error -50
+- **Critical**: Removed duplicate `configure()` call in `startPlaying()` method
+- Following Apple best practices: `setCategory()` can be called on active session
+
+### Changed
+- Added `force` parameter to `configure()` for media services reset scenario
+- Singleton configure now idempotent - multiple calls safely ignored
+- Media services reset uses `configure(force: true)` for clean reconfiguration
+
+### Technical Details
+
+**Root Cause of Error -50**:
+```swift
+// ❌ WRONG (caused -50):
+try? session.setActive(false)  // Deactivates session
+try session.setCategory(...)   // Can fail if other audio is active
+
+// ✅ CORRECT (Apple recommended):
+try session.setCategory(...)   // Works on active session!
+try session.setActive(true)    // Then activate
+```
+
+**Removed Duplicate Configure**:
+```swift
+// Before (v4.1.2): configure() called TWICE
+func setup() {
+    try sessionManager.configure()  // ← First call
+}
+
+func startPlaying() {
+    try sessionManager.configure()  // ← Second call (duplicate!)
+}
+
+// After (v4.1.3): configure() called ONCE
+func setup() {
+    try sessionManager.configure()  // ← Only here
+}
+
+func startPlaying() {
+    try sessionManager.activate()   // ← Just activate
+}
+```
+
 ## [4.1.2] - 2025-10-20
 
 ### Fixed

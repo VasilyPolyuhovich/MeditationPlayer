@@ -272,17 +272,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.currentRepeatCount = 0
         self.activeCrossfadeOperation = nil
         
-        // Configure audio session with user's options (default: peaceful coexistence)
-        do {
-            try await sessionManager.configure(options: configuration.audioSessionOptions)
-            Self.logger.debug("Audio session configured successfully")
-        } catch {
-            Self.logger.error("Failed to configure audio session: \(error.localizedDescription)")
-            throw AudioPlayerError.sessionConfigurationFailed(
-                reason: "Failed to configure: \(error.localizedDescription)"
-            )
-        }
-        
+        // Audio session already configured in setup()
+        // Just ensure it's activated (idempotent operation)
         do {
             try await sessionManager.activate()
             Self.logger.debug("Audio session activated successfully")
@@ -1600,8 +1591,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Step 2: Reconfigure audio session from scratch with user's options
         do {
-            try await sessionManager.configure(options: configuration.audioSessionOptions)
-            Self.logger.debug("[MEDIA_SERVICES] Session reconfigured successfully")
+            try await sessionManager.configure(options: configuration.audioSessionOptions, force: true)
+            Self.logger.debug("[MEDIA_SERVICES] Session reconfigured successfully (force)")
         } catch {
             Self.logger.error("[MEDIA_SERVICES] Failed to reconfigure session: \(error.localizedDescription)")
             // Enter failed state if we can't recover
