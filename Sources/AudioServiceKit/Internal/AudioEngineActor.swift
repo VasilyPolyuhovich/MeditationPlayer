@@ -85,11 +85,11 @@ actor AudioEngineActor {
     
     // MARK: - Setup
     
-    func setup() {
-        setupAudioGraph()
+    func setup() throws {
+        try setupAudioGraph()
     }
     
-    private func setupAudioGraph() {
+    private func setupAudioGraph() throws {
         // Attach all nodes to engine
         engine.attach(playerNodeA)
         engine.attach(playerNodeB)

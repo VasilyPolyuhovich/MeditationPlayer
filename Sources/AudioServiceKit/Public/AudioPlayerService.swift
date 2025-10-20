@@ -151,7 +151,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// ```
     ///
     /// - Parameter configuration: Player configuration (optional, uses defaults if not provided)
-    public init(configuration: PlayerConfiguration = PlayerConfiguration()) async {
+    public init(configuration: PlayerConfiguration = PlayerConfiguration()) async throws {
         self._state = .finished
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
@@ -166,12 +166,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // ✅ NEW: Perform full setup immediately
         // Service is ready to use after init completes
-        await setup()
+        try await setup()
     }
     
     /// Internal setup - called automatically on first use.
     /// You no longer need to call this manually!
-    internal func setup() async {
+    internal func setup() async throws {
         guard !isSetupComplete else { return }
         isSetupComplete = true
         // Configure and activate audio session BEFORE engine setup
@@ -186,7 +186,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Now safe to setup engine (accesses outputNode)
-        await audioEngine.setup()
+        try await audioEngine.setup()
         
         // Apply initial volume from configuration
         await audioEngine.setVolume(configuration.volume)
@@ -967,7 +967,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         initializeStateMachine()
         
         // Re-setup engine for fresh start
-        await audioEngine.setup()
+        try? await audioEngine.setup()
         
         // Notify observers
         notifyObservers(stateChange: .finished)
