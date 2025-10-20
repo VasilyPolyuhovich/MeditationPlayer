@@ -77,6 +77,12 @@ actor AudioSessionManager {
             return
         }
         
+        // CRITICAL: Set flag IMMEDIATELY after guard to prevent race condition
+        // If we set it after setCategory(), two concurrent calls could both pass guard
+        // and both try to configure AVAudioSession → Error -50
+        isConfigured = true
+        configuredOptions = categoryOptions
+        
         do {
             // MARK: Advanced Configuration for Maximum Stability
             
@@ -127,12 +133,11 @@ actor AudioSessionManager {
                 print("  ⚠️ WARNING: Sample rate mismatch (difference > 100 Hz)")
             }
             
-            // Mark as configured and save options
-            isConfigured = true
-            configuredOptions = categoryOptions
             print("[AudioSession] ✅ Configured successfully")
         } catch {
-            // Configuration failed - don't mark as configured
+            // Configuration failed - rollback flag
+            isConfigured = false
+            configuredOptions = nil
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "Failed to configure audio session: \(error.localizedDescription)"
             )

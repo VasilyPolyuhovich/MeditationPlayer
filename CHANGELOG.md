@@ -5,6 +5,27 @@ All notable changes to ProsperPlayer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.2] - 2025-10-20
+
+### Fixed
+- **Critical Race Condition**: Fixed race condition in `AudioSessionManager.configure()`
+  - Problem: Two concurrent configure() calls could both pass guard check and both try to set AVAudioSession category → Error -50
+  - Solution: Set `isConfigured = true` IMMEDIATELY after guard (atomic check-and-set)
+  - Now guaranteed thread-safe even with concurrent initialization from multiple instances
+
+### Technical Details
+```swift
+// Before (RACE CONDITION):
+guard !isConfigured else { return }
+try session.setCategory(...)  // ← Both tasks could reach here!
+isConfigured = true  // ← Too late!
+
+// After (ATOMIC):
+guard !isConfigured else { return }
+isConfigured = true  // ← Set IMMEDIATELY (atomic with guard)
+try session.setCategory(...)  // ← Only first task reaches here
+```
+
 ## [4.1.1] - 2025-10-20
 
 ### Added
