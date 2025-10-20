@@ -338,6 +338,226 @@ actor AudioEngineActor {
         return currentActiveVolume
     }
     
+    // MARK: - Crossfade Pause/Resume Support
+    
+    /// Crossfade state snapshot for pause/resume
+    struct CrossfadeState {
+        let activeMixerVolume: Float
+        let inactiveMixerVolume: Float
+        let activePlayerPosition: TimeInterval
+        let inactivePlayerPosition: TimeInterval
+        let activePlayer: PlayerNode
+    }
+    
+    /// Get current crossfade state for pausing
+    func getCrossfadeState() -> CrossfadeState? {
+        guard isCrossfading else { return nil }
+        
+        let activeMixer = getActiveMixerNode()
+        let inactiveMixer = getInactiveMixerNode()
+        
+        // Get positions from both players
+        let activePos = getPlayerPosition(for: activePlayer)
+        let inactivePos = getPlayerPosition(for: activePlayer == .a ? .b : .a)
+        
+        return CrossfadeState(
+            activeMixerVolume: activeMixer.volume,
+            inactiveMixerVolume: inactiveMixer.volume,
+            activePlayerPosition: activePos,
+            inactivePlayerPosition: inactivePos,
+            activePlayer: activePlayer
+        )
+    }
+    
+    /// Get position for specific player
+    private func getPlayerPosition(for player: PlayerNode) -> TimeInterval {
+        let file = player == .a ? audioFileA : audioFileB
+        guard let file = file else { return 0.0 }
+        
+        let playerNode = player == .a ? playerNodeA : playerNodeB
+        let offset = player == .a ? playbackOffsetA : playbackOffsetB
+        let sampleRate = file.fileFormat.sampleRate
+        
+        if playerNode.isPlaying {
+            guard let nodeTime = playerNode.lastRenderTime,
+                  let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
+                return Double(offset) / sampleRate
+            }
+            let actualSampleTime = offset + playerTime.sampleTime
+            return Double(actualSampleTime) / sampleRate
+        } else {
+            return Double(offset) / sampleRate
+        }
+    }
+    
+    /// Pause both players during crossfade
+    func pauseBothPlayersDuringCrossfade() {
+        playerNodeA.pause()
+        playerNodeB.pause()
+    }
+    
+    /// Resume crossfade from paused state
+    /// - Parameters:
+    ///   - duration: Remaining crossfade duration (or quick finish duration)
+    ///   - curve: Fade curve to use
+    ///   - startVolumes: Starting volumes (from paused state)
+    /// - Returns: AsyncStream for progress observation
+    func resumeCrossfadeFromState(
+        duration: TimeInterval,
+        curve: FadeCurve,
+        startVolumes: (active: Float, inactive: Float)
+    ) async -> AsyncStream<CrossfadeProgress> {
+        // Create progress stream
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: CrossfadeProgress.self,
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        crossfadeProgressContinuation = continuation
+        
+        // Create crossfade task
+        let task = Task {
+            await self.executeResumeCrossfade(
+                duration: duration,
+                curve: curve,
+                startVolumes: startVolumes,
+                progress: continuation
+            )
+            
+            try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+            await self.cleanupCrossfade(continuation: continuation)
+        }
+        
+        activeCrossfadeTask = task
+        return stream
+    }
+    
+    /// Execute resumed crossfade with custom start volumes
+    private func executeResumeCrossfade(
+        duration: TimeInterval,
+        curve: FadeCurve,
+        startVolumes: (active: Float, inactive: Float),
+        progress: AsyncStream<CrossfadeProgress>.Continuation
+    ) async {
+        let startTime = Date()
+        
+        // Phase 1: Preparing
+        progress.yield(CrossfadeProgress(
+            phase: .preparing,
+            duration: duration,
+            elapsed: 0
+        ))
+        
+        let activePlayer = getActivePlayerNode()
+        let inactivePlayer = getInactivePlayerNode()
+        
+        guard !Task.isCancelled else {
+            progress.yield(.idle)
+            return
+        }
+        
+        // Resume both players
+        activePlayer.play()
+        inactivePlayer.play()
+        
+        guard !Task.isCancelled else {
+            activePlayer.pause()
+            inactivePlayer.pause()
+            progress.yield(.idle)
+            return
+        }
+        
+        // Phase 2: Fading from current volumes to final state
+        await fadeFromVolumesWithProgress(
+            duration: duration,
+            curve: curve,
+            startVolumes: startVolumes,
+            startTime: startTime,
+            progress: progress
+        )
+        
+        guard !Task.isCancelled else {
+            progress.yield(.idle)
+            return
+        }
+        
+        // Phase 3: Switching
+        progress.yield(CrossfadeProgress(
+            phase: .switching,
+            duration: duration,
+            elapsed: Date().timeIntervalSince(startTime)
+        ))
+        
+        // Phase 4: Cleanup
+        progress.yield(CrossfadeProgress(
+            phase: .cleanup,
+            duration: duration,
+            elapsed: Date().timeIntervalSince(startTime)
+        ))
+        
+        // Phase 5: Complete
+        progress.yield(.idle)
+    }
+    
+    /// Fade from specific start volumes to final state
+    private func fadeFromVolumesWithProgress(
+        duration: TimeInterval,
+        curve: FadeCurve,
+        startVolumes: (active: Float, inactive: Float),
+        startTime: Date,
+        progress: AsyncStream<CrossfadeProgress>.Continuation
+    ) async {
+        let activeMixer = getActiveMixerNode()
+        let inactiveMixer = getInactiveMixerNode()
+        
+        let stepsPerSecond: Int
+        if duration < 1.0 {
+            stepsPerSecond = 100
+        } else if duration < 5.0 {
+            stepsPerSecond = 50
+        } else if duration < 15.0 {
+            stepsPerSecond = 30
+        } else {
+            stepsPerSecond = 20
+        }
+        
+        let steps = Int(duration * Double(stepsPerSecond))
+        let stepTime = duration / Double(steps)
+        
+        for i in 0...steps {
+            guard !Task.isCancelled else { return }
+            
+            let stepProgress = Float(i) / Float(steps)
+            let elapsed = Date().timeIntervalSince(startTime)
+            
+            // Report progress
+            progress.yield(CrossfadeProgress(
+                phase: .fading(progress: Double(stepProgress)),
+                duration: duration,
+                elapsed: elapsed
+            ))
+            
+            // Calculate target volumes for this step
+            // Fade out from startVolumes.active to 0
+            // Fade in from startVolumes.inactive to targetVolume
+            let targetActiveVolume: Float = 0.0
+            let targetInactiveVolume = targetVolume
+            
+            let currentActiveVolume = startVolumes.active + (targetActiveVolume - startVolumes.active) * curve.volume(for: stepProgress)
+            let currentInactiveVolume = startVolumes.inactive + (targetInactiveVolume - startVolumes.inactive) * curve.volume(for: stepProgress)
+            
+            activeMixer.volume = currentActiveVolume
+            inactiveMixer.volume = currentInactiveVolume
+            
+            try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
+        }
+        
+        // Ensure final volumes (if not cancelled)
+        if !Task.isCancelled {
+            activeMixer.volume = 0.0
+            inactiveMixer.volume = targetVolume
+        }
+    }
+    
     // MARK: - Cleanup & Reset
     
     /// Complete async reset - clears all state including overlay
@@ -545,6 +765,7 @@ actor AudioEngineActor {
         let playerNode = getActivePlayerNode()
         let isPlayingStart = playerNode.isPlaying
         print("[FADE_DEBUG] \(mixerName): from=\(from) → to=\(to), duration=\(duration)s, curve=\(curve)")
+        print("[FADE_CALLSTACK] \(Thread.callStackSymbols.prefix(7).joined(separator: "\n"))")
         print("[STOP_DIAGNOSTIC] fadeVolume START: mixer=\(mixerName), playerIsPlaying=\(isPlayingStart), currentMixerVol=\(mixer.volume)")
         
         // FIXED Issue #9: Adaptive step sizing for efficient fading
@@ -1164,7 +1385,7 @@ actor AudioEngineActor {
 
 // MARK: - Player Node Enum
 
-private enum PlayerNode {
+internal enum PlayerNode {
     case a
     case b
 }

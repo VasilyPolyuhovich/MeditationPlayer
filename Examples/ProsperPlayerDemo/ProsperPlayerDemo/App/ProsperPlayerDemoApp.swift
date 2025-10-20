@@ -11,12 +11,10 @@ struct ProsperPlayerDemoApp: App {
             if let viewModel {
                 MainView(viewModel: viewModel)
             } else {
-                ProgressView("Initializing SDK...")
+                ProgressView("Initializing...")
                     .task {
-                        // CRITICAL: Setup audioService FIRST
-                        await audioService.setup()
-                        
                         // Initialize ViewModel on MainActor
+                        // No need to call setup() - it's automatic!
                         viewModel = await PlayerViewModel(audioService: audioService)
                     }
             }

@@ -5,6 +5,41 @@ All notable changes to ProsperPlayer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2025-10-20
+
+### Added
+- **Multiple Instances Support**: Create multiple `AudioPlayerService` instances with different configurations
+- Automatic setup on first use - no need to call `setup()` manually
+- Detailed logging for AudioSession configuration conflicts
+
+### Changed
+- **BREAKING**: `AudioSessionManager` is now a **singleton** (`AudioSessionManager.shared`)
+- **BREAKING**: `setup()` is now `internal` and called automatically on first use
+- AVAudioSession configured once globally (first instance wins)
+- Observers setup moved to singleton initialization
+
+### Fixed
+- **Critical Bug**: Error -50 when creating multiple `AudioPlayerService` instances
+- AudioSession configuration conflict detection and warnings
+- Race condition in session manager initialization
+
+### Migration Guide
+```swift
+// OLD (v4.1.0)
+let player = AudioPlayerService()
+await player.setup()  // ❌ Required manual call
+try await player.loadPlaylist(tracks, configuration: config)
+
+// NEW (v4.1.1)
+let player = AudioPlayerService()
+// ✅ No setup() needed - automatic!
+try await player.loadPlaylist(tracks, configuration: config)
+
+// Multiple instances now work correctly
+let player1 = AudioPlayerService()
+let player2 = AudioPlayerService()  // ✅ No error -50!
+```
+
 ## [4.1.0] - 2025-10-19
 
 ### Added

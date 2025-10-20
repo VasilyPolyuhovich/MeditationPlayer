@@ -5,9 +5,8 @@
 ## 🚀 Quick Start
 
 ```swift
-// Initialize service
+// Initialize service (setup is automatic!)
 let service = AudioPlayerService()
-await service.setup()
 
 // Configure playback
 let config = PlayerConfiguration(
@@ -106,6 +105,29 @@ await service.playSoundEffect(bell)
 - Equal-Power algorithm (constant perceived loudness)
 - **Large buffers** (8192 samples) for Bluetooth stability
 - SDK-level playlist management
+- **Singleton AudioSession** (shared across all player instances)
+
+### Multiple Instances Support 🆕
+
+You can create multiple `AudioPlayerService` instances with different configurations:
+
+```swift
+// Component 1: Meditation player
+let meditationPlayer = AudioPlayerService()
+let config1 = PlayerConfiguration(crossfadeDuration: 10.0, volume: 0.8)
+try await meditationPlayer.loadPlaylist(meditationTracks, configuration: config1)
+
+// Component 2: Music player
+let musicPlayer = AudioPlayerService()
+let config2 = PlayerConfiguration(crossfadeDuration: 5.0, volume: 1.0)
+try await musicPlayer.loadPlaylist(musicTracks, configuration: config2)
+```
+
+**How it works:**
+- `AudioSessionManager` is a **singleton** (shared across all instances)
+- AVAudioSession is configured **once globally** (first instance wins)
+- Each player has its own state, playlist, and audio engine
+- **No manual setup() needed** - initialization is automatic!
 
 ## 🛠️ Tech Stack
 
@@ -168,7 +190,6 @@ swift build
 
 ```swift
 let service = AudioPlayerService()
-await service.setup()
 
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
@@ -451,6 +472,80 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Swift 6 strict concurrency patterns
 - AVFoundation best practices (WWDC 2014-2024)
 - Audio stability optimizations based on production feedback
+
+---
+
+## 🔄 Migration from v4.1.0 to v4.1.1
+
+### Breaking Changes
+
+#### 1. No Manual `setup()` Required
+
+**OLD (v4.1.0)**:
+```swift
+let player = AudioPlayerService()
+await player.setup()  // ❌ Required manual call
+try await player.loadPlaylist(tracks, configuration: config)
+```
+
+**NEW (v4.1.1)**:
+```swift
+let player = AudioPlayerService()
+// ✅ No setup() needed - automatic!
+try await player.loadPlaylist(tracks, configuration: config)
+```
+
+**Migration**: Simply remove all `await service.setup()` calls from your code.
+
+---
+
+#### 2. Multiple Instances Now Supported
+
+**Problem in v4.1.0**: Creating multiple instances caused error -50.
+
+**Fixed in v4.1.1**:
+```swift
+// Both instances work correctly now!
+let player1 = AudioPlayerService()
+let player2 = AudioPlayerService()  // ✅ No error!
+
+// Each with different configurations
+try await player1.loadPlaylist(tracks1, configuration: config1)
+try await player2.loadPlaylist(tracks2, configuration: config2)
+```
+
+**How it works**:
+- `AudioSessionManager` is now a singleton (shared globally)
+- AVAudioSession configured once (first instance wins)
+- Each player has independent state and playlist
+
+---
+
+#### 3. AudioSession Options Conflicts
+
+⚠️ **Important**: If different instances use different `audioSessionOptions`, the first one wins:
+
+```swift
+// Player 1 - sets options
+let config1 = PlayerConfiguration(
+    audioSessionOptions: [.mixWithOthers, .duckOthers]
+)
+try await player1.loadPlaylist(tracks1, configuration: config1)  // ✅ Applied
+
+// Player 2 - different options
+let config2 = PlayerConfiguration(
+    audioSessionOptions: []  // ⚠️ Ignored! Player1's options used
+)
+try await player2.loadPlaylist(tracks2, configuration: config2)
+// Console: [AudioSession] ⚠️ WARNING: Attempting to reconfigure with different options!
+```
+
+**Best Practice**: Use same options for all instances:
+```swift
+let sharedOptions: [AVAudioSession.CategoryOptions] = [.mixWithOthers, .duckOthers]
+let config1 = PlayerConfiguration(audioSessionOptions: sharedOptions)
+let config2 = PlayerConfiguration(audioSessionOptions: sharedOptions)
+```
 
 ---
 

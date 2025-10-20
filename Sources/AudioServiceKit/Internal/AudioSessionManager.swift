@@ -1,14 +1,40 @@
 import AVFoundation
 import AudioServiceCore
 
-/// Actor managing AVAudioSession configuration and lifecycle
+/// Singleton actor managing global AVAudioSession configuration and lifecycle.
+///
+/// **Design Rationale**:
+/// - AVAudioSession is a **GLOBAL system resource** (one per process)
+/// - Multiple AudioPlayerService instances must share the same session
+/// - Singleton pattern prevents configuration conflicts and error -50
+///
+/// **Usage**:
+/// ```swift
+/// // Automatically used by AudioPlayerService instances
+/// let player1 = AudioPlayerService()
+/// let player2 = AudioPlayerService()
+/// // Both use AudioSessionManager.shared internally
+/// ```
 actor AudioSessionManager {
+    // MARK: - Singleton
+    
+    /// Shared instance - AVAudioSession is global, so manager must be too
+    static let shared = AudioSessionManager()
+    
     // MARK: - Properties
     
     private let session: AVAudioSession
+    
+    // Configuration state
     private var isConfigured = false
+    private var configuredOptions: AVAudioSession.CategoryOptions?
+    
+    // Activation state
     private var isActive = false
     private var isActivating = false  // Reentrancy guard for activate()
+    
+    // Notification observers setup flag
+    private var observersSetup = false
     
     // Callbacks for handling session events
     private var interruptionHandler: (@Sendable (Bool) -> Void)?
@@ -17,18 +43,39 @@ actor AudioSessionManager {
     
     // MARK: - Initialization
     
-    init() {
+    private init() {
         self.session = AVAudioSession.sharedInstance()
+        
+        // Setup observers in a detached task (init is nonisolated)
+        Task { [weak self] in
+            await self?.setupNotificationObserversOnce()
+        }
     }
     
     // MARK: - Configuration
     
-    func setup() {
-        setupNotificationObservers()
-    }
-    
+    /// Configure AVAudioSession with specified options.
+    /// - Parameter options: Category options for audio session
+    /// - Throws: AudioPlayerError if configuration fails
+    ///
+    /// **Important**: Can only be called once. Subsequent calls with different options will log a warning.
     func configure(options: [AVAudioSession.CategoryOptions]) throws {
-        guard !isConfigured else { return }
+        // Combine array into single OptionSet
+        let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
+            result.formUnion(option)
+        }
+        
+        // Already configured - check for conflicts
+        guard !isConfigured else {
+            if let existingOptions = configuredOptions, existingOptions != categoryOptions {
+                print("[AudioSession] ⚠️ WARNING: Attempting to reconfigure with different options!")
+                print("[AudioSession] Existing: \(existingOptions.rawValue), New: \(categoryOptions.rawValue)")
+                print("[AudioSession] Using existing configuration (first wins)")
+            } else {
+                print("[AudioSession] ⏭️ Already configured, skipping")
+            }
+            return
+        }
         
         do {
             // MARK: Advanced Configuration for Maximum Stability
@@ -54,10 +101,7 @@ actor AudioSessionManager {
             // Default: Peaceful coexistence (.mixWithOthers + .duckOthers + Bluetooth + AirPlay)
             // Custom: User can override (triggers warning in PlayerConfiguration.init)
             
-            // Combine array of options into single OptionSet
-            let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
-                result.formUnion(option)
-            }
+
 
             try session.setCategory(
                 .playback,
@@ -83,8 +127,12 @@ actor AudioSessionManager {
                 print("  ⚠️ WARNING: Sample rate mismatch (difference > 100 Hz)")
             }
             
+            // Mark as configured and save options
             isConfigured = true
+            configuredOptions = categoryOptions
+            print("[AudioSession] ✅ Configured successfully")
         } catch {
+            // Configuration failed - don't mark as configured
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "Failed to configure audio session: \(error.localizedDescription)"
             )
@@ -151,7 +199,10 @@ actor AudioSessionManager {
     
     // MARK: - Notification Observers
     
-    private func setupNotificationObservers() {
+    /// Setup notification observers once (called from init)
+    private func setupNotificationObserversOnce() {
+        guard !observersSetup else { return }
+        observersSetup = true
         // Interruption notifications
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.interruptionNotification,
