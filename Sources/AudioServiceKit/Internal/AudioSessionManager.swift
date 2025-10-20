@@ -85,6 +85,11 @@ actor AudioSessionManager {
         isConfigured = true
         configuredOptions = categoryOptions
         
+
+        
+        print("[AudioSession] 🔧 Configuration started with options: \(categoryOptions.rawValue)")
+        print("[AudioSession] Current state: category=\(session.category.rawValue), mode=\(session.mode.rawValue), active=\(session.isOtherAudioPlaying)")
+        
         do {
             // MARK: Advanced Configuration for Maximum Stability
             // NOTE: Apple docs say setCategory() CAN be called on active session
@@ -94,30 +99,34 @@ actor AudioSessionManager {
             // 0.02s (20ms) provides excellent stability while keeping latency acceptable
             // For meditation/ambient apps, latency is less critical than stability
             let preferredBufferDuration: TimeInterval = 0.02
+            print("[AudioSession] ⏳ Step 1/4: Setting buffer duration...")
             try session.setPreferredIOBufferDuration(preferredBufferDuration)
+            print("[AudioSession] ✅ Step 1/4: Buffer duration set successfully")
             
             // 2. Set preferred sample rate to avoid resampling
             // 44100 Hz is standard for most audio files
             let preferredSampleRate: Double = 44100.0
+            print("[AudioSession] ⏳ Step 2/4: Setting sample rate...")
             try session.setPreferredSampleRate(preferredSampleRate)
+            print("[AudioSession] ✅ Step 2/4: Sample rate set successfully")
             
             // 3. Minimize interruptions from system alerts (iOS 14.5+)
             if #available(iOS 14.5, *) {
+                print("[AudioSession] ⏳ Step 3/4: Setting prefersNoInterruptionsFromSystemAlerts...")
                 try session.setPrefersNoInterruptionsFromSystemAlerts(true)
+                print("[AudioSession] ✅ Step 3/4: prefersNoInterruptionsFromSystemAlerts set successfully")
             }
             
-            // 4. Set category to playback for background audio
-            // Options passed from PlayerConfiguration.audioSessionOptions
-            // Default: Peaceful coexistence (.mixWithOthers + .duckOthers + Bluetooth + AirPlay)
-            // Custom: User can override (triggers warning in PlayerConfiguration.init)
-            
-
-
+            // 4. Set category to playAndRecord for background audio + microphone support
+            // CRITICAL: This MUST succeed - user's audioSessionOptions MUST be applied
+            // Using .playAndRecord instead of .playback because app uses microphone
+            print("[AudioSession] ⏳ Step 4/4: Setting category .playAndRecord with options \(categoryOptions.rawValue)...")
             try session.setCategory(
-                .playback,
+                .playAndRecord,
                 mode: .default,
                 options: categoryOptions
             )
+            print("[AudioSession] ✅ Step 4/4: Category set successfully")
             
             // 5. Validate actual vs preferred settings
             let actualBufferDuration = session.ioBufferDuration

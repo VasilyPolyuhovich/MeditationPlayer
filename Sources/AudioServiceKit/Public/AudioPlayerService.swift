@@ -120,8 +120,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Playlist manager
     internal var playlistManager: PlaylistManager  // Allow internal access for playlist API
     
-    // Sound effects player
-    private var soundEffectsPlayer: SoundEffectsPlayerActor!
+    // Sound effects player (independent from main engine)
+    private let soundEffectsPlayer: SoundEffectsPlayerActor
 
     /// Pending fade-in duration for next startPlaying call
     /// Allows per-call fade-in override without changing configuration
@@ -132,14 +132,41 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Initialization
     
-    public init(configuration: PlayerConfiguration = PlayerConfiguration()) {
+    /// Initialize AudioPlayerService with configuration
+    ///
+    /// **Async Initialization:**
+    /// This initializer is async because it performs complete setup:
+    /// - Configures and activates audio session
+    /// - Sets up audio engine and nodes
+    /// - Initializes remote commands
+    /// - Configures session handlers
+    ///
+    /// After initialization, the service is **fully ready** to use.
+    ///
+    /// **Example:**
+    /// ```swift
+    /// let audioService = await AudioPlayerService()
+    /// try await audioService.loadPlaylist(tracks)
+    /// try await audioService.startPlaying()
+    /// ```
+    ///
+    /// - Parameter configuration: Player configuration (optional, uses defaults if not provided)
+    public init(configuration: PlayerConfiguration = PlayerConfiguration()) async {
         self._state = .finished
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
         self.sessionManager = AudioSessionManager.shared  // Use singleton
         // Initialize playlist manager with configuration
         self.playlistManager = PlaylistManager(configuration: configuration)
+        // Initialize sound effects player with nodes from AudioEngineActor
+        // Nodes (playerNodeD, mixerNodeD) are already created and will be attached in setup()
+        // Create inside actor context to avoid Sendable issues
+        self.soundEffectsPlayer = await audioEngine.createSoundEffectsPlayer()
         // remoteCommandManager will be created in setup() on MainActor
+        
+        // ✅ NEW: Perform full setup immediately
+        // Service is ready to use after init completes
+        await setup()
     }
     
     /// Internal setup - called automatically on first use.
@@ -161,8 +188,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Now safe to setup engine (accesses outputNode)
         await audioEngine.setup()
         
-        // Initialize sound effects player (uses its own AVAudioEngine)
-        soundEffectsPlayer = SoundEffectsPlayerActor()
+        // Apply initial volume from configuration
+        await audioEngine.setVolume(configuration.volume)
         
         // FIXED: Create RemoteCommandManager on MainActor
         remoteCommandManager = await MainActor.run {
@@ -179,10 +206,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.stateMachine = AudioStateMachine(context: self)
     }
     
-    /// Ensure setup is complete before operations
-    private func ensureSetup() async {
-        await setup()
-    }
+    // ensureSetup() removed - setup() is now called in async init()
     
     // MARK: - Setup
     
@@ -250,7 +274,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Configuration must be set via initializer or `updateConfiguration()`
     /// - Note: fadeDuration is independent from crossfade between tracks
     public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
-        await ensureSetup()
         
         // Get current track from playlist
         guard let track = await playlistManager.getCurrentTrack() else {
@@ -1015,7 +1038,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// try await player.loadPlaylist(tracks)
     /// ```
     public func loadPlaylist(_ tracks: [Track]) async throws {
-        await ensureSetup()
         
         guard !tracks.isEmpty else {
             throw AudioPlayerError.emptyPlaylist
@@ -1043,7 +1065,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// try await player.loadPlaylist([introURL, meditationURL, outroURL])
     /// ```
     public func loadPlaylist(_ tracks: [URL]) async throws {
-        await ensureSetup()
         
         guard !tracks.isEmpty else {
             throw AudioPlayerError.emptyPlaylist
@@ -1074,7 +1095,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// try await player.replacePlaylist(newTracks)
     /// ```
     public func replacePlaylist(_ tracks: [Track]) async throws {
-        await ensureSetup()
         
         // 1. Validation
         guard !tracks.isEmpty else {
@@ -1166,7 +1186,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// try await player.replacePlaylist([url1, url2, url3])
     /// ```
     public func replacePlaylist(_ tracks: [URL]) async throws {
-        await ensureSetup()
         
         // 1. Validation
         guard !tracks.isEmpty else {
@@ -1746,20 +1765,19 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         if configuration.repeatMode == .singleTrack {
             // ✅ FIX: Use adapted duration (same as loopCurrentTrackWithFade)
             crossfadeDuration = calculateAdaptedCrossfadeDuration(trackDuration: position.duration)
-            
-            // 🔍 DEBUG: Log trigger calculation
-            Self.logger.debug("[LOOP_TRIGGER] Adapted crossfade: \(crossfadeDuration)s for track: \(position.duration)s")
         } else {
             crossfadeDuration = configuration.crossfadeDuration
         }
         
         let triggerPoint = position.duration - crossfadeDuration
         
-        // 🔍 DEBUG: Log trigger point
+        // Check if should trigger (with epsilon tolerance)
         let willTrigger = position.currentTime >= (triggerPoint - triggerTolerance) && 
                          position.currentTime < position.duration
+        
+        // 🔍 DEBUG: Log only when actually triggering
         if willTrigger {
-            Self.logger.info("[LOOP_TRIGGER] Triggering at \(position.currentTime)s (trigger: \(triggerPoint)s, crossfade: \(crossfadeDuration)s)")
+            Self.logger.info("[LOOP_TRIGGER] Triggering at \(position.currentTime)s (trigger: \(triggerPoint)s, crossfade: \(crossfadeDuration)s, mode: \(configuration.repeatMode))")
         }
         
         // FIXED Issue #8: Use epsilon tolerance for float precision
@@ -1968,7 +1986,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///   - `AudioPlayerError.invalidAudioFile` if file format is unsupported
     ///   - `AudioPlayerError.audioSessionError` if audio session setup fails
     public func playOverlay(_ url: URL) async throws {
-        await ensureSetup()
         
         // Ensure session is active before starting overlay (critical for coexistence)
         try await ensureSessionActive()
@@ -2592,7 +2609,15 @@ extension AudioPlayerService: AudioStateMachineContext {
     ///   - effect: Sound effect to play
     ///   - fadeDuration: Fade-in duration in seconds (default: 0.0 = instant)
     public func playSoundEffect(_ effect: SoundEffect, fadeDuration: TimeInterval = 0.0) async {
-        await ensureSetup()
+        // Ensure audio session is active and engine is running
+        do {
+            try await ensureSessionActive()
+            try await audioEngine.start()
+        } catch {
+            Self.logger.error("[SoundEffects] Failed to start engine: \(error.localizedDescription)")
+            return
+        }
+        
         await soundEffectsPlayer.play(effect, fadeDuration: fadeDuration)
     }
     

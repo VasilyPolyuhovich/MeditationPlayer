@@ -23,22 +23,28 @@ public struct PlayerConfiguration: Sendable {
     /// 
     /// **Configuration:**
     /// - `.mixWithOthers`: Play alongside other apps (no audio session war)
-    /// - `.duckOthers`: iOS intelligently reduces other audio (polite request, not force)
-    /// - `.allowBluetoothA2DP`: High-quality Bluetooth audio support
+    /// - `.allowBluetoothA2DP`: High-quality Bluetooth audio (output + input)
     /// - `.allowAirPlay`: AirPlay streaming support
     /// 
-    /// This preset ensures the SDK coexists peacefully with:
-    /// - User's AVAudioPlayer instances
-    /// - System audio (alerts, notifications)
-    /// - Other music apps running in background
+    /// This preset ensures the SDK:
+    /// - Coexists peacefully with other audio apps
+    /// - Supports Bluetooth headsets (audio + microphone)
+    /// - Supports AirPlay streaming
+    /// - Works with `.playAndRecord` category (for microphone access)
+    /// 
+    /// **Note:** The following options are NOT included:
+    /// - `.duckOthers`: Requires special modes (.voiceChat, .videoChat, .spokenAudio)
+    ///   Using this with `.default` mode causes **error -50** on real devices.
+    /// 
+    /// **Category:** These options are compatible with `.playAndRecord` category,
+    /// which allows both audio playback AND microphone recording.
     /// 
     /// **Warning:** Only override if you understand iOS audio session behavior!
     /// Custom options may cause conflicts with other audio sources.
     public static let defaultAudioSessionOptions: [AVAudioSession.CategoryOptions] = [
-        .mixWithOthers,      // Coexist peacefully
-        .duckOthers,         // Politely request priority
-        .allowBluetoothA2DP, // Bluetooth support
-        .allowAirPlay        // AirPlay support
+        .mixWithOthers,      // Coexist peacefully with other audio
+        .allowBluetoothA2DP, // Bluetooth support (headsets, speakers)
+        .allowAirPlay        // AirPlay streaming support
     ]
     
     // MARK: - Crossfade Settings

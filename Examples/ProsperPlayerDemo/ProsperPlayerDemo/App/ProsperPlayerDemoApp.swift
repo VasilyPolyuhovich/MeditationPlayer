@@ -3,7 +3,6 @@ import AudioServiceKit
 
 @main
 struct ProsperPlayerDemoApp: App {
-    @State private var audioService = AudioPlayerService()
     @State private var viewModel: PlayerViewModel?
     
     var body: some Scene {
@@ -13,8 +12,11 @@ struct ProsperPlayerDemoApp: App {
             } else {
                 ProgressView("Initializing...")
                     .task {
-                        // Initialize ViewModel on MainActor
-                        // No need to call setup() - it's automatic!
+                        // Initialize AudioService with async init
+                        // This performs full setup (audio session, engine, nodes)
+                        let audioService = await AudioPlayerService()
+                        
+                        // Initialize ViewModel
                         viewModel = await PlayerViewModel(audioService: audioService)
                     }
             }

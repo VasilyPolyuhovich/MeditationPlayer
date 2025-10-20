@@ -5,6 +5,46 @@ All notable changes to ProsperPlayer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.2] - 2025-10-20
+
+### Fixed
+- **Critical**: Error -50 when app has other audio components (AVAudioPlayer, AVPlayer, etc.)
+- Made `setPreferred*` calls non-throwing (safe to fail if session already configured)
+- Added defensive check before `setCategory()` to skip if already correct
+- Added detailed logging for session state before configuration
+
+### Technical Details
+
+**Problem**: Error -50 occurred when user's app already had other audio components that configured AVAudioSession before SDK initialization.
+
+**Root Cause**:
+1. `setPreferredIOBufferDuration()` fails if session already active
+2. `setPreferredSampleRate()` fails if session already active
+3. `setCategory()` can fail when setting same category redundantly
+
+**Solution**:
+```swift
+// 1. Non-throwing preferences (safe to fail)
+try? session.setPreferredIOBufferDuration(0.02)
+try? session.setPreferredSampleRate(44100.0)
+
+// 2. Defensive category check
+let currentCategory = session.category
+let currentOptions = session.categoryOptions
+
+if currentCategory != .playback || currentOptions != categoryOptions {
+    try session.setCategory(.playback, options: categoryOptions)
+} else {
+    print("Category already correct, skipping")
+}
+```
+
+**Compatibility**: Now works seamlessly when app uses:
+- AVAudioPlayer for sound effects
+- AVPlayer for video playback
+- Other audio SDKs
+- Multiple AudioPlayerService instances
+
 ## [4.1.1] - 2025-10-20
 
 ### Added

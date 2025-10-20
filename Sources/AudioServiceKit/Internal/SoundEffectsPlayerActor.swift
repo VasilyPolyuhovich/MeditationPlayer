@@ -14,12 +14,10 @@ actor SoundEffectsPlayerActor {
 
     // MARK: - Audio Graph Components
 
-    // nonisolated(unsafe): Safe because these are immutable after init
-    // and AVAudioEngine/nodes are thread-safe for basic operations
-    // SoundEffectsPlayer uses its own AVAudioEngine for complete independence
-    private nonisolated(unsafe) let audioEngine: AVAudioEngine
-    private nonisolated(unsafe) let playerNode: AVAudioPlayerNode
-    private nonisolated(unsafe) let mixerNode: AVAudioMixerNode
+    // nonisolated(unsafe): Safe because nodes are received from AudioEngineActor
+    // and used exclusively by this actor (single ownership after transfer)
+    private nonisolated(unsafe) let player: AVAudioPlayerNode
+    private nonisolated(unsafe) let mixer: AVAudioMixerNode
 
     // MARK: - LRU Cache State
 
@@ -40,26 +38,20 @@ actor SoundEffectsPlayerActor {
 
     // MARK: - Initialization
 
-    init(cacheLimit: Int = 10) {
+    /// Initialize sound effects player with nodes from AudioEngineActor
+    ///
+    /// - Parameters:
+    ///   - player: Player node from AudioEngineActor (playerD)
+    ///   - mixer: Mixer node from AudioEngineActor (mixerD)
+    ///   - cacheLimit: Maximum number of effects to cache (default: 10)
+    init(
+        player: AVAudioPlayerNode,
+        mixer: AVAudioMixerNode,
+        cacheLimit: Int = 10
+    ) {
+        self.player = player
+        self.mixer = mixer
         self.cacheLimit = cacheLimit
-        
-        // Create own AVAudioEngine for complete independence from main player
-        self.audioEngine = AVAudioEngine()
-        self.playerNode = AVAudioPlayerNode()
-        self.mixerNode = AVAudioMixerNode()
-
-        // Setup audio graph inline (can't be separate function due to actor isolation)
-        audioEngine.attach(playerNode)
-        audioEngine.attach(mixerNode)
-        audioEngine.connect(playerNode, to: mixerNode, format: nil)
-        audioEngine.connect(mixerNode, to: audioEngine.mainMixerNode, format: nil)
-        
-        // Start engine
-        do {
-            try audioEngine.start()
-        } catch {
-            print("[SoundEffects] ⚠️ Failed to start audio engine: \(error)")
-        }
         
         print("[SoundEffects] 🎵 Initialized with LRU cache (limit: \(cacheLimit))")
     }
@@ -179,29 +171,32 @@ actor SoundEffectsPlayerActor {
 
         // Volume = effect's volume * master volume
         let finalVolume = effect.volume * volume
+        
+        // Set mixer volume to 1.0 (full output)
+        // Player volume controls the actual level
+        mixer.volume = 1.0
 
-        // Connect player with buffer's format
-        let format = effect.buffer.format
-        audioEngine.connect(playerNode, to: mixerNode, format: format)
+        // Player and mixer already connected in AudioEngineActor
+        // Just use the existing connection
 
         // Schedule buffer for playback
-        playerNode.scheduleBuffer(effect.buffer) { [weak self] in
+        player.scheduleBuffer(effect.buffer) { [weak self] in
             Task { [weak self] in
                 await self?.handleEffectFinished(id: effect.id)
             }
         }
 
         // Start player if not already running
-        if !playerNode.isPlaying {
-            playerNode.play()
+        if !player.isPlaying {
+            player.play()
         }
 
         // Fade in (use parameter, not effect's fadeInDuration)
         if fadeDuration > 0 {
-            playerNode.volume = 0.0
+            player.volume = 0.0
             fadeTo(volume: finalVolume, duration: fadeDuration)
         } else {
-            playerNode.volume = finalVolume
+            player.volume = finalVolume
         }
 
         print("[SoundEffects] ▶️ Playing: \(effect.track.url.lastPathComponent) (effect: \(effect.volume), master: \(volume), final: \(finalVolume), fadeIn: \(fadeDuration)s)")
@@ -230,8 +225,8 @@ actor SoundEffectsPlayerActor {
         fadeTask = nil
 
         // Stop player
-        playerNode.stop()
-        playerNode.volume = 0.0
+        player.stop()
+        player.volume = 0.0
 
         if let effect = currentlyPlaying {
             print("[SoundEffects] ⏹️ Stopped: \(effect.track.url.lastPathComponent)")
@@ -256,12 +251,12 @@ actor SoundEffectsPlayerActor {
 
     private func fadeTo(volume: Float, duration: TimeInterval) {
         guard duration > 0 else {
-            playerNode.volume = volume
+            player.volume = volume
             return
         }
 
         // Simple linear fade (60 FPS)
-        let startVolume = playerNode.volume
+        let startVolume = player.volume
         let delta = volume - startVolume
         let steps = Int(duration * 60)
         let stepDuration = duration / Double(steps)
@@ -272,7 +267,7 @@ actor SoundEffectsPlayerActor {
 
                 let progress = Float(step) / Float(steps)
                 let currentVolume = startVolume + (delta * progress)
-                playerNode.volume = currentVolume
+                player.volume = currentVolume
 
                 try? await Task.sleep(nanoseconds: UInt64(stepDuration * 1_000_000_000))
             }
@@ -284,7 +279,7 @@ actor SoundEffectsPlayerActor {
 
         print("[SoundEffects] ✅ Finished: \(id)")
         currentlyPlaying = nil
-        playerNode.volume = 0.0
+        player.volume = 0.0
     }
 
     // MARK: - Volume Control
@@ -299,7 +294,7 @@ actor SoundEffectsPlayerActor {
         // Update current playing effect volume if any
         if currentlyPlaying != nil {
             let finalVolume = (currentlyPlaying?.volume ?? 1.0) * volume
-            playerNode.volume = finalVolume
+            player.volume = finalVolume
         }
         
         print("[SoundEffects] 🔊 Volume set to \(Int(volume * 100))%")

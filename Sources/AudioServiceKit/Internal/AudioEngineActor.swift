@@ -19,6 +19,12 @@ actor AudioEngineActor {
     private nonisolated(unsafe) let playerNodeC: AVAudioPlayerNode
     private nonisolated(unsafe) let mixerNodeC: AVAudioMixerNode
     
+    // Sound effects player nodes (always attached, ready for use)
+    // nonisolated(unsafe): Safe because nodes are created once, attached once,
+    // then transferred to SoundEffectsPlayerActor where they're exclusively accessed
+    internal nonisolated(unsafe) let playerNodeD: AVAudioPlayerNode
+    internal nonisolated(unsafe) let mixerNodeD: AVAudioMixerNode
+    
     // Track which player is currently active
     private var activePlayer: PlayerNode = .a
     
@@ -73,6 +79,8 @@ actor AudioEngineActor {
         self.mixerNodeB = AVAudioMixerNode()
         self.playerNodeC = AVAudioPlayerNode()
         self.mixerNodeC = AVAudioMixerNode()
+        self.playerNodeD = AVAudioPlayerNode()
+        self.mixerNodeD = AVAudioMixerNode()
     }
     
     // MARK: - Setup
@@ -92,6 +100,10 @@ actor AudioEngineActor {
         engine.attach(playerNodeC)
         engine.attach(mixerNodeC)
         
+        // Attach sound effects nodes (always ready for use)
+        engine.attach(playerNodeD)
+        engine.attach(mixerNodeD)
+        
         // Get the standard format from output
         let format = engine.outputNode.outputFormat(forBus: 0)
         
@@ -109,6 +121,11 @@ actor AudioEngineActor {
         // Connect overlay player C: playerC -> mixerC -> mainMixer
         engine.connect(playerNodeC, to: mixerNodeC, format: format)
         engine.connect(mixerNodeC, to: engine.mainMixerNode, format: format)
+        
+        // Connect sound effects player D: playerD -> mixerD -> mainMixer
+        // All sound effect buffers are converted to stereo in SoundEffect.init
+        engine.connect(playerNodeD, to: mixerNodeD, format: format)
+        engine.connect(mixerNodeD, to: engine.mainMixerNode, format: format)
         
         // Set initial volumes
         mixerNodeA.volume = 0.0
@@ -1380,6 +1397,20 @@ actor AudioEngineActor {
             return .idle
         }
         return await player.getState()
+    }
+    
+    // MARK: - Sound Effects Player Creation
+    
+    /// Create sound effects player actor with pre-attached nodes
+    /// Nodes (playerNodeD, mixerNodeD) are already attached and connected during setup
+    /// - Parameter cacheLimit: Maximum number of cached sound effects (default: 10)
+    /// - Returns: Initialized SoundEffectsPlayerActor
+    func createSoundEffectsPlayer(cacheLimit: Int = 10) -> SoundEffectsPlayerActor {
+        return SoundEffectsPlayerActor(
+            player: playerNodeD,
+            mixer: mixerNodeD,
+            cacheLimit: cacheLimit
+        )
     }
 }
 
