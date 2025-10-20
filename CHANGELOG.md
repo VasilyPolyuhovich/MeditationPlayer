@@ -5,73 +5,6 @@ All notable changes to ProsperPlayer will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.1.3] - 2025-10-20
-
-### Fixed
-- **Critical**: Removed `setActive(false)` before `setCategory()` that caused error -50
-- **Critical**: Removed duplicate `configure()` call in `startPlaying()` method
-- Following Apple best practices: `setCategory()` can be called on active session
-
-### Changed
-- Added `force` parameter to `configure()` for media services reset scenario
-- Singleton configure now idempotent - multiple calls safely ignored
-- Media services reset uses `configure(force: true)` for clean reconfiguration
-
-### Technical Details
-
-**Root Cause of Error -50**:
-```swift
-// ❌ WRONG (caused -50):
-try? session.setActive(false)  // Deactivates session
-try session.setCategory(...)   // Can fail if other audio is active
-
-// ✅ CORRECT (Apple recommended):
-try session.setCategory(...)   // Works on active session!
-try session.setActive(true)    // Then activate
-```
-
-**Removed Duplicate Configure**:
-```swift
-// Before (v4.1.2): configure() called TWICE
-func setup() {
-    try sessionManager.configure()  // ← First call
-}
-
-func startPlaying() {
-    try sessionManager.configure()  // ← Second call (duplicate!)
-}
-
-// After (v4.1.3): configure() called ONCE
-func setup() {
-    try sessionManager.configure()  // ← Only here
-}
-
-func startPlaying() {
-    try sessionManager.activate()   // ← Just activate
-}
-```
-
-## [4.1.2] - 2025-10-20
-
-### Fixed
-- **Critical Race Condition**: Fixed race condition in `AudioSessionManager.configure()`
-  - Problem: Two concurrent configure() calls could both pass guard check and both try to set AVAudioSession category → Error -50
-  - Solution: Set `isConfigured = true` IMMEDIATELY after guard (atomic check-and-set)
-  - Now guaranteed thread-safe even with concurrent initialization from multiple instances
-
-### Technical Details
-```swift
-// Before (RACE CONDITION):
-guard !isConfigured else { return }
-try session.setCategory(...)  // ← Both tasks could reach here!
-isConfigured = true  // ← Too late!
-
-// After (ATOMIC):
-guard !isConfigured else { return }
-isConfigured = true  // ← Set IMMEDIATELY (atomic with guard)
-try session.setCategory(...)  // ← Only first task reaches here
-```
-
 ## [4.1.1] - 2025-10-20
 
 ### Added
@@ -84,11 +17,56 @@ try session.setCategory(...)  // ← Only first task reaches here
 - **BREAKING**: `setup()` is now `internal` and called automatically on first use
 - AVAudioSession configured once globally (first instance wins)
 - Observers setup moved to singleton initialization
+- Deprecated `deactivate()` method → renamed to `_internalDeactivateDeprecated()`
+- Added `@available(*, deprecated)` warning to prevent future misuse
+- Audio session stays active for all instances (shared singleton)
+- Added `force` parameter to `configure()` for media services reset scenario
 
 ### Fixed
-- **Critical Bug**: Error -50 when creating multiple `AudioPlayerService` instances
-- AudioSession configuration conflict detection and warnings
-- Race condition in session manager initialization
+- **Critical**: Error -50 when creating multiple `AudioPlayerService` instances
+- **Critical**: Race condition in `AudioSessionManager.configure()` with concurrent calls
+- **Critical**: Removed all `deactivate()` calls from `stopImmediately()`, `reset()`, and `cleanup()`
+- **Critical**: Singleton `deactivate()` no longer affects other `AudioPlayerService` instances
+- Removed `setActive(false)` before `setCategory()` that caused error -50
+- Removed duplicate `configure()` call in `startPlaying()` method
+- Following Apple's AVAudioPlayer pattern: activate once, never deactivate
+
+### Technical Details
+
+**Problem 1**: Multiple Instances Error -50
+```swift
+// ❌ BEFORE (v4.1.0): Each instance created own session manager
+let player1 = AudioPlayerService()  // Creates AudioSessionManager()
+let player2 = AudioPlayerService()  // Creates AudioSessionManager() → Error -50!
+
+// ✅ AFTER (v4.1.1): Singleton shared by all instances
+let player1 = AudioPlayerService()  // Uses AudioSessionManager.shared
+let player2 = AudioPlayerService()  // Uses AudioSessionManager.shared ✅
+```
+
+**Problem 2**: Race Condition in configure()
+```swift
+// ❌ BEFORE: Both tasks could pass guard
+guard !isConfigured else { return }
+try session.setCategory(...)  // Both reach here!
+isConfigured = true  // Too late!
+
+// ✅ AFTER: Atomic check-and-set
+guard !isConfigured else { return }
+isConfigured = true  // Set IMMEDIATELY
+try session.setCategory(...)  // Only first task reaches here
+```
+
+**Problem 3**: Singleton Deactivation Affecting All Instances
+```swift
+// ❌ BEFORE: stop() deactivated shared session
+let player1 = AudioPlayerService()  // Playing music
+let player2 = AudioPlayerService()  // Playing voiceover
+player2.stop()  // Calls deactivate() → BREAKS player1!
+
+// ✅ AFTER: stop() never deactivates (Apple pattern)
+player2.stop()  // Only stops player2, player1 keeps playing ✅
+```
 
 ### Migration Guide
 ```swift
@@ -105,6 +83,7 @@ try await player.loadPlaylist(tracks, configuration: config)
 // Multiple instances now work correctly
 let player1 = AudioPlayerService()
 let player2 = AudioPlayerService()  // ✅ No error -50!
+player1.stop()  // ✅ Doesn't affect player2!
 ```
 
 ## [4.1.0] - 2025-10-19

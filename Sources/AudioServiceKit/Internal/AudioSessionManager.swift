@@ -179,7 +179,15 @@ actor AudioSessionManager {
         }
     }
     
-    func deactivate() throws {
+    /// ⚠️ DEPRECATED - DO NOT USE!
+    /// This method should NEVER be called in production code.
+    /// Following Apple's AVAudioPlayer pattern: activate once, never deactivate.
+    /// iOS manages session lifecycle automatically.
+    /// 
+    /// Deactivating a singleton session affects ALL AudioPlayerService instances.
+    /// Only kept for potential emergency scenarios (not currently used).
+    @available(*, deprecated, message: "Do not use - violates singleton pattern. Session should stay active.")
+    func _internalDeactivateDeprecated() throws {
         guard isActive else { return }
         
         do {

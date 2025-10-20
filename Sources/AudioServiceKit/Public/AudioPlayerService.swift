@@ -638,8 +638,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         Self.logger.debug("[STOP_DIAGNOSTIC] stopImmediately: players stopped")
         
-        // ISSUE #7 FIX: Deactivate audio session
-        try? await sessionManager.deactivate()
+        // Session stays active - following Apple's AVAudioPlayer pattern
+        // iOS manages session lifecycle automatically
         
         // Reset ALL state for clean restart (including crossfade flags)
         playbackPosition = nil
@@ -922,8 +922,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Full engine reset (clears all files and state)
         await audioEngine.fullReset()
         
-        // ISSUE #7 FIX: Deactivate audio session
-        try? await sessionManager.deactivate()
+        // Session stays active - following Apple's AVAudioPlayer pattern
+        // iOS manages session lifecycle automatically
         
         // Reset configuration
         configuration = PlayerConfiguration()
@@ -970,8 +970,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         stopPlaybackTimer()
         await audioEngine.fullReset()
         
-        // Deactivate audio session
-        try? await sessionManager.deactivate()
+        // Session stays active - following Apple's AVAudioPlayer pattern
+        // iOS manages session lifecycle automatically
         
         // Clear all state (including crossfade flags)
         currentTrack = nil
