@@ -6,7 +6,7 @@
 
 ```swift
 // Initialize service (setup is automatic!)
-let service = AudioPlayerService()
+let service = try await AudioPlayerService()
 
 // Configure playback
 let config = PlayerConfiguration(
@@ -113,12 +113,12 @@ You can create multiple `AudioPlayerService` instances with different configurat
 
 ```swift
 // Component 1: Meditation player
-let meditationPlayer = AudioPlayerService()
+let meditationPlayer = try await AudioPlayerService()
 let config1 = PlayerConfiguration(crossfadeDuration: 10.0, volume: 0.8)
 try await meditationPlayer.loadPlaylist(meditationTracks, configuration: config1)
 
 // Component 2: Music player
-let musicPlayer = AudioPlayerService()
+let musicPlayer = try await AudioPlayerService()
 let config2 = PlayerConfiguration(crossfadeDuration: 5.0, volume: 1.0)
 try await musicPlayer.loadPlaylist(musicTracks, configuration: config2)
 ```
@@ -189,7 +189,7 @@ swift build
 ### Basic Playlist
 
 ```swift
-let service = AudioPlayerService()
+let service = try await AudioPlayerService()
 
 let config = PlayerConfiguration(
     crossfadeDuration: 10.0,
@@ -475,6 +475,84 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
+## 🔄 Migration to v4.1.4
+
+### Breaking Changes
+
+#### Async Throws Initialization
+
+**v4.1.1-4.1.3**:
+```swift
+let player = AudioPlayerService()
+```
+
+**v4.1.4**:
+```swift
+let player = try await AudioPlayerService()
+```
+
+**Why?** Proper error propagation from audio engine setup. If stereo format creation fails, you'll now receive a clear error instead of silent failure.
+
+**Migration steps:**
+
+1. **Add `try await` to all AudioPlayerService initializations:**
+```swift
+// Before
+let audioService = AudioPlayerService()
+
+// After
+let audioService = try await AudioPlayerService()
+```
+
+2. **Update dependency injection containers:**
+```swift
+// Before (Factory DI)
+var audioPlayerService: Factory<AudioPlayerService> {
+    self { AudioPlayerService() }
+}
+
+// After
+@MainActor
+func createAudioPlayerService() async throws -> AudioPlayerService {
+    try await AudioPlayerService(configuration: .default)
+}
+```
+
+3. **Handle errors in SwiftUI:**
+```swift
+struct ContentView: View {
+    @State private var audioService: AudioPlayerService?
+    @State private var error: Error?
+    
+    var body: some View {
+        if let audioService = audioService {
+            PlayerView(audioService: audioService)
+        } else if let error = error {
+            ErrorView(error: error)
+        } else {
+            ProgressView()
+                .task {
+                    do {
+                        audioService = try await AudioPlayerService()
+                    } catch {
+                        self.error = error
+                    }
+                }
+        }
+    }
+}
+```
+
+#### Audio Routing Fix
+
+**What changed:** Added `.defaultToSpeaker` to default audio session options.
+
+**Impact:** Audio now plays through **loudspeaker** instead of **ear speaker** when using `.playAndRecord` category.
+
+**No migration needed** - this fix is automatic!
+
+---
+
 ## 🔄 Migration from v4.1.0 to v4.1.1
 
 ### Breaking Changes
@@ -488,10 +566,17 @@ await player.setup()  // ❌ Required manual call
 try await player.loadPlaylist(tracks, configuration: config)
 ```
 
-**NEW (v4.1.1)**:
+**v4.1.1**:
 ```swift
 let player = AudioPlayerService()
 // ✅ No setup() needed - automatic!
+try await player.loadPlaylist(tracks, configuration: config)
+```
+
+**NEW (v4.1.4)**:
+```swift
+let player = try await AudioPlayerService()
+// ✅ Async throws init with proper error handling
 try await player.loadPlaylist(tracks, configuration: config)
 ```
 
@@ -506,8 +591,8 @@ try await player.loadPlaylist(tracks, configuration: config)
 **Fixed in v4.1.1**:
 ```swift
 // Both instances work correctly now!
-let player1 = AudioPlayerService()
-let player2 = AudioPlayerService()  // ✅ No error!
+let player1 = try await AudioPlayerService()
+let player2 = try await AudioPlayerService()  // ✅ No error!
 
 // Each with different configurations
 try await player1.loadPlaylist(tracks1, configuration: config1)
@@ -549,6 +634,21 @@ let config2 = PlayerConfiguration(audioSessionOptions: sharedOptions)
 
 ---
 
+## 🆕 What's New in v4.1.4
+
+### Error Handling
+- **Throwing initialization** - `AudioPlayerService.init()` now `async throws`
+- **Proper error propagation** - audio engine setup errors are caught and reported
+- **Clear error messages** - `AudioPlayerError.engineStartFailed` with detailed reasons
+- **No silent failures** - stereo format creation errors are visible
+
+### Audio Routing Fix
+- **Loudspeaker routing** - added `.defaultToSpeaker` option
+- **Correct speaker selection** - uses loudspeaker (music) instead of ear speaker (calls)
+- **Better audio quality** - proper volume levels with `.playAndRecord` category
+
+---
+
 ## 🆕 What's New in v4.1
 
 ### Sound Effects System
@@ -574,7 +674,7 @@ let config2 = PlayerConfiguration(audioSessionOptions: sharedOptions)
 
 ---
 
-**Version**: 4.1.0
+**Version**: 4.1.4
 **Platform**: iOS 15+
 **Build**: [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
