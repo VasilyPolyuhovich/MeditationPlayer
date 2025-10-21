@@ -392,6 +392,47 @@ actor PlaybackStateCoordinator {
         return state.isCrossfading
     }
     
+    /// Check if there's an active crossfade operation
+    func hasActiveCrossfade() -> Bool {
+        return activeCrossfade != nil
+    }
+    
+    /// Check if there's a paused crossfade
+    func hasPausedCrossfade() -> Bool {
+        return pausedCrossfade != nil
+    }
+    
+    /// Get active crossfade operation type (if any)
+    func getActiveCrossfadeOperation() -> CrossfadeOperation? {
+        return activeCrossfade?.operation
+    }
+    
+    /// Cancel active crossfade and cleanup
+    func cancelActiveCrossfade() async {
+        guard activeCrossfade != nil else { return }
+        
+        Self.logger.debug("[Coordinator] Cancelling active crossfade")
+        
+        // Cancel progress task
+        crossfadeProgressTask?.cancel()
+        crossfadeProgressTask = nil
+        
+        // Cancel engine crossfade
+        await audioEngine.cancelActiveCrossfade()
+        
+        // Clear state
+        activeCrossfade = nil
+        state = state.withCrossfading(false)
+    }
+    
+    /// Clear paused crossfade state
+    func clearPausedCrossfade() {
+        if pausedCrossfade != nil {
+            Self.logger.debug("[Coordinator] Clearing paused crossfade")
+            pausedCrossfade = nil
+        }
+    }
+    
     /// Capture complete state snapshot (for crossfade pause/resume)
     func captureSnapshot() -> CoordinatorState {
         return state

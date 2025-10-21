@@ -158,13 +158,7 @@ extension AudioPlayerService {
         let remainingTime = position.duration - position.currentTime
         let crossfadeDuration = min(configuration.crossfadeDuration, remainingTime)
         
-        // Send preparing state to observers immediately (BEFORE replaceTrack)
-        let prepareProgress = CrossfadeProgress(
-            phase: .preparing,
-            duration: crossfadeDuration,
-            elapsed: 0
-        )
-        updateCrossfadeProgress(prepareProgress)
+        // Removed: updateCrossfadeProgress (coordinator handles progress reporting)
         
         // Create Track from URL (validates file exists)
         guard let track = Track(url: url) else {
