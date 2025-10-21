@@ -1144,7 +1144,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         } else {
             // Paused or stopped - prepare player and switch without playback
             await audioEngine.prepareSecondaryPlayer()
-            await audioEngine.switchActivePlayer()
+            await audioEngine.switchActivePlayerWithVolume()
             await audioEngine.stopInactivePlayer()
         }
 
@@ -1236,7 +1236,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         } else {
             // Paused or stopped - prepare player and switch without playback
             await audioEngine.prepareSecondaryPlayer()
-            await audioEngine.switchActivePlayer()
+            await audioEngine.switchActivePlayerWithVolume()
             await audioEngine.stopInactivePlayer()
         }
         
@@ -1355,7 +1355,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             }
         } else {
             // Paused or stopped during load - switch files without starting
-            await audioEngine.switchActivePlayer()
+            await audioEngine.switchActivePlayerWithVolume()
             await audioEngine.stopInactivePlayer()
             // Note: New active player will be scheduled on resume via play()
         }

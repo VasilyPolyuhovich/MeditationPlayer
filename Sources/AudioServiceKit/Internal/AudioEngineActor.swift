@@ -210,10 +210,10 @@ actor AudioEngineActor {
             return
         }
         
-        // ✅ FIX: Always check if we need to reschedule after pause or fresh load
+        // ✅ FIX: Always check if we need to reschedule after pause
         // AVFoundation quirk: isPlaying may be unreliable after pause()
-        // Strategy: If player is not playing, we need to schedule (either resume or fresh play)
-        let needsReschedule = !player.isPlaying
+        // Strategy: If player is not playing AND we have an offset, it's a resume
+        let needsReschedule = !player.isPlaying && offset > 0
         
         if needsReschedule {
             // Resume from saved position
@@ -1209,6 +1209,19 @@ actor AudioEngineActor {
     func switchActivePlayer() {
         // Simply switch the active flag - files are already in correct slots
         activePlayer = activePlayer == .a ? .b : .a
+    }
+    
+    /// Switch the active player AND set new active mixer to full volume
+    /// Use this for non-crossfade scenarios (pause + skip, pause + load playlist)
+    func switchActivePlayerWithVolume() {
+        // Switch the active flag
+        activePlayer = activePlayer == .a ? .b : .a
+        
+        // ✅ FIX Race #13: Set new active mixer to full volume
+        // During pause, prepareSecondaryPlayer() sets mixer.volume = 0.0
+        // When we switch without crossfade, we need to restore full volume
+        let activeMixer = getActiveMixerNode()
+        activeMixer.volume = 1.0
     }
     
     /// Load audio file on the secondary player (for replace/next track)
