@@ -18,9 +18,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Private logger
     private static let logger = Logger.audio
     
-    // SSOT: State managed exclusively by state machine
-    private var _state: PlayerState
-    public var state: PlayerState { _state }
+    // SSOT: State managed by PlaybackStateCoordinator
+    // Cached state for sync protocol conformance
+    private var _cachedState: PlayerState = .finished
+    public var state: PlayerState { _cachedState }
+    
+    // Helper: Update state via coordinator and sync cache
+    private func updateState(_ newState: PlayerState) async {
+        await playbackStateCoordinator.updateMode(newState)
+        _cachedState = newState
+        notifyObservers(stateChange: newState)
+    }
     public private(set) var configuration: PlayerConfiguration  // Public read, private write (use updateConfiguration)
     public internal(set) var currentTrack: TrackInfo?  // Public read, internal write for playlist API
     public private(set) var playbackPosition: PlaybackPosition?
@@ -32,7 +40,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // RemoteCommandManager is now @MainActor isolated for thread safety
     // Must be created in setup() due to MainActor isolation
     private var remoteCommandManager: RemoteCommandManager!
-    internal var stateMachine: AudioStateMachine!  // Allow internal access for playlist API
+    // Removed: stateMachine - replaced by PlaybackStateCoordinator
     
     // Playback timer for position updates
     private var playbackTimer: Task<Void, Never>?
@@ -153,7 +161,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// - Parameter configuration: Player configuration (optional, uses defaults if not provided)
     public init(configuration: PlayerConfiguration = PlayerConfiguration()) async throws {
-        self._state = .finished
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
         self.playbackStateCoordinator = PlaybackStateCoordinator(audioEngine: audioEngine)
@@ -198,14 +205,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             RemoteCommandManager()
         }
         
-        // Initialize state machine
-        initializeStateMachine()
+        // State machine removed - using PlaybackStateCoordinator
         await setupSessionHandlers()
         await setupRemoteCommands()
-    }
-    
-    private func initializeStateMachine() {
-        self.stateMachine = AudioStateMachine(context: self)
     }
     
     // ensureSetup() removed - setup() is now called in async init()
@@ -325,16 +327,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.currentTrack = trackInfo
         
         // Enter preparing state
-        let success = await stateMachine.enterPreparing()
-        Logger.state.assertTransition(
-            success,
-            from: state.description,
-            to: "preparing"
-        )
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        await updateState(.preparing)
+        Logger.state.debug("State transition: \(currentState) → preparing")
         
-        guard success else {
+        // Coordinator validates automatically via isConsistent
+        guard await playbackStateCoordinator.getPlaybackMode() == .preparing else {
+            let currentState = await state
             throw AudioPlayerError.invalidState(
-                current: state.description,
+                current: currentState.description,
                 attempted: "start playing"
             )
         }
@@ -421,7 +422,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                     activeCrossfadeOperation = nil
                     
                     // Use normal pause instead
-                    await stateMachine.enterPaused()
+                    await updateState(.paused)
                     await updateNowPlayingPlaybackRate(0.0)
                     return
                 }
@@ -457,7 +458,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
             // Use state machine (pausePlayback will check pausedCrossfadeState)
             Self.logger.debug("[CROSSFADE_PAUSE] ✅ Entering paused state...")
-            await stateMachine.enterPaused()
+            await updateState(.paused)
             Self.logger.debug("[CROSSFADE_PAUSE] ✓ Pause completed successfully")
             
             Self.logger.debug("[CROSSFADE_PAUSE] Paused during crossfade, players frozen at current volumes")
@@ -468,7 +469,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // - Capturing position ONCE
             // - Pausing audio engine
             // - Stopping playback timer
-            await stateMachine.enterPaused()
+            await updateState(.paused)
         }
         
         // Update UI
@@ -525,7 +526,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             activeCrossfadeOperation = pausedState.operation
 
             // Use state machine but it will skip reschedule due to flag
-            await stateMachine.enterPlaying()
+            await updateState(.playing)
 
             // Start resumed crossfade
             let progressStream = await audioEngine.resumeCrossfadeFromState(
@@ -574,7 +575,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // - Playing audio engine
             // - Restarting playback timer
             Self.logger.debug("[RESUME] Normal resume (no crossfade)")
-            await stateMachine.enterPlaying()
+            await updateState(.playing)
         }
         
         // Update UI
@@ -590,7 +591,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let playerIsPlaying = await audioEngine.isActivePlayerPlaying()
         let mixerVolume = await audioEngine.getActiveMixerVolume()
         let targetVol = await audioEngine.getTargetVolume()
-        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(self.state)")
+        let currentState = await state
+        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(currentState)")
 
         // Clear paused crossfade state (stop invalidates saved state)
         clearPausedCrossfadeIfNeeded()
@@ -677,7 +679,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         activeCrossfadeOperation = nil
         
         // State change via state machine
-        await stateMachine.enterFinished()
+        await updateState(.finished)
         
         // Clear UI
         let manager = remoteCommandManager!  // Capture before MainActor hop
@@ -690,16 +692,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     public func finish(fadeDuration: TimeInterval?) async throws {
         let duration = fadeDuration ?? 3.0
         
-        let success = await stateMachine.enterFadingOut(duration: duration)
-        Logger.state.assertTransition(
-            success,
-            from: state.description,
-            to: "fading out"
-        )
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        await updateState(.fadingOut)
+        Logger.state.debug("State transition: \(currentState) → fadingOut")
         
-        guard success else {
+        guard await playbackStateCoordinator.getPlaybackMode() == .fadingOut else {
             throw AudioPlayerError.invalidState(
-                current: state.description,
+                current: currentState.description,
                 attempted: "finish"
             )
         }
@@ -786,7 +785,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             currentCrossfadeProgress = .idle
         }
         
-        let wasPlaying = state == .playing
+        let wasPlaying = await state == .playing
         
         let currentVolume = await audioEngine.getTargetVolume()
         
@@ -967,9 +966,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         currentRepeatCount = 0
         activeCrossfadeOperation = nil
         
-        // CRITICAL: Reinitialize state machine to FinishedState
+        // CRITICAL: Reset state to finished
         // This prevents Error 4 (invalidState) on next play()
-        initializeStateMachine()
+        await updateState(.finished)
         
         // Re-setup engine for fresh start
         try? await audioEngine.setup()
@@ -1007,7 +1006,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         playbackPosition = nil
         currentRepeatCount = 0
         activeCrossfadeOperation = nil
-        await stateMachine.enterFinished()
+        await updateState(.finished)
         
         // Remove remote commands
         let manager = remoteCommandManager!  // Capture before MainActor hop
@@ -1121,14 +1120,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
 
         // State preservation (BEFORE async operations!)
-        let wasPlaying = state == .playing
+        let wasPlaying = await state == .playing
 
         // Load first track of new playlist on secondary player
         let firstTrack = tracks[0]
         let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrack.url)
 
         // Recheck state after async (actor reentrancy protection)
-        let isStillPlaying = state == .playing
+        let isStillPlaying = await state == .playing
 
         // Decision: crossfade or silent switch
         if wasPlaying && isStillPlaying {
@@ -1212,14 +1211,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
 
         // State preservation (BEFORE async operations!)
-        let wasPlaying = state == .playing
+        let wasPlaying = await state == .playing
 
         // Load first track of new playlist on secondary player
         let firstTrackURL = tracks[0]
         let newTrack = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrackURL)
 
         // Recheck state after async (actor reentrancy protection)
-        let isStillPlaying = state == .playing
+        let isStillPlaying = await state == .playing
 
         // Decision: crossfade or silent switch
         if wasPlaying && isStillPlaying {
@@ -1329,13 +1328,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // CRITICAL: Remember state BEFORE any async operations
-        let wasPlaying = state == .playing
+        let wasPlaying = await state == .playing
         
         // Load new file on secondary player (suspension point)
         _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: url)
         
         // CRITICAL: Recheck state after async operation (actor reentrancy protection)
-        let isStillPlaying = state == .playing
+        let isStillPlaying = await state == .playing
         
         // Decision: crossfade only if BOTH conditions true
         if wasPlaying && isStillPlaying {
@@ -1355,8 +1354,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             }
 
             // CRITICAL FIX: Ensure state=.playing after crossfade
-            if state != .playing {
-                await stateMachine.enterPlaying()
+            if await state != .playing {
+                await updateState(.playing)
             }
         } else {
             // Paused or stopped during load - switch files without starting
@@ -1444,13 +1443,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await updateNowPlayingPosition()
         
         // Check for track end (auto-advance to next track or stop)
-        if shouldTriggerTrackEnd(position) {
+        if await shouldTriggerTrackEnd(position) {
             await handleTrackEnd()
             return  // Don't check loop crossfade if track ended
         }
         
         // Check for loop crossfade trigger (with race condition protection)
-        if shouldTriggerLoopCrossfade(position) && activeCrossfadeOperation != .automaticLoop {
+        if await shouldTriggerLoopCrossfade(position) && activeCrossfadeOperation != .automaticLoop {
             await startLoopCrossfade()
         }
     }
@@ -1467,7 +1466,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Read actor-isolated properties before MainActor hop
         let currentTime = playbackPosition?.currentTime ?? 0
-        let playbackRate: Double = state == .playing ? 1.0 : 0.0
+        let playbackRate: Double = await state == .playing ? 1.0 : 0.0
         let manager = remoteCommandManager!  // Capture before MainActor hop
         
         await MainActor.run {
@@ -1485,7 +1484,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard let position = playbackPosition else { return }
         
         // Read actor-isolated state before MainActor hop
-        let playbackRate: Double = state == .playing ? 1.0 : 0.0
+        let playbackRate: Double = await state == .playing ? 1.0 : 0.0
         let manager = remoteCommandManager!  // Capture before MainActor hop
         
         await MainActor.run {
@@ -1608,7 +1607,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.info("[MEDIA_SERVICES] Attempting to recover audio session and engine...")
         
         // Step 1: Save current playback state BEFORE any recovery
-        let wasPlaying = state == .playing
+        let wasPlaying = await state == .playing
         let currentPosition = wasPlaying ? await audioEngine.getCurrentPosition()?.currentTime : nil
         if let pos = currentPosition {
             Self.logger.debug("[MEDIA_SERVICES] Saved playback position: \(pos)s")
@@ -1621,9 +1620,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         } catch {
             Self.logger.error("[MEDIA_SERVICES] Failed to reconfigure session: \(error.localizedDescription)")
             // Enter failed state if we can't recover
-            await stateMachine.enterFailed(error: .sessionConfigurationFailed(
+            await updateState(.failed(.sessionConfigurationFailed(
                 reason: "Media services reset - reconfiguration failed: \(error.localizedDescription)"
-            ))
+            )))
             return
         }
         
@@ -1633,9 +1632,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             Self.logger.debug("[MEDIA_SERVICES] Session reactivated successfully")
         } catch {
             Self.logger.error("[MEDIA_SERVICES] Failed to reactivate session: \(error.localizedDescription)")
-            await stateMachine.enterFailed(error: .sessionConfigurationFailed(
+            await updateState(.failed(.sessionConfigurationFailed(
                 reason: "Media services reset - reactivation failed: \(error.localizedDescription)"
-            ))
+            )))
             return
         }
         
@@ -1652,9 +1651,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             Self.logger.debug("[MEDIA_SERVICES] Audio engine restarted successfully")
         } catch {
             Self.logger.error("[MEDIA_SERVICES] Failed to restart engine: \(error.localizedDescription)")
-            await stateMachine.enterFailed(error: .engineStartFailed(
+            await updateState(.failed(.engineStartFailed(
                 reason: "Media services reset - engine restart failed: \(error.localizedDescription)"
-            ))
+            )))
             return
         }
         
@@ -1701,7 +1700,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// Check if track has ended (needs auto-advance or stop)
     /// - Parameter position: Current playback position
     /// - Returns: True if track ended
-    private func shouldTriggerTrackEnd(_ position: PlaybackPosition) -> Bool {
+    private func shouldTriggerTrackEnd(_ position: PlaybackPosition) async -> Bool {
         // Only for .off or .playlist modes (not .singleTrack - it loops)
         guard configuration.repeatMode != .singleTrack else { return false }
         
@@ -1709,7 +1708,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard activeCrossfadeOperation != .manualChange else { return false }
         
         // Only trigger when playing
-        guard state == .playing else { return false }
+        guard await state == .playing else { return false }
         
         // Track ended if we're within 0.5s of the end
         let epsilon: TimeInterval = 0.5
@@ -1755,7 +1754,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Uses epsilon tolerance to handle floating-point precision errors
     /// - Note: Now checks repeatMode instead of enableLooping (Phase 3)
     /// - Note: For .singleTrack mode, uses adapted crossfade duration to match actual execution
-    private func shouldTriggerLoopCrossfade(_ position: PlaybackPosition) -> Bool {
+    private func shouldTriggerLoopCrossfade(_ position: PlaybackPosition) async -> Bool {
         // Only loop if repeat mode is not .off
         guard configuration.repeatMode != .off else { return false }
         
@@ -1763,7 +1762,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard activeCrossfadeOperation != .automaticLoop else { return false }
         
         // Only trigger when playing
-        guard state == .playing else { return false }
+        guard await state == .playing else { return false }
         
         // Calculate trigger point (crossfade duration before end)
         // For .singleTrack mode, use ADAPTED values to match loopCurrentTrackWithFade()
@@ -2226,9 +2225,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Guard: only pause if playing or preparing
-        guard state == .playing || state == .preparing else {
+        let currentState = await state
+        guard currentState == .playing || currentState == .preparing else {
             // If already paused or finished, just pause overlay and return
-            if state == .paused || state == .finished {
+            if currentState == .paused || currentState == .finished {
                 await audioEngine.pauseOverlay()
                 return
             }
@@ -2238,7 +2238,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Pause main player via state machine
-        await stateMachine.enterPaused()
+        await updateState(.paused)
         
         // Pause overlay separately
         await audioEngine.pauseOverlay()
@@ -2262,14 +2262,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// ```
     public func resumeAll() async {
         // Guard: only resume if paused
-        guard state == .paused else {
+        guard await state == .paused else {
             // If already playing, just resume overlay and return
-            if state == .playing {
+            if await state == .playing {
                 await audioEngine.resumeOverlay()
                 return
             }
             // If finished - can't resume, but still try overlay
-            if state == .finished {
+            if await state == .finished {
                 await audioEngine.resumeOverlay()
                 return
             }
@@ -2279,7 +2279,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Resume main player via state machine
-        await stateMachine.enterPlaying()
+        await updateState(.playing)
         
         // Resume overlay separately
         await audioEngine.resumeOverlay()
@@ -2314,7 +2314,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         stopPlaybackTimer()
         
         // Stop main player via state machine (transition to finished)
-        await stateMachine.enterFinished()
+        await updateState(.finished)
         
         // Stop overlay separately
         await audioEngine.stopOverlay()
@@ -2459,7 +2459,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Called asynchronously from Task in resume() to avoid blocking
     private func cleanupResumedCrossfade() async {
         Self.logger.debug("[CLEANUP] ⚙️ cleanupResumedCrossfade() STARTED")
-        Self.logger.debug("[CLEANUP] Current state: \(await stateMachine.currentState), pausedCrossfadeState: \(pausedCrossfadeState != nil ? "EXISTS" : "nil")")
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        Self.logger.debug("[CLEANUP] Current state: \(currentState), pausedCrossfadeState: \(pausedCrossfadeState != nil ? "EXISTS" : "nil")")
         
         // CRITICAL: Check if paused during cleanup execution
         // Task.isCancelled is NOT reliable in Swift - must check state manually!
@@ -2481,16 +2482,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Clear operation state
         activeCrossfadeOperation = nil
     }
-}
 
-// MARK: - AudioStateMachineContext
+// MARK: - State Machine removed - using PlaybackStateCoordinator
+// AudioStateMachineContext extension removed
 
-extension AudioPlayerService: AudioStateMachineContext {
-    func stateDidChange(to state: PlayerState) async {
-        self._state = state  // SSOT: Only update point
-        notifyObservers(stateChange: state)
-    }
-    
     func startEngine() async throws {
         try await audioEngine.start()
         
@@ -2565,11 +2560,11 @@ extension AudioPlayerService: AudioStateMachineContext {
     }
     
     func transitionToPlaying() async {
-        await stateMachine.enterPlaying()
+        await updateState(.playing)
     }
     
     func transitionToFailed(error: AudioPlayerError) async {
-        await stateMachine.enterFailed(error: error)
+        await updateState(.failed(error))
     }
     
     // MARK: - Sound Effects API

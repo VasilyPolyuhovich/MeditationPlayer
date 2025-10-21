@@ -14,10 +14,14 @@ struct ProsperPlayerDemoApp: App {
                     .task {
                         // Initialize AudioService with async init
                         // This performs full setup (audio session, engine, nodes)
-                        let audioService = await AudioPlayerService()
-                        
-                        // Initialize ViewModel
-                        viewModel = await PlayerViewModel(audioService: audioService)
+                        do {
+                            let audioService = try await AudioPlayerService()
+                            
+                            // Initialize ViewModel
+                            viewModel = await PlayerViewModel(audioService: audioService)
+                        } catch {
+                            print("Failed to initialize AudioPlayerService: \(error)")
+                        }
                     }
             }
         }
