@@ -1319,17 +1319,20 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Clear any paused crossfade state (starting new operation)
         clearPausedCrossfadeIfNeeded()
 
-        // If crossfade in progress - rollback and retry
+        // If crossfade in progress - smoothly rollback and continue immediately
         if activeCrossfadeOperation != nil {
-            // 1. Rollback current transition
-            await audioEngine.cancelCrossfadeAndStopInactive()
+            Self.logger.debug("[REPLACE] Crossfade in progress, rolling back smoothly")
+            
+            // 1. Smoothly rollback current crossfade (0.3s quick fade to active)
+            _ = await audioEngine.rollbackCrossfade(rollbackDuration: 0.3)
+            
+            // 2. Clear crossfade tracking
             activeCrossfadeOperation = nil
             crossfadeProgressTask?.cancel()
             crossfadeProgressTask = nil
             currentCrossfadeProgress = .idle
-
-            // 2. Short delay before retry
-            try await Task.sleep(nanoseconds: UInt64(retryDelay * 1_000_000_000))
+            
+            // No delay needed - rollback was smooth, can proceed immediately
         }
         
         // CRITICAL: Remember state BEFORE any async operations
