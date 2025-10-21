@@ -27,6 +27,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Internal components
     internal let audioEngine: AudioEngineActor  // Allow internal access for playlist API
+    private let playbackStateCoordinator: PlaybackStateCoordinator  // SSOT for player state
     internal let sessionManager: AudioSessionManager  // Allow internal access for playlist API
     // RemoteCommandManager is now @MainActor isolated for thread safety
     // Must be created in setup() due to MainActor isolation
@@ -155,6 +156,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self._state = .finished
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
+        self.playbackStateCoordinator = PlaybackStateCoordinator(audioEngine: audioEngine)
         self.sessionManager = AudioSessionManager.shared  // Use singleton
         // Initialize playlist manager with configuration
         self.playlistManager = PlaylistManager(configuration: configuration)
