@@ -210,10 +210,10 @@ actor AudioEngineActor {
             return
         }
         
-        // ✅ FIX: Always check if we need to reschedule after pause
+        // ✅ FIX: Always check if we need to reschedule after pause or fresh load
         // AVFoundation quirk: isPlaying may be unreliable after pause()
-        // Strategy: If player is not playing AND we have an offset, it's a resume
-        let needsReschedule = !player.isPlaying && offset > 0
+        // Strategy: If player is not playing, we need to schedule (either resume or fresh play)
+        let needsReschedule = !player.isPlaying
         
         if needsReschedule {
             // Resume from saved position

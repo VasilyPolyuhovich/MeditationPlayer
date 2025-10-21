@@ -1354,9 +1354,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 await stateMachine.enterPlaying()
             }
         } else {
-            // Paused or stopped during load - just switch files without starting
+            // Paused or stopped during load - switch files without starting
             await audioEngine.switchActivePlayer()
             await audioEngine.stopInactivePlayer()
+            // Note: New active player will be scheduled on resume via play()
         }
     }
 
