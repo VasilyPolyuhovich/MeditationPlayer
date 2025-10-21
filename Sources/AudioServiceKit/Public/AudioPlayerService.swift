@@ -343,6 +343,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Update now playing info
         await updateNowPlayingInfo()
         
+        // Start audio engine and transition to playing
+        try await startEngine()
+        await updateState(.playing)
+        
         // Start playback timer
         startPlaybackTimer()
     }
