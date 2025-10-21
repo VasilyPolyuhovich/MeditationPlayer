@@ -261,9 +261,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // Load audio file
-        let trackInfo = try await audioEngine.loadAudioFile(url: url)
-        self.currentTrack = trackInfo
+        // Load audio file and set track in coordinator
+        _ = try await audioEngine.loadAudioFile(url: url)
+        // Note: currentTrack is legacy, should be removed in future refactoring
+        // For now, Coordinator holds the source of truth via atomicSwitch
+        await playbackStateCoordinator.atomicSwitch(newTrack: track)
         
         // Enter preparing state
         let currentState = await playbackStateCoordinator.getPlaybackMode()
