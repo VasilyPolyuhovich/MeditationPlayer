@@ -51,7 +51,9 @@ actor PlaybackStateCoordinator {
         let activePlayer: PlayerNode
         let playbackMode: PlayerState
         let activeTrack: Track?
+        let activeTrackInfo: TrackInfo?
         let inactiveTrack: Track?
+        let inactiveTrackInfo: TrackInfo?
         let activeMixerVolume: Float
         let inactiveMixerVolume: Float
         let isCrossfading: Bool
@@ -90,31 +92,37 @@ actor PlaybackStateCoordinator {
                 activePlayer: activePlayer,
                 playbackMode: mode,
                 activeTrack: activeTrack,
+                activeTrackInfo: activeTrackInfo,
                 inactiveTrack: inactiveTrack,
+                inactiveTrackInfo: inactiveTrackInfo,
                 activeMixerVolume: activeMixerVolume,
                 inactiveMixerVolume: inactiveMixerVolume,
                 isCrossfading: isCrossfading
             )
         }
         
-        func withActiveTrack(_ track: Track?) -> CoordinatorState {
+        func withActiveTrack(_ track: Track?, info: TrackInfo? = nil) -> CoordinatorState {
             CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: track,
+                activeTrackInfo: info,
                 inactiveTrack: inactiveTrack,
+                inactiveTrackInfo: inactiveTrackInfo,
                 activeMixerVolume: activeMixerVolume,
                 inactiveMixerVolume: inactiveMixerVolume,
                 isCrossfading: isCrossfading
             )
         }
         
-        func withInactiveTrack(_ track: Track?) -> CoordinatorState {
+        func withInactiveTrack(_ track: Track?, info: TrackInfo? = nil) -> CoordinatorState {
             CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
+                activeTrackInfo: activeTrackInfo,
                 inactiveTrack: track,
+                inactiveTrackInfo: info,
                 activeMixerVolume: activeMixerVolume,
                 inactiveMixerVolume: inactiveMixerVolume,
                 isCrossfading: isCrossfading
@@ -126,7 +134,9 @@ actor PlaybackStateCoordinator {
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
+                activeTrackInfo: activeTrackInfo,
                 inactiveTrack: inactiveTrack,
+                inactiveTrackInfo: inactiveTrackInfo,
                 activeMixerVolume: active,
                 inactiveMixerVolume: inactive,
                 isCrossfading: isCrossfading
@@ -138,7 +148,9 @@ actor PlaybackStateCoordinator {
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
+                activeTrackInfo: activeTrackInfo,
                 inactiveTrack: inactiveTrack,
+                inactiveTrackInfo: inactiveTrackInfo,
                 activeMixerVolume: activeMixerVolume,
                 inactiveMixerVolume: inactiveMixerVolume,
                 isCrossfading: crossfading
@@ -257,7 +269,9 @@ actor PlaybackStateCoordinator {
             activePlayer: .a,
             playbackMode: .finished,
             activeTrack: nil,
+            activeTrackInfo: nil,
             inactiveTrack: nil,
+            inactiveTrackInfo: nil,
             activeMixerVolume: 1.0,
             inactiveMixerVolume: 0.0,
             isCrossfading: false
@@ -277,7 +291,9 @@ actor PlaybackStateCoordinator {
             activePlayer: state.activePlayer.opposite,
             playbackMode: state.playbackMode,
             activeTrack: state.inactiveTrack,  // Swap tracks
+            activeTrackInfo: state.inactiveTrackInfo,
             inactiveTrack: state.activeTrack,
+            inactiveTrackInfo: state.activeTrackInfo,
             activeMixerVolume: state.inactiveMixerVolume,  // Swap volumes
             inactiveMixerVolume: state.activeMixerVolume,
             isCrossfading: state.isCrossfading
@@ -308,10 +324,10 @@ actor PlaybackStateCoordinator {
     }
     
     /// Atomically load track on inactive player
-    func loadTrackOnInactive(_ track: Track) {
+    func loadTrackOnInactive(_ track: Track, info: TrackInfo? = nil) {
         Self.logger.debug("[StateCoordinator] → loadTrackOnInactive(\(track.url.lastPathComponent))")
         
-        let newState = state.withInactiveTrack(track)
+        let newState = state.withInactiveTrack(track, info: info)
         
         guard newState.isConsistent else {
             Self.logger.error("[StateCoordinator] ❌ Invalid state after loading track - rollback")
@@ -349,7 +365,7 @@ actor PlaybackStateCoordinator {
     
     /// Atomically switch to new track (combines load + switch)
     /// Use this for pause + skip scenario
-    func atomicSwitch(newTrack: Track, mode: PlayerState? = nil) {
+    func atomicSwitch(newTrack: Track, trackInfo: TrackInfo? = nil, mode: PlayerState? = nil) {
         Self.logger.debug("[StateCoordinator] → atomicSwitch(\(newTrack.url.lastPathComponent))")
         
         let targetMode = mode ?? state.playbackMode
@@ -359,7 +375,9 @@ actor PlaybackStateCoordinator {
             activePlayer: state.activePlayer.opposite,
             playbackMode: targetMode,
             activeTrack: newTrack,  // New track becomes active
+            activeTrackInfo: trackInfo,
             inactiveTrack: state.activeTrack,  // Old active becomes inactive
+            inactiveTrackInfo: state.activeTrackInfo,
             activeMixerVolume: 1.0,  // Reset to full volume
             inactiveMixerVolume: 0.0,
             isCrossfading: false
@@ -395,6 +413,16 @@ actor PlaybackStateCoordinator {
     /// Check if there's an active crossfade operation
     func hasActiveCrossfade() -> Bool {
         return activeCrossfade != nil
+    }
+    
+    /// Get current active track
+    func getActiveTrack() -> Track? {
+        return state.activeTrack
+    }
+    
+    /// Get current active track info
+    func getActiveTrackInfo() -> TrackInfo? {
+        return state.activeTrackInfo
     }
     
     /// Check if there's a paused crossfade
@@ -457,6 +485,7 @@ actor PlaybackStateCoordinator {
     /// - Returns: CrossfadeResult (.completed, .paused, .cancelled)
     func startCrossfade(
         to track: Track,
+        trackInfo: TrackInfo? = nil,
         duration: TimeInterval,
         curve: FadeCurve,
         operation: CrossfadeOperation
@@ -496,8 +525,13 @@ actor PlaybackStateCoordinator {
         
         // 5. Load track on inactive player
         Self.logger.debug("[Coordinator] Loading track on inactive player...")
-        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
-        loadTrackOnInactive(track)
+        let inactiveTrackInfo: TrackInfo
+        if let providedInfo = trackInfo {
+            inactiveTrackInfo = providedInfo
+        } else {
+            inactiveTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
+        }
+        loadTrackOnInactive(track, info: inactiveTrackInfo)
         
         // 6. Mark as crossfading
         updateCrossfading(true)

@@ -23,14 +23,22 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private var _cachedState: PlayerState = .finished
     public var state: PlayerState { _cachedState }
     
+    // Cached TrackInfo for sync protocol conformance
+    private var _cachedTrackInfo: TrackInfo? = nil
+    public var currentTrack: TrackInfo? { _cachedTrackInfo }
+    
     // Helper: Update state via coordinator and sync cache
     private func updateState(_ newState: PlayerState) async {
         await playbackStateCoordinator.updateMode(newState)
         _cachedState = newState
         notifyObservers(stateChange: newState)
     }
+    
+    // Helper: Sync cached TrackInfo from coordinator
+    private func syncCachedTrackInfo() async {
+        _cachedTrackInfo = await playbackStateCoordinator.getActiveTrackInfo()
+    }
     public private(set) var configuration: PlayerConfiguration  // Public read, private write (use updateConfiguration)
-    public internal(set) var currentTrack: TrackInfo?  // Public read, internal write for playlist API
     public private(set) var playbackPosition: PlaybackPosition?
     
     // Internal components
@@ -262,10 +270,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         // Load audio file and set track in coordinator
-        _ = try await audioEngine.loadAudioFile(url: url)
-        // Note: currentTrack is legacy, should be removed in future refactoring
-        // For now, Coordinator holds the source of truth via atomicSwitch
-        await playbackStateCoordinator.atomicSwitch(newTrack: track)
+        let trackInfo = try await audioEngine.loadAudioFile(url: url)
+        await playbackStateCoordinator.atomicSwitch(newTrack: track, trackInfo: trackInfo)
+        await syncCachedTrackInfo()
         
         // Enter preparing state
         let currentState = await playbackStateCoordinator.getPlaybackMode()
@@ -446,8 +453,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Reset ALL state for clean restart (including crossfade flags)
         playbackPosition = nil
-        currentTrack = nil
-        // currentTrackURL removed - coordinator manages active track
+        // currentTrack removed - coordinator manages active track via atomicSwitch()
         currentRepeatCount = 0
         // Removed: activeCrossfadeOperation = nil (managed by coordinator)
         
@@ -730,8 +736,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await syncConfigurationToPlaylistManager()
         
         // Clear all state (including crossfade flags)
-        currentTrack = nil
-        // currentTrackURL removed - coordinator manages active track
+        // currentTrack removed - coordinator manages active track via atomicSwitch()
         playbackPosition = nil
         currentRepeatCount = 0
         // Removed: activeCrossfadeOperation = nil (managed by coordinator)
@@ -771,8 +776,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // iOS manages session lifecycle automatically
         
         // Clear all state (including crossfade flags)
-        currentTrack = nil
-        // currentTrackURL removed - coordinator manages active track
+        // currentTrack removed - coordinator manages active track via atomicSwitch()
         playbackPosition = nil
         currentRepeatCount = 0
         // Removed: activeCrossfadeOperation = nil (managed by coordinator)
@@ -894,7 +898,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
         // Load first track of new playlist on secondary player
         let firstTrack = tracks[0]
-        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrack.url)
+        let firstTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrack.url)
 
         // Recheck state after async (actor reentrancy protection)
         let isStillPlaying = await state == .playing
@@ -907,6 +911,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Execute crossfade with automatic pause handling
             let result = try await playbackStateCoordinator.startCrossfade(
                 to: firstTrack,
+                trackInfo: firstTrackInfo,
                 duration: validDuration,
                 curve: configuration.fadeCurve,
                 operation: .manualChange
@@ -927,7 +932,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await playlistManager.replacePlaylist(tracks)
         
         // 8. Update current track state via coordinator
-        await playbackStateCoordinator.atomicSwitch(newTrack: firstTrack)
+        await playbackStateCoordinator.atomicSwitch(newTrack: firstTrack, trackInfo: firstTrackInfo)
+        await syncCachedTrackInfo()
         // currentTrackURL removed - coordinator manages active track
         
         // 9. Reset counters
@@ -989,7 +995,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         guard let firstTrack = Track(url: firstTrackURL) else {
             throw AudioPlayerError.fileLoadFailed(reason: "File not found: \(firstTrackURL.lastPathComponent)")
         }
-        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrackURL)
+        let firstTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: firstTrackURL)
 
         // Recheck state after async (actor reentrancy protection)
         let isStillPlaying = await state == .playing
@@ -1002,6 +1008,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Execute crossfade with automatic pause handling
             let result = try await playbackStateCoordinator.startCrossfade(
                 to: firstTrack,
+                trackInfo: firstTrackInfo,
                 duration: validDuration,
                 curve: configuration.fadeCurve,
                 operation: .manualChange
@@ -1022,7 +1029,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 7. Update PlaylistManager
         await playlistManager.replacePlaylist(tracks)
         
-        // 8. Current track already set by coordinator.atomicSwitch()
+        // 8. Update current track state via coordinator
+        await playbackStateCoordinator.atomicSwitch(newTrack: firstTrack, trackInfo: firstTrackInfo)
+        await syncCachedTrackInfo()
         
         // 9. Reset counters
         currentRepeatCount = 0
@@ -1111,8 +1120,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             Self.logger.debug("[SERVICE] Not playing, switching without crossfade")
             
             // Load on inactive and switch
-            _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
-            await playbackStateCoordinator.atomicSwitch(newTrack: track)
+            let trackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
+            await playbackStateCoordinator.atomicSwitch(newTrack: track, trackInfo: trackInfo)
+            await syncCachedTrackInfo()
             
             // Switch engine players
             await audioEngine.switchActivePlayerWithVolume()
@@ -1217,8 +1227,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // MARK: - Now Playing Updates
     
-    internal func updateNowPlayingInfo() async {  // Allow internal access for playlist API
-        guard let track = currentTrack else { return }
+    internal func updateNowPlayingInfo() async {
+        guard let trackInfo = await playbackStateCoordinator.getActiveTrackInfo() else { return }
         
         // Read actor-isolated properties before MainActor hop
         let currentTime = playbackPosition?.currentTime ?? 0
@@ -1227,9 +1237,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         await MainActor.run {
             manager.updateNowPlayingInfo(
-                title: track.title,
-                artist: track.artist,
-                duration: track.duration,
+                title: trackInfo.title,
+                artist: trackInfo.artist,
+                duration: trackInfo.duration,
                 elapsedTime: currentTime,
                 playbackRate: playbackRate
             )
@@ -1612,7 +1622,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Load same file on secondary player
         do {
             guard let activeTrack = await playbackStateCoordinator.getCurrentTrack() else { return }
-            _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: currentURL)
+            let loopTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: currentURL)
 
             // Prepare secondary player
             await audioEngine.prepareSecondaryPlayer()
@@ -1621,6 +1631,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Note: Loop uses .automaticLoop operation type
             let result = try await playbackStateCoordinator.startCrossfade(
                 to: activeTrack,
+                trackInfo: loopTrackInfo,
                 duration: crossfadeDuration,
                 curve: configuration.fadeCurve,
                 operation: .automaticLoop
@@ -1669,7 +1680,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Load next track on secondary player
         do {
-            _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: nextURL)
+            let nextTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: nextURL)
 
             // Prepare secondary player
             await audioEngine.prepareSecondaryPlayer()
@@ -1677,6 +1688,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Execute crossfade with automatic pause handling
             let result = try await playbackStateCoordinator.startCrossfade(
                 to: nextTrack,
+                trackInfo: nextTrackInfo,
                 duration: configuration.crossfadeDuration,
                 curve: configuration.fadeCurve,
                 operation: .automaticLoop
