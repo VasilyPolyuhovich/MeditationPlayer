@@ -352,14 +352,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
-        let hasCleanupTask = crossfadeCleanupTask != nil
-        let currentState = await playbackStateCoordinator.getPlaybackMode()
-        Self.logger.debug("[PAUSE] ⏸️ pause() called")
-        Self.logger.debug("[PAUSE] State: \(currentState) | Crossfade active: \(activeCrossfadeOperation != nil) | Already paused: \(pausedCrossfadeState != nil) | Cleanup task running: \(hasCleanupTask)")
+        Self.logger.debug("[SERVICE] pause() → coordinator")
         
-        // Guard: only pause if playing or preparing (to prevent Error 4)
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        
+        // Guard: only pause if playing or preparing
         guard currentState == .playing || currentState == .preparing else {
-            // If already paused or finished, just return
             if currentState == .paused || currentState == .finished {
                 return
             }
@@ -369,126 +367,34 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // Save crossfade state if active (for resume)
-        // Check both activeCrossfadeOperation and pausedCrossfadeState (for repeated pause)
-        if activeCrossfadeOperation != nil || pausedCrossfadeState != nil {
-            // Only save state if not already paused
-            if pausedCrossfadeState == nil {
-                // Get current crossfade state from engine
-                if let engineState = await audioEngine.getCrossfadeState() {
-                    // Calculate progress from currentCrossfadeProgress
-                    let progress = Float(currentCrossfadeProgress.progress)
-                    
-                    // Create paused state snapshot
-                    pausedCrossfadeState = PausedCrossfadeState(
-                        progress: progress,
-                        originalDuration: configuration.crossfadeDuration,
-                        curve: configuration.fadeCurve,
-                        activeMixerVolume: engineState.activeMixerVolume,
-                        inactiveMixerVolume: engineState.inactiveMixerVolume,
-                        activePlayerPosition: engineState.activePlayerPosition,
-                        inactivePlayerPosition: engineState.inactivePlayerPosition,
-                        activePlayer: engineState.activePlayer,
-                        operation: activeCrossfadeOperation!
-                    )
-                    
-                    Self.logger.debug("[CROSSFADE_PAUSE] Saved state: progress=\(progress), strategy=\(pausedCrossfadeState!.resumeStrategy)")
-                }
-                
-                // Check if state was successfully saved
-                guard pausedCrossfadeState != nil else {
-                    // State save failed - log error and use normal pause
-                    Self.logger.error("[CROSSFADE_PAUSE] ❌ FAILED to get crossfade state from engine!")
-                    Self.logger.error("[CROSSFADE_PAUSE] ⚠️ This may happen during playlist replacement or if players are not ready")
-                    Self.logger.error("[CROSSFADE_PAUSE] ⚠️ Cancelling all crossfade tasks and using normal pause to avoid issues")
-                    
-                    // Cancel active crossfade task in AudioEngineActor
-                    Self.logger.debug("[CROSSFADE_PAUSE] ❌ Cancelling active crossfade task...")
-                    await audioEngine.cancelActiveCrossfade()
-                    
-                    // Cancel progress observation task
-                    Self.logger.debug("[CROSSFADE_PAUSE] ❌ Cancelling progress observation task...")
-                    crossfadeProgressTask?.cancel()
-                    crossfadeProgressTask = nil
-                    updateCrossfadeProgress(.idle)  // Notify observers that crossfade is cancelled
-                    
-                    // Cancel cleanup task to prevent it from running after crossfade completes
-                    if crossfadeCleanupTask != nil {
-                        Self.logger.debug("[CROSSFADE_PAUSE] ⚠️ CLEANUP TASK IS RUNNING - cancelling to prevent issues!")
-                        crossfadeCleanupTask?.cancel()
-                        crossfadeCleanupTask = nil
-                        Self.logger.debug("[CROSSFADE_PAUSE] ✅ Cleanup task cancelled successfully")
-                    } else {
-                        Self.logger.debug("[CROSSFADE_PAUSE] ✓ No cleanup task running")
-                    }
-                    
-                    // Clear crossfade operation
-                    activeCrossfadeOperation = nil
-                    
-                    // Use normal pause instead
-                    await updateState(.paused)
-                    await updateNowPlayingPlaybackRate(0.0)
-                    return
-                }
-                
-                // Pause both players (don't stop inactive player)
-                Self.logger.debug("[CROSSFADE_PAUSE] ⏸️ Pausing both players...")
-                await audioEngine.pauseBothPlayersDuringCrossfade()
-
-                // Cancel active crossfade task in AudioEngineActor
-                Self.logger.debug("[CROSSFADE_PAUSE] ❌ Cancelling active crossfade task...")
-                await audioEngine.cancelActiveCrossfade()
-
-                // Cancel progress observation task
-                Self.logger.debug("[CROSSFADE_PAUSE] ❌ Cancelling progress observation task...")
-                crossfadeProgressTask?.cancel()
-                crossfadeProgressTask = nil
-                updateCrossfadeProgress(.idle)  // Notify observers that crossfade is paused
-                
-                // Cancel cleanup task to prevent race condition
-                if crossfadeCleanupTask != nil {
-                    Self.logger.debug("[CROSSFADE_PAUSE] ⚠️ CLEANUP TASK IS RUNNING - cancelling to prevent race condition!")
-                    crossfadeCleanupTask?.cancel()
-                    crossfadeCleanupTask = nil
-                    Self.logger.debug("[CROSSFADE_PAUSE] ✅ Cleanup task cancelled successfully")
-                } else {
-                    Self.logger.debug("[CROSSFADE_PAUSE] ✓ No cleanup task running (already completed or not started)")
-                }
-                
-                // Don't clear activeCrossfadeOperation - keep it for repeated pause detection
-            } else {
-                Self.logger.debug("[CROSSFADE_PAUSE] ➡️ Repeated pause detected - state already saved, skipping")
-            }
-
-            // Use state machine (pausePlayback will check pausedCrossfadeState)
-            Self.logger.debug("[CROSSFADE_PAUSE] ✅ Entering paused state...")
-            await updateState(.paused)
-            Self.logger.debug("[CROSSFADE_PAUSE] ✓ Pause completed successfully")
-            
-            Self.logger.debug("[CROSSFADE_PAUSE] Paused during crossfade, players frozen at current volumes")
-        } else {
-            // Normal pause (no crossfade)
-            Self.logger.debug("[PAUSE] pausePlayback: normal pause")
-            
-            // Pause playback (pause engine, stop timer, capture position)
-            await pausePlayback()
-            
-            // Transition to paused state
-            await updateState(.paused)
-        }
+        // Delegate crossfade pause to coordinator (if any active)
+        _ = try await playbackStateCoordinator.pauseCrossfade()
+        
+        // Pause engine
+        await pausePlayback()
+        
+        // Update state
+        await playbackStateCoordinator.updateMode(.paused)
         
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
     }
     
     public func resume() async throws {
+        Self.logger.debug("[SERVICE] resume() → coordinator")
+        
         let currentState = await playbackStateCoordinator.getPlaybackMode()
         
-        // Guard: only resume if paused or finished
-        guard currentState == .paused || currentState == .finished else {
-            // If already playing, just return
+        // Guard: only resume if paused
+        guard currentState == .paused else {
             if currentState == .playing {
                 return
+            }
+            if currentState == .finished {
+                throw AudioPlayerError.invalidState(
+                    current: "finished",
+                    attempted: "resume - use startPlaying instead"
+                )
             }
             throw AudioPlayerError.invalidState(
                 current: currentState.description,
@@ -496,97 +402,24 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // If finished - need to restart
-        if currentState == .finished {
-            throw AudioPlayerError.invalidState(
-                current: "finished",
-                attempted: "resume - use startPlaying instead"
-            )
+        // Try resume crossfade from coordinator (if any paused)
+        let resumedCrossfade = try await playbackStateCoordinator.resumeCrossfade()
+        
+        if !resumedCrossfade {
+            // No crossfade to resume - normal resume
+            Self.logger.debug("[SERVICE] Normal resume (no paused crossfade)")
+            
+            // Resume playback
+            try await resumePlayback()
         }
         
-        // Check if we need to resume crossfade
-        if let pausedState = pausedCrossfadeState {
-            Self.logger.debug("[CROSSFADE_RESUME] ▶️ RESUMING CROSSFADE: strategy=\(pausedState.resumeStrategy), progress=\(pausedState.progress * 100)%")
-            Self.logger.debug("[CROSSFADE_RESUME] State snapshot: activeMixer=\(pausedState.activeMixerVolume), inactiveMixer=\(pausedState.inactiveMixerVolume)")
-            
-            // Determine resume parameters based on strategy
-            let resumeDuration: TimeInterval
-            let startVolumes: (active: Float, inactive: Float)
-            
-            switch pausedState.resumeStrategy {
-            case .continueFromProgress:
-                // Progress <50%: continue with remaining duration
-                resumeDuration = pausedState.originalDuration * TimeInterval(1.0 - pausedState.progress)
-                startVolumes = (pausedState.activeMixerVolume, pausedState.inactiveMixerVolume)
-                Self.logger.debug("[CROSSFADE_RESUME] Continue from progress: remaining=\(resumeDuration)s, volumes=(\(startVolumes.active), \(startVolumes.inactive))")
-                
-            case .quickFinish:
-                // Progress >=50%: quick finish in 1 second
-                resumeDuration = 1.0
-                startVolumes = (pausedState.activeMixerVolume, pausedState.inactiveMixerVolume)
-                Self.logger.debug("[CROSSFADE_RESUME] Quick finish: duration=1.0s, volumes=(\(startVolumes.active), \(startVolumes.inactive))")
-            }
-            
-            // Restore operation state
-            activeCrossfadeOperation = pausedState.operation
-
-            // Use state machine but it will skip reschedule due to flag
-            await updateState(.playing)
-
-            // Start resumed crossfade
-            let progressStream = await audioEngine.resumeCrossfadeFromState(
-                duration: resumeDuration,
-                curve: pausedState.curve,
-                startVolumes: startVolumes
-            )
-
-            // Observe progress
-            crossfadeProgressTask = Task { [weak self] in
-                for await progress in progressStream {
-                    await self?.updateCrossfadeProgress(progress)
-                }
-            }
-
-            // CRITICAL: Clear paused state IMMEDIATELY (don't wait for completion)
-            // This allows new track changes to work correctly
-            pausedCrossfadeState = nil
-
-            // Cleanup asynchronously after crossfade completes (don't block resume())
-            // Store task reference so it can be cancelled on pause
-            Self.logger.debug("[CLEANUP_TASK] ▶️ Starting async cleanup task (will run after crossfade completes)")
-            crossfadeCleanupTask = Task { [weak self] in
-                Self.logger.debug("[CLEANUP_TASK] ⏳ Waiting for crossfade progress task to complete...")
-                await self?.crossfadeProgressTask?.value
-                Self.logger.debug("[CLEANUP_TASK] ✓ Crossfade progress task completed")
-                
-                // Check if task was cancelled before cleanup
-                if Task.isCancelled {
-                    Self.logger.debug("[CLEANUP_TASK] ❌ CANCELLED - cleanup will NOT run (race condition avoided!)")
-                    return
-                }
-                
-                Self.logger.debug("[CLEANUP_TASK] ✅ Not cancelled - proceeding with cleanup")
-                await self?.cleanupResumedCrossfade()
-                Self.logger.debug("[CLEANUP_TASK] ✓ Cleanup task finished successfully")
-            }
-            
-            Self.logger.debug("[CROSSFADE_RESUME] ✅ Resume completed - crossfade is running, cleanup scheduled")
-            
-        } else {
-            // Normal resume without crossfade
-            Self.logger.debug("[RESUME] Normal resume (no crossfade)")
-            
-            // Resume playback (play engine, restart timer)
-            try await resumePlayback()
-            
-            // Transition to playing state
-            await updateState(.playing)
-        }
+        // Update state
+        await playbackStateCoordinator.updateMode(.playing)
         
         // Update UI
         await updateNowPlayingPlaybackRate(1.0)
     }
-    
+
     /// Stop playback with optional fade out
     /// - Parameter fadeDuration: Duration of fade out in seconds (0.0 = instant stop, clamped to 0.0-10.0)
     /// - Note: Default is instant stop (fadeDuration = 0.0)
@@ -1311,65 +1144,44 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///   - crossfadeDuration: Crossfade duration in seconds
     ///   - retryDelay: Delay before retry if crossfade already in progress
     internal func replaceCurrentTrack(track: Track, crossfadeDuration: TimeInterval, retryDelay: TimeInterval = 1.5) async throws {
-        let url = track.url
-
+        Self.logger.debug("[SERVICE] replaceCurrentTrack → coordinator")
+        
         // Validate and clamp crossfade duration
         let validatedDuration = max(1.0, min(30.0, crossfadeDuration))
-
-        // Clear any paused crossfade state (starting new operation)
-        clearPausedCrossfadeIfNeeded()
-
-        // If crossfade in progress - smoothly rollback and continue immediately
-        if activeCrossfadeOperation != nil {
-            Self.logger.debug("[REPLACE] Crossfade in progress, rolling back smoothly")
-            
-            // 1. Smoothly rollback current crossfade (0.3s quick fade to active)
-            _ = await audioEngine.rollbackCrossfade(rollbackDuration: 0.3)
-            
-            // 2. Clear crossfade tracking
-            activeCrossfadeOperation = nil
-            crossfadeProgressTask?.cancel()
-            crossfadeProgressTask = nil
-            currentCrossfadeProgress = .idle
-            
-            // No delay needed - rollback was smooth, can proceed immediately
-        }
         
         // CRITICAL: Remember state BEFORE any async operations
-        let wasPlaying = await state == .playing
+        let wasPlaying = await playbackStateCoordinator.getPlaybackMode() == .playing
         
-        // Load new file on secondary player (suspension point)
-        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: url)
-        
-        // CRITICAL: Recheck state after async operation (actor reentrancy protection)
-        let isStillPlaying = await state == .playing
-        
-        // Decision: crossfade only if BOTH conditions true
-        if wasPlaying && isStillPlaying {
-            // Still playing - do crossfade
-            await audioEngine.prepareSecondaryPlayer()
-
-            // Execute crossfade with automatic pause handling
-            let result = await executeCrossfade(
+        // Decision: crossfade only if playing
+        if wasPlaying {
+            // Delegate crossfade to coordinator
+            let result = try await playbackStateCoordinator.startCrossfade(
+                to: track,
                 duration: validatedDuration,
                 curve: configuration.fadeCurve,
                 operation: .manualChange
             )
-
-            // If paused, cleanup will be done on resume
+            
+            // Update now playing info
+            if result == .completed {
+                await updateNowPlayingInfo()
+            }
+            
+            // If paused during crossfade, nothing else to do
             if result == .paused {
                 return
             }
-
-            // CRITICAL FIX: Ensure state=.playing after crossfade
-            if await state != .playing {
-                await updateState(.playing)
-            }
         } else {
-            // Paused or stopped during load - switch files without starting
+            // Paused or stopped - load track without crossfade
+            Self.logger.debug("[SERVICE] Not playing, switching without crossfade")
+            
+            // Load on inactive and switch
+            _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
+            await playbackStateCoordinator.atomicSwitch(newTrack: track)
+            
+            // Switch engine players
             await audioEngine.switchActivePlayerWithVolume()
             await audioEngine.stopInactivePlayer()
-            // Note: New active player will be scheduled on resume via play()
         }
     }
 
@@ -2495,6 +2307,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 // AudioStateMachineContext extension removed
 
     func startEngine() async throws {
+        Self.logger.debug("[SERVICE] startEngine → coordinator")
+        
+        // Start engine (prepare + start)
         try await audioEngine.start()
         
         // Use pending fade-in if set, otherwise no fade (instant start)
@@ -2507,6 +2322,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             fadeCurve: configuration.fadeCurve
         )
         
+        // Delegate playback start to coordinator
+        _ = try await playbackStateCoordinator.startPlayback()
+        
         // Clear pending fade after use
         pendingFadeInDuration = 0.0
     }
@@ -2517,38 +2335,28 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     func pausePlayback() async {
+        Self.logger.debug("[SERVICE] pausePlayback → coordinator")
+        
         // Stop playback timer BEFORE pausing
-        // This prevents position updates during pause
         stopPlaybackTimer()
         
-        // During crossfade pause: just pause both players without fade
-        if pausedCrossfadeState != nil {
-            Self.logger.debug("[CROSSFADE_PAUSE] pausePlayback: skipping normal pause (crossfade mode)")
-            // Players already paused by pauseBothPlayersDuringCrossfade()
-            // Just capture position
-            playbackPosition = await audioEngine.getCurrentPosition()
-            return
-        }
-
-        Self.logger.debug("[PAUSE] pausePlayback: normal pause")
-        // Normal pause: pause audio engine (captures position accurately)
-        await audioEngine.pause()
+        // Delegate to coordinator
+        await playbackStateCoordinator.pausePlayback()
+        
+        // Capture position
+        playbackPosition = await audioEngine.getCurrentPosition()
     }
 
     func resumePlayback() async throws {
-        // Ensure session is active before resuming (protects against external interference)
-        try await ensureSessionActive()
-
-        // During crossfade resume: skip normal play (crossfade will handle it)
-        if pausedCrossfadeState != nil {
-            // Just restart timer, players will be resumed by crossfade
-            startPlaybackTimer()
-            return
-        }
+        Self.logger.debug("[SERVICE] resumePlayback → coordinator")
         
-        // Normal resume: play audio engine
-        await audioEngine.play()
-        // Restart playback timer after resume
+        // Ensure session is active before resuming
+        try await ensureSessionActive()
+        
+        // Delegate to coordinator
+        await playbackStateCoordinator.resumePlayback()
+        
+        // Restart playback timer
         startPlaybackTimer()
     }
     

@@ -647,6 +647,64 @@ actor PlaybackStateCoordinator {
         activeCrossfade = crossfade
     }
     
+    // MARK: - Engine Control (Phase 2.5)
+    
+    /// Start playback engine
+    /// - Returns: true if successfully started
+    func startPlayback() async throws -> Bool {
+        Self.logger.debug("[Coordinator] startPlayback()")
+        
+        // Validate we have active track
+        guard state.activeTrack != nil else {
+            Self.logger.error("[Coordinator] ❌ Cannot start - no active track")
+            throw AudioPlayerError.invalidState(
+                current: "no active track",
+                attempted: "start playback"
+            )
+        }
+        
+        // Start engine playback
+        await audioEngine.play()
+        
+        // Update state
+        updateMode(.playing)
+        
+        Self.logger.info("[Coordinator] ✅ Playback started")
+        return true
+    }
+    
+    /// Pause playback engine
+    func pausePlayback() async {
+        Self.logger.debug("[Coordinator] pausePlayback()")
+        
+        await audioEngine.pause()
+        
+        Self.logger.info("[Coordinator] ✅ Playback paused")
+    }
+    
+    /// Resume playback engine
+    func resumePlayback() async {
+        Self.logger.debug("[Coordinator] resumePlayback()")
+        
+        await audioEngine.play()
+        
+        Self.logger.info("[Coordinator] ✅ Playback resumed")
+    }
+    
+    /// Stop playback engine
+    func stopPlayback() async {
+        Self.logger.debug("[Coordinator] stopPlayback()")
+        
+        // Stop both players
+        await audioEngine.stopActivePlayer()
+        await audioEngine.stopInactivePlayer()
+        
+        // Reset mixers
+        await audioEngine.resetInactiveMixer()
+        
+        Self.logger.info("[Coordinator] ✅ Playback stopped")
+    }
+    
     // MARK: - Debug
     
     func logCurrentState() {
