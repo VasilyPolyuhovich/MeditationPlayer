@@ -50,7 +50,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Loop tracking
     private var currentRepeatCount = 0
-    internal var currentTrackURL: URL?  // Allow internal access for playlist API
+    // Removed: currentTrackURL - now using playbackStateCoordinator.getActiveTrack()?.url
     
     // Crossfade operation tracking (unified lock)
     private enum CrossfadeOperation {
@@ -295,7 +295,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await syncConfigurationToPlaylistManager()
         
         // Reset loop tracking
-        self.currentTrackURL = url
+        // currentTrackURL removed - coordinator manages active track
         self.currentRepeatCount = 0
         self.activeCrossfadeOperation = nil
         
@@ -674,7 +674,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Reset ALL state for clean restart (including crossfade flags)
         playbackPosition = nil
         currentTrack = nil
-        currentTrackURL = nil
+        // currentTrackURL removed - coordinator manages active track
         currentRepeatCount = 0
         activeCrossfadeOperation = nil
         
@@ -961,7 +961,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Clear all state (including crossfade flags)
         currentTrack = nil
-        currentTrackURL = nil
+        // currentTrackURL removed - coordinator manages active track
         playbackPosition = nil
         currentRepeatCount = 0
         activeCrossfadeOperation = nil
@@ -1002,7 +1002,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Clear all state (including crossfade flags)
         currentTrack = nil
-        currentTrackURL = nil
+        // currentTrackURL removed - coordinator manages active track
         playbackPosition = nil
         currentRepeatCount = 0
         activeCrossfadeOperation = nil
@@ -1157,7 +1157,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 8. Update current track state
         currentTrack = newTrack
-        currentTrackURL = firstTrack.url
+        // currentTrackURL removed - coordinator manages active track
         
         // 9. Reset counters
         currentRepeatCount = 0
@@ -1249,7 +1249,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 8. Update current track state
         currentTrack = newTrack
-        currentTrackURL = firstTrackURL
+        // currentTrackURL removed - coordinator manages active track
         
         // 9. Reset counters
         currentRepeatCount = 0
@@ -1819,7 +1819,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Dynamically adapts crossfade duration to track duration (max 40% of track)
     private func loopCurrentTrackWithFade() async {
         // 1. Validation
-        guard let currentURL = currentTrackURL,
+        guard let currentURL = await playbackStateCoordinator.getCurrentTrack()?.url,
               let position = playbackPosition else {
             Self.logger.error("Cannot loop: no current track URL or position")
             return
@@ -1930,7 +1930,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
             // Update current track info
             currentTrack = nextTrack
-            currentTrackURL = nextURL
+            // currentTrackURL removed - coordinator manages active track
 
             // Update now playing
             await updateNowPlayingInfo()
