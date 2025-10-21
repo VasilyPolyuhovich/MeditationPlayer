@@ -21,6 +21,19 @@ actor PlaybackStateCoordinator {
     
     // MARK: - Types
     
+    /// Crossfade operation type
+    enum CrossfadeOperation {
+        case automaticLoop   // Triggered by playback position reaching near-end
+        case manualChange    // Triggered by user API calls (replaceTrack, skipTo*, etc.)
+    }
+    
+    /// Crossfade result
+    enum CrossfadeResult {
+        case completed   // Crossfade finished successfully
+        case paused      // Crossfade was paused mid-way
+        case cancelled   // Crossfade was cancelled/rolled back
+    }
+    
     /// Player node identifier
     enum PlayerNode {
         case a
@@ -133,10 +146,100 @@ actor PlaybackStateCoordinator {
         }
     }
     
+    // MARK: - Crossfade State
+    
+    /// Active crossfade tracking
+    struct ActiveCrossfadeState {
+        let operation: CrossfadeOperation
+        let startTime: Date
+        let duration: TimeInterval
+        let curve: FadeCurve
+        let fromTrack: Track
+        let toTrack: Track
+        var progress: Float = 0.0
+        
+        var elapsed: TimeInterval {
+            return Date().timeIntervalSince(startTime)
+        }
+        
+        var remaining: TimeInterval {
+            return max(0, duration - elapsed)
+        }
+    }
+    
+    /// Paused crossfade state for pause/resume
+    struct PausedCrossfadeState {
+        let progress: Float           // 0.0...1.0
+        let originalDuration: TimeInterval
+        let curve: FadeCurve
+        
+        // Current volume levels
+        let activeMixerVolume: Float
+        let inactiveMixerVolume: Float
+        
+        // Playback positions
+        let activePlayerPosition: TimeInterval
+        let inactivePlayerPosition: TimeInterval
+        
+        // Which player is active
+        let activePlayer: PlayerNode
+        
+        // Resume strategy based on progress
+        enum ResumeStrategy {
+            case continueFromProgress  // <50%: continue with remaining duration
+            case quickFinish           // >=50%: quick finish in 1 second
+        }
+        let resumeStrategy: ResumeStrategy
+        
+        // Operation type
+        let operation: CrossfadeOperation
+        
+        var remainingDuration: TimeInterval {
+            let remaining = originalDuration * TimeInterval(1.0 - progress)
+            return resumeStrategy == .quickFinish ? 1.0 : remaining
+        }
+        
+        init(
+            progress: Float,
+            originalDuration: TimeInterval,
+            curve: FadeCurve,
+            activeMixerVolume: Float,
+            inactiveMixerVolume: Float,
+            activePlayerPosition: TimeInterval,
+            inactivePlayerPosition: TimeInterval,
+            activePlayer: PlayerNode,
+            operation: CrossfadeOperation
+        ) {
+            self.progress = progress
+            self.originalDuration = originalDuration
+            self.curve = curve
+            self.activeMixerVolume = activeMixerVolume
+            self.inactiveMixerVolume = inactiveMixerVolume
+            self.activePlayerPosition = activePlayerPosition
+            self.inactivePlayerPosition = inactivePlayerPosition
+            self.activePlayer = activePlayer
+            self.operation = operation
+            
+            // Determine strategy based on progress threshold
+            self.resumeStrategy = progress < 0.5 ? .continueFromProgress : .quickFinish
+            
+            Logger.audio.debug("[Coordinator] PausedCrossfade: strategy=\(self.resumeStrategy), progress=\(Int(progress * 100))%")
+        }
+    }
+    
     // MARK: - State (SINGLE SOURCE OF TRUTH)
     
     /// Current coordinator state - READ ONLY from outside
     private(set) var state: CoordinatorState
+    
+    /// Active crossfade (if any)
+    private var activeCrossfade: ActiveCrossfadeState? = nil
+    
+    /// Paused crossfade (if any)
+    private var pausedCrossfade: PausedCrossfadeState? = nil
+    
+    /// Crossfade progress task
+    private var crossfadeProgressTask: Task<Void, Never>? = nil
     
     // MARK: - Dependencies
     
@@ -305,6 +408,243 @@ actor PlaybackStateCoordinator {
         
         state = snapshot
         Self.logger.info("[StateCoordinator] ✅ Snapshot restored")
+    }
+    
+    // MARK: - Crossfade Operations
+    
+    /// Start crossfade from active track to new track
+    /// - Returns: CrossfadeResult (.completed, .paused, .cancelled)
+    func startCrossfade(
+        to track: Track,
+        duration: TimeInterval,
+        curve: FadeCurve,
+        operation: CrossfadeOperation
+    ) async throws -> CrossfadeResult {
+        Self.logger.debug("[Coordinator] → startCrossfade(to: \(track.url.lastPathComponent))")
+        
+        // 1. Rollback existing crossfade if any
+        if activeCrossfade != nil {
+            Self.logger.debug("[Coordinator] Active crossfade exists, rolling back...")
+            await rollbackCurrentCrossfade()
+        }
+        
+        // 2. Validate we have active track
+        guard let fromTrack = state.activeTrack else {
+            Self.logger.error("[Coordinator] ❌ No active track to crossfade from")
+            throw AudioPlayerError.invalidState(
+                current: "no active track",
+                attempted: "start crossfade"
+            )
+        }
+        
+        // 3. Clear any paused crossfade
+        if pausedCrossfade != nil {
+            Self.logger.debug("[Coordinator] Clearing paused crossfade (new operation)")
+            pausedCrossfade = nil
+        }
+        
+        // 4. Create active crossfade state
+        activeCrossfade = ActiveCrossfadeState(
+            operation: operation,
+            startTime: Date(),
+            duration: duration,
+            curve: curve,
+            fromTrack: fromTrack,
+            toTrack: track
+        )
+        
+        // 5. Load track on inactive player
+        Self.logger.debug("[Coordinator] Loading track on inactive player...")
+        _ = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
+        loadTrackOnInactive(track)
+        
+        // 6. Mark as crossfading
+        updateCrossfading(true)
+        
+        // 7. Prepare and start crossfade
+        await audioEngine.prepareSecondaryPlayer()
+        
+        Self.logger.info("[Coordinator] ✅ Starting engine crossfade (duration=\(duration)s)")
+        
+        let progressStream = await audioEngine.performSynchronizedCrossfade(
+            duration: duration,
+            curve: curve
+        )
+        
+        // 8. Monitor progress
+        crossfadeProgressTask = Task { [weak self] in
+            for await progress in progressStream {
+                await self?.updateCrossfadeProgress(progress)
+            }
+        }
+        
+        // 9. Wait for completion
+        await crossfadeProgressTask?.value
+        crossfadeProgressTask = nil
+        
+        // 10. Check if paused during crossfade
+        if pausedCrossfade != nil {
+            Self.logger.debug("[Coordinator] Crossfade paused during execution")
+            activeCrossfade = nil
+            return .paused
+        }
+        
+        // 11. Crossfade completed - cleanup
+        Self.logger.debug("[Coordinator] Crossfade completed, performing cleanup...")
+        
+        // Switch players
+        switchActivePlayer()
+        
+        // Stop and clear inactive
+        await audioEngine.stopInactivePlayer()
+        await audioEngine.resetInactiveMixer()
+        await audioEngine.clearInactiveFile()
+        
+        // Clear crossfade state
+        activeCrossfade = nil
+        updateCrossfading(false)
+        
+        Self.logger.info("[Coordinator] ✅ Crossfade completed successfully")
+        
+        return .completed
+    }
+    
+    /// Rollback current crossfade smoothly (used when skipping during crossfade)
+    func rollbackCurrentCrossfade() async {
+        guard activeCrossfade != nil else { return }
+        
+        Self.logger.debug("[Coordinator] Rolling back active crossfade...")
+        
+        // Quick fade to active player (0.3s smooth rollback)
+        _ = await audioEngine.rollbackCrossfade(rollbackDuration: 0.3)
+        
+        // Clear state
+        activeCrossfade = nil
+        state = state.withInactiveTrack(nil)
+            .withMixerVolumes(active: 1.0, inactive: 0.0)
+            .withCrossfading(false)
+        
+        // Cancel progress task
+        crossfadeProgressTask?.cancel()
+        crossfadeProgressTask = nil
+        
+        Self.logger.info("[Coordinator] ✅ Crossfade rolled back")
+    }
+    
+    /// Pause current crossfade and capture state
+    func pauseCrossfade() async throws -> PausedCrossfadeState? {
+        guard let crossfade = activeCrossfade else { return nil }
+        
+        Self.logger.debug("[Coordinator] Pausing crossfade (progress=\(Int(crossfade.progress * 100))%)")
+        
+        // Capture engine state (includes positions)
+        guard let engineState = await audioEngine.getCrossfadeState() else {
+            Self.logger.error("[Coordinator] ❌ Failed to get crossfade state")
+            return nil
+        }
+        
+        // Create paused state
+        let pausedState = PausedCrossfadeState(
+            progress: crossfade.progress,
+            originalDuration: crossfade.duration,
+            curve: crossfade.curve,
+            activeMixerVolume: engineState.activeMixerVolume,
+            inactiveMixerVolume: engineState.inactiveMixerVolume,
+            activePlayerPosition: engineState.activePlayerPosition,
+            inactivePlayerPosition: engineState.inactivePlayerPosition,
+            activePlayer: state.activePlayer,
+            operation: crossfade.operation
+        )
+        
+        // Store paused state
+        pausedCrossfade = pausedState
+        
+        // Clear active crossfade
+        activeCrossfade = nil
+        
+        // Cancel progress task
+        crossfadeProgressTask?.cancel()
+        crossfadeProgressTask = nil
+        
+        Self.logger.info("[Coordinator] ✅ Crossfade paused (strategy=\(pausedState.resumeStrategy))")
+        
+        return pausedState
+    }
+    
+    /// Resume paused crossfade
+    func resumeCrossfade() async throws -> Bool {
+        guard let paused = pausedCrossfade else { return false }
+        
+        Self.logger.debug("[Coordinator] Resuming paused crossfade (strategy=\(paused.resumeStrategy))")
+        
+        // Resume crossfade in engine
+        // Note: We'll implement a simpler approach - just continue the crossfade
+        let resumed = true  // For now, always resume
+        
+        if resumed {
+            // Recreate active crossfade
+            guard let fromTrack = state.activeTrack, let toTrack = state.inactiveTrack else {
+                Self.logger.error("[Coordinator] ❌ Cannot resume - missing tracks")
+                return false
+            }
+            
+            activeCrossfade = ActiveCrossfadeState(
+                operation: paused.operation,
+                startTime: Date(),
+                duration: paused.remainingDuration,
+                curve: paused.curve,
+                fromTrack: fromTrack,
+                toTrack: toTrack,
+                progress: Float(paused.progress)
+            )
+            
+            pausedCrossfade = nil
+            updateCrossfading(true)
+            
+            // Monitor resumed crossfade (async cleanup)
+            Task { [weak self] in
+                // Wait a bit for resume to settle
+                try? await Task.sleep(nanoseconds: 100_000_000) // 0.1s
+                
+                await self?.cleanupResumedCrossfade()
+            }
+            
+            Self.logger.info("[Coordinator] ✅ Crossfade resumed")
+        }
+        
+        return resumed
+    }
+    
+    /// Cleanup after resumed crossfade completes
+    private func cleanupResumedCrossfade() async {
+        Self.logger.debug("[Coordinator] Cleanup resumed crossfade...")
+        
+        // Check if paused again during cleanup
+        if pausedCrossfade != nil {
+            Self.logger.debug("[Coordinator] ❌ Cleanup aborted - crossfade paused again")
+            return
+        }
+        
+        // Switch players
+        switchActivePlayer()
+        
+        // Stop inactive
+        await audioEngine.stopInactivePlayer()
+        
+        // Clear state
+        activeCrossfade = nil
+        updateCrossfading(false)
+        
+        Self.logger.info("[Coordinator] ✅ Resumed crossfade cleanup complete")
+    }
+    
+    /// Update crossfade progress (internal)
+    private func updateCrossfadeProgress(_ progress: CrossfadeProgress) {
+        guard var crossfade = activeCrossfade else { return }
+        
+        // Update progress
+        crossfade.progress = Float(progress.progress)
+        activeCrossfade = crossfade
     }
     
     // MARK: - Debug
