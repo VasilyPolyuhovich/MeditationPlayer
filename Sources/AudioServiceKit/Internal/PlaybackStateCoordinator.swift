@@ -31,17 +31,12 @@ actor PlaybackStateCoordinator {
         }
     }
     
-    /// Playback mode
-    enum PlaybackMode {
-        case playing
-        case paused
-        case stopped
-    }
+    // Use PlayerState from AudioServiceCore instead of custom enum
     
-    /// Complete player state - immutable snapshot
-    struct PlayerState {
+    /// Complete coordinator state - immutable snapshot
+    struct CoordinatorState {
         let activePlayer: PlayerNode
-        let playbackMode: PlaybackMode
+        let playbackMode: PlayerState
         let activeTrack: Track?
         let inactiveTrack: Track?
         let activeMixerVolume: Float
@@ -77,8 +72,8 @@ actor PlaybackStateCoordinator {
         
         // MARK: - Functional Updates
         
-        func withMode(_ mode: PlaybackMode) -> PlayerState {
-            PlayerState(
+        func withMode(_ mode: PlayerState) -> CoordinatorState {
+            CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: mode,
                 activeTrack: activeTrack,
@@ -89,8 +84,8 @@ actor PlaybackStateCoordinator {
             )
         }
         
-        func withActiveTrack(_ track: Track?) -> PlayerState {
-            PlayerState(
+        func withActiveTrack(_ track: Track?) -> CoordinatorState {
+            CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: track,
@@ -101,8 +96,8 @@ actor PlaybackStateCoordinator {
             )
         }
         
-        func withInactiveTrack(_ track: Track?) -> PlayerState {
-            PlayerState(
+        func withInactiveTrack(_ track: Track?) -> CoordinatorState {
+            CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
@@ -113,8 +108,8 @@ actor PlaybackStateCoordinator {
             )
         }
         
-        func withMixerVolumes(active: Float, inactive: Float) -> PlayerState {
-            PlayerState(
+        func withMixerVolumes(active: Float, inactive: Float) -> CoordinatorState {
+            CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
@@ -125,8 +120,8 @@ actor PlaybackStateCoordinator {
             )
         }
         
-        func withCrossfading(_ crossfading: Bool) -> PlayerState {
-            PlayerState(
+        func withCrossfading(_ crossfading: Bool) -> CoordinatorState {
+            CoordinatorState(
                 activePlayer: activePlayer,
                 playbackMode: playbackMode,
                 activeTrack: activeTrack,
@@ -140,8 +135,8 @@ actor PlaybackStateCoordinator {
     
     // MARK: - State (SINGLE SOURCE OF TRUTH)
     
-    /// Current player state - READ ONLY from outside
-    private(set) var state: PlayerState
+    /// Current coordinator state - READ ONLY from outside
+    private(set) var state: CoordinatorState
     
     // MARK: - Dependencies
     
@@ -155,9 +150,9 @@ actor PlaybackStateCoordinator {
     
     init(audioEngine: AudioEngineActor) {
         self.audioEngine = audioEngine
-        self.state = PlayerState(
+        self.state = CoordinatorState(
             activePlayer: .a,
-            playbackMode: .stopped,
+            playbackMode: .finished,
             activeTrack: nil,
             inactiveTrack: nil,
             activeMixerVolume: 1.0,
@@ -175,7 +170,7 @@ actor PlaybackStateCoordinator {
         Self.logger.debug("[StateCoordinator] → switchActivePlayer()")
         
         // Create new state with swapped players
-        let newState = PlayerState(
+        let newState = CoordinatorState(
             activePlayer: state.activePlayer.opposite,
             playbackMode: state.playbackMode,
             activeTrack: state.inactiveTrack,  // Swap tracks
@@ -195,7 +190,7 @@ actor PlaybackStateCoordinator {
     }
     
     /// Atomically update playback mode
-    func updateMode(_ mode: PlaybackMode) {
+    func updateMode(_ mode: PlayerState) {
         Self.logger.debug("[StateCoordinator] → updateMode(\(mode))")
         
         let newState = state.withMode(mode)
@@ -251,15 +246,15 @@ actor PlaybackStateCoordinator {
     
     /// Atomically switch to new track (combines load + switch)
     /// Use this for pause + skip scenario
-    func atomicSwitch(newTrack: Track, preserveMode: Bool = true) {
+    func atomicSwitch(newTrack: Track, mode: PlayerState? = nil) {
         Self.logger.debug("[StateCoordinator] → atomicSwitch(\(newTrack.url.lastPathComponent))")
         
-        let mode = preserveMode ? state.playbackMode : .playing
+        let targetMode = mode ?? state.playbackMode
         
         // Create new state with switched player and new track
-        let newState = PlayerState(
+        let newState = CoordinatorState(
             activePlayer: state.activePlayer.opposite,
-            playbackMode: mode,
+            playbackMode: targetMode,
             activeTrack: newTrack,  // New track becomes active
             inactiveTrack: state.activeTrack,  // Old active becomes inactive
             activeMixerVolume: 1.0,  // Reset to full volume
@@ -282,7 +277,7 @@ actor PlaybackStateCoordinator {
         return state.activeTrack
     }
     
-    func getPlaybackMode() -> PlaybackMode {
+    func getPlaybackMode() -> PlayerState {
         return state.playbackMode
     }
     
@@ -295,12 +290,12 @@ actor PlaybackStateCoordinator {
     }
     
     /// Capture complete state snapshot (for crossfade pause/resume)
-    func captureSnapshot() -> PlayerState {
+    func captureSnapshot() -> CoordinatorState {
         return state
     }
     
     /// Restore state snapshot (for crossfade resume)
-    func restoreSnapshot(_ snapshot: PlayerState) {
+    func restoreSnapshot(_ snapshot: CoordinatorState) {
         Self.logger.debug("[StateCoordinator] → restoreSnapshot()")
         
         guard snapshot.isConsistent else {

@@ -348,17 +348,18 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     public func pause() async throws {
         let hasCleanupTask = crossfadeCleanupTask != nil
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
         Self.logger.debug("[PAUSE] ⏸️ pause() called")
-        Self.logger.debug("[PAUSE] State: \(state) | Crossfade active: \(activeCrossfadeOperation != nil) | Already paused: \(pausedCrossfadeState != nil) | Cleanup task running: \(hasCleanupTask)")
+        Self.logger.debug("[PAUSE] State: \(currentState) | Crossfade active: \(activeCrossfadeOperation != nil) | Already paused: \(pausedCrossfadeState != nil) | Cleanup task running: \(hasCleanupTask)")
         
         // Guard: only pause if playing or preparing (to prevent Error 4)
-        guard state == .playing || state == .preparing else {
+        guard currentState == .playing || currentState == .preparing else {
             // If already paused or finished, just return
-            if state == .paused || state == .finished {
+            if currentState == .paused || currentState == .finished {
                 return
             }
             throw AudioPlayerError.invalidState(
-                current: state.description,
+                current: currentState.description,
                 attempted: "pause"
             )
         }
@@ -475,20 +476,22 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func resume() async throws {
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        
         // Guard: only resume if paused or finished
-        guard state == .paused || state == .finished else {
+        guard currentState == .paused || currentState == .finished else {
             // If already playing, just return
-            if state == .playing {
+            if currentState == .playing {
                 return
             }
             throw AudioPlayerError.invalidState(
-                current: state.description,
+                current: currentState.description,
                 attempted: "resume"
             )
         }
         
         // If finished - need to restart
-        if state == .finished {
+        if currentState == .finished {
             throw AudioPlayerError.invalidState(
                 current: "finished",
                 attempted: "resume - use startPlaying instead"
