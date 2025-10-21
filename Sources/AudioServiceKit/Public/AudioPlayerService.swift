@@ -467,12 +467,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             
             Self.logger.debug("[CROSSFADE_PAUSE] Paused during crossfade, players frozen at current volumes")
         } else {
-            // Normal pause - use state machine
-            // ✅ FIX: Delegate to state machine (removes duplicate call)
-            // State machine will call context.pausePlayback() which handles:
-            // - Capturing position ONCE
-            // - Pausing audio engine
-            // - Stopping playback timer
+            // Normal pause (no crossfade)
+            Self.logger.debug("[PAUSE] pausePlayback: normal pause")
+            
+            // Pause playback (pause engine, stop timer, capture position)
+            await pausePlayback()
+            
+            // Transition to paused state
             await updateState(.paused)
         }
         
@@ -573,12 +574,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             
         } else {
             // Normal resume without crossfade
-            // ✅ FIX: Delegate to state machine (removes duplicate call)
-            // State machine will call context.resumePlayback() which handles:
-            // - Rescheduling buffer from saved position
-            // - Playing audio engine
-            // - Restarting playback timer
             Self.logger.debug("[RESUME] Normal resume (no crossfade)")
+            
+            // Resume playback (play engine, restart timer)
+            try await resumePlayback()
+            
+            // Transition to playing state
             await updateState(.playing)
         }
         
