@@ -2326,11 +2326,19 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Parameter rollbackDuration: Duration to restore active volume (default: 0.5s)
     /// - Note: Clears both loop and replacement flags (works for all repeat modes)
     private func rollbackCrossfade(rollbackDuration: TimeInterval = 0.5) async {
+        Self.logger.debug("[ROLLBACK] 🔄 Starting crossfade rollback")
+        
         // Perform rollback on audio engine
         _ = await audioEngine.rollbackCrossfade(rollbackDuration: rollbackDuration)
         
         // Clear crossfade flags (handles all repeat modes)
         activeCrossfadeOperation = nil
+        
+        // ✅ FIX: Clear paused crossfade state to prevent stale resume
+        if pausedCrossfadeState != nil {
+            Self.logger.debug("[ROLLBACK] Clearing stale pausedCrossfadeState")
+            pausedCrossfadeState = nil
+        }
         
         // Cancel progress observation
         crossfadeProgressTask?.cancel()
@@ -2347,6 +2355,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                 }
             }
         }
+        
+        Self.logger.debug("[ROLLBACK] ✅ Crossfade rollback completed")
     }
 
     // MARK: - Crossfade Lifecycle Helpers
