@@ -354,3 +354,10 @@ actor AudioSessionManager {
         }
     }
 }
+
+// MARK: - AudioSessionManaging Conformance
+
+extension AudioSessionManager: AudioSessionManaging {
+    // ✅ Already conforms to all protocol requirements
+    // Methods: activate(), ensureActive(), deactivate()
+}

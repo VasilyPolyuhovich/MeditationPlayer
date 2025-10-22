@@ -133,4 +133,49 @@ final class RemoteCommandManager: Sendable {
     func clearNowPlayingInfo() {
         nowPlayingCenter.nowPlayingInfo = nil
     }
+
+    // MARK: - Helper Methods for Protocol Conformance
+
+    func updateNowPlayingInfo(track: TrackInfo) {
+        updateNowPlayingInfo(
+            title: track.title,
+            artist: track.artist,
+            duration: track.duration,
+            elapsedTime: 0,
+            playbackRate: 0
+        )
+    }
+
+    func updateNowPlayingPlaybackRate(_ rate: Float) {
+        guard var info = nowPlayingCenter.nowPlayingInfo else { return }
+        info[MPNowPlayingInfoPropertyPlaybackRate] = Double(rate)
+        nowPlayingCenter.nowPlayingInfo = info
+    }
+
+    func updateNowPlayingPosition(_ position: PlaybackPosition) {
+        updatePlaybackPosition(
+            elapsedTime: position.currentTime,
+            playbackRate: 1.0
+        )
+    }
+}
+
+// MARK: - RemoteCommandManaging Conformance
+
+extension RemoteCommandManager: RemoteCommandManaging {
+    func updateNowPlaying(track: TrackInfo) async {
+        updateNowPlayingInfo(track: track)
+    }
+
+    func updatePlaybackRate(_ rate: Float) async {
+        updateNowPlayingPlaybackRate(rate)
+    }
+
+    func clearNowPlaying() async {
+        clearNowPlayingInfo()
+    }
+
+    func updatePlaybackPosition(_ position: PlaybackPosition) async {
+        updateNowPlayingPosition(position)
+    }
 }

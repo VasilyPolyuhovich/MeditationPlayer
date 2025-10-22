@@ -1,0 +1,66 @@
+From 616a2c2136c2bc6467f841eae419302939394023 Mon Sep 17 00:00:00 2001
+From: Vasily Polyuhovich <vasilitch@gmail.com>
+Date: Tue, 21 Oct 2025 17:30:23 +0300
+Subject: [PATCH 1/3] Fix: Clear pausedCrossfadeState in rollbackCrossfade()
+
+**Problem:**
+When user quickly skips tracks during active crossfade, rollbackCrossfade()
+was called but didn't clear pausedCrossfadeState. This caused:
+- Stale state on next pause/resume cycle
+- UI glitches (crossfade progress stopped updating)
+- Audio silence after pause+skip+resume sequence
+
+**Root Cause:**
+rollbackCrossfade() only cleared activeCrossfadeOperation but left
+pausedCrossfadeState intact, leading to state inconsistency.
+
+**Solution:**
+Added pausedCrossfadeState cleanup in rollbackCrossfade() method.
+Now both crossfade state fields are properly cleared on rollback.
+
+**Testing:**
+- Build successful
+- Ready for user testing with rapid track changes
+
+Related issue: Crossfade glitches during track navigation
+---
+ .../AudioServiceKit/Public/AudioPlayerService.swift    | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/Sources/AudioServiceKit/Public/AudioPlayerService.swift b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+index 47a5053..d792c4e 100644
+--- a/Sources/AudioServiceKit/Public/AudioPlayerService.swift
++++ b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+@@ -2326,12 +2326,20 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+     /// - Parameter rollbackDuration: Duration to restore active volume (default: 0.5s)
+     /// - Note: Clears both loop and replacement flags (works for all repeat modes)
+     private func rollbackCrossfade(rollbackDuration: TimeInterval = 0.5) async {
++        Self.logger.debug("[ROLLBACK] 🔄 Starting crossfade rollback")
++        
+         // Perform rollback on audio engine
+         _ = await audioEngine.rollbackCrossfade(rollbackDuration: rollbackDuration)
+         
+         // Clear crossfade flags (handles all repeat modes)
+         activeCrossfadeOperation = nil
+         
++        // ✅ FIX: Clear paused crossfade state to prevent stale resume
++        if pausedCrossfadeState != nil {
++            Self.logger.debug("[ROLLBACK] Clearing stale pausedCrossfadeState")
++            pausedCrossfadeState = nil
++        }
++        
+         // Cancel progress observation
+         crossfadeProgressTask?.cancel()
+         crossfadeProgressTask = nil
+@@ -2347,6 +2355,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+                 }
+             }
+         }
++        
++        Self.logger.debug("[ROLLBACK] ✅ Crossfade rollback completed")
+     }
+ 
+     // MARK: - Crossfade Lifecycle Helpers
+-- 
+2.51.1
+

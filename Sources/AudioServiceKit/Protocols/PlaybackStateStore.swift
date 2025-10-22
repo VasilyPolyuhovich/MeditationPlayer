@@ -1,0 +1,113 @@
+//
+//  PlaybackStateStore.swift
+//  AudioServiceKit
+//
+//  Protocol abstraction for playback state storage
+//
+
+import Foundation
+import AudioServiceCore
+
+/// Protocol for pure playback state storage and queries
+///
+/// Abstracts state management to enable dependency injection
+/// and unit testing with mock implementations.
+///
+/// **Responsibility:** State storage ONLY (no engine control, no business logic)
+/// **Dependencies:** NONE (zero dependencies for maximum testability)
+protocol PlaybackStateStore: Actor {
+    // MARK: - Queries
+
+    /// Get current playback mode
+    /// - Returns: Current player state
+    func getPlaybackMode() -> PlayerState
+
+    /// Get current active track
+    /// - Returns: Active track or nil if none
+    func getCurrentTrack() -> Track?
+
+    /// Get active track
+    /// - Returns: Active track or nil if none
+    func getActiveTrack() -> Track?
+
+    /// Get active track information
+    /// - Returns: TrackInfo or nil if none
+    func getActiveTrackInfo() -> TrackInfo?
+
+    /// Get active player node
+    /// - Returns: Currently active player (A or B)
+    func getActivePlayer() -> PlayerNode
+
+    /// Check if crossfade is active
+    /// - Returns: true if crossfading
+    func isCrossfading() -> Bool
+
+    /// Check if there's an active crossfade operation
+    /// - Returns: true if crossfade state exists
+    func hasActiveCrossfade() -> Bool
+
+    /// Check if there's a paused crossfade
+    /// - Returns: true if paused crossfade exists
+    func hasPausedCrossfade() -> Bool
+
+    /// Get active crossfade operation type
+    /// - Returns: CrossfadeOperation or nil if none
+    func getActiveCrossfadeOperation() -> CrossfadeOperation?
+
+    // MARK: - Mutations
+
+    /// Update playback mode atomically
+    /// - Parameter mode: New playback mode
+    func updateMode(_ mode: PlayerState)
+
+    /// Switch active/inactive players atomically
+    func switchActivePlayer()
+
+    /// Load track on inactive player atomically
+    /// - Parameters:
+    ///   - track: Track to load
+    ///   - info: Optional track info
+    func loadTrackOnInactive(_ track: Track, info: TrackInfo?)
+
+    /// Update mixer volumes atomically
+    /// - Parameters:
+    ///   - active: Active mixer volume (0.0-1.0)
+    ///   - inactive: Inactive mixer volume (0.0-1.0)
+    func updateMixerVolumes(active: Float, inactive: Float)
+
+    /// Update crossfading flag atomically
+    /// - Parameter crossfading: true if crossfade active
+    func updateCrossfading(_ crossfading: Bool)
+
+    /// Atomically switch to new track (combines load + switch)
+    /// Use for pause + skip scenario
+    /// - Parameters:
+    ///   - newTrack: New track to load
+    ///   - trackInfo: Optional track info
+    ///   - mode: Optional playback mode to set
+    func atomicSwitch(newTrack: Track, trackInfo: TrackInfo?, mode: PlayerState?)
+
+    // MARK: - Crossfade State Management
+
+    /// Cancel active crossfade and cleanup
+    func cancelActiveCrossfade() async
+
+    /// Clear paused crossfade state
+    func clearPausedCrossfade()
+
+    // MARK: - Snapshot & Restore
+
+    /// Capture current state snapshot
+    /// - Returns: Immutable state copy
+    func captureSnapshot() -> CoordinatorState
+
+    /// Restore state from snapshot
+    /// - Parameter snapshot: State to restore
+    func restoreSnapshot(_ snapshot: CoordinatorState)
+
+    // MARK: - Validation
+
+    /// Check if current state is consistent
+    /// - Returns: true if state passes validation
+    func isStateConsistent() -> Bool
+}

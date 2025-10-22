@@ -1,0 +1,109 @@
+From 01ca59e3c3eea227555b2b6f92f2ef4cbf2d7489 Mon Sep 17 00:00:00 2001
+From: Vasily Polyuhovich <vasilitch@gmail.com>
+Date: Tue, 21 Oct 2025 18:06:25 +0300
+Subject: [PATCH 3/3] Fix Race #13: Pause + Skip + Resume plays silence
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+**Problem:**
+When user pauses playback, skips to next track, then resumes - player plays silence.
+
+**Root Cause:**
+1. During pause, replaceCurrentTrack() loads new file on inactive player
+2. prepareSecondaryPlayer() sets mixer.volume = 0.0 (for crossfade fade-in)
+3. switchActivePlayer() switches to new player
+4. BUT mixer.volume stays at 0.0 (no crossfade happened)
+5. Resume calls play() → player plays but mixer volume is 0.0 → silence
+
+**Solution:**
+Created switchActivePlayerWithVolume() for non-crossfade scenarios:
+- Switches active player flag
+- Sets new active mixer.volume = 1.0
+- Used in pause+skip, pause+loadPlaylist paths
+
+**Key Changes:**
+- AudioEngineActor.swift: Added switchActivePlayerWithVolume()
+- AudioPlayerService.swift: Use new method in 3 pause paths
+- Preserved original switchActivePlayer() for crossfade scenarios
+
+**Testing:**
+✅ Build successful
+⏳ Awaiting user testing: pause→skip→resume, basic pause→resume
+---
+ .../Internal/AudioEngineActor.swift           | 19 ++++++++++++++++---
+ .../Public/AudioPlayerService.swift           |  6 +++---
+ 2 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/Sources/AudioServiceKit/Internal/AudioEngineActor.swift b/Sources/AudioServiceKit/Internal/AudioEngineActor.swift
+index c9ff87d..290c3bb 100644
+--- a/Sources/AudioServiceKit/Internal/AudioEngineActor.swift
++++ b/Sources/AudioServiceKit/Internal/AudioEngineActor.swift
+@@ -210,10 +210,10 @@ actor AudioEngineActor {
+             return
+         }
+         
+-        // ✅ FIX: Always check if we need to reschedule after pause or fresh load
++        // ✅ FIX: Always check if we need to reschedule after pause
+         // AVFoundation quirk: isPlaying may be unreliable after pause()
+-        // Strategy: If player is not playing, we need to schedule (either resume or fresh play)
+-        let needsReschedule = !player.isPlaying
++        // Strategy: If player is not playing AND we have an offset, it's a resume
++        let needsReschedule = !player.isPlaying && offset > 0
+         
+         if needsReschedule {
+             // Resume from saved position
+@@ -1211,6 +1211,19 @@ actor AudioEngineActor {
+         activePlayer = activePlayer == .a ? .b : .a
+     }
+     
++    /// Switch the active player AND set new active mixer to full volume
++    /// Use this for non-crossfade scenarios (pause + skip, pause + load playlist)
++    func switchActivePlayerWithVolume() {
++        // Switch the active flag
++        activePlayer = activePlayer == .a ? .b : .a
++        
++        // ✅ FIX Race #13: Set new active mixer to full volume
++        // During pause, prepareSecondaryPlayer() sets mixer.volume = 0.0
++        // When we switch without crossfade, we need to restore full volume
++        let activeMixer = getActiveMixerNode()
++        activeMixer.volume = 1.0
++    }
++    
+     /// Load audio file on the secondary player (for replace/next track)
+     func loadAudioFileOnSecondaryPlayer(url: URL) throws -> TrackInfo {
+         let file = try AVAudioFile(forReading: url)
+diff --git a/Sources/AudioServiceKit/Public/AudioPlayerService.swift b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+index b8bc17d..7575811 100644
+--- a/Sources/AudioServiceKit/Public/AudioPlayerService.swift
++++ b/Sources/AudioServiceKit/Public/AudioPlayerService.swift
+@@ -1144,7 +1144,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+         } else {
+             // Paused or stopped - prepare player and switch without playback
+             await audioEngine.prepareSecondaryPlayer()
+-            await audioEngine.switchActivePlayer()
++            await audioEngine.switchActivePlayerWithVolume()
+             await audioEngine.stopInactivePlayer()
+         }
+ 
+@@ -1236,7 +1236,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+         } else {
+             // Paused or stopped - prepare player and switch without playback
+             await audioEngine.prepareSecondaryPlayer()
+-            await audioEngine.switchActivePlayer()
++            await audioEngine.switchActivePlayerWithVolume()
+             await audioEngine.stopInactivePlayer()
+         }
+         
+@@ -1355,7 +1355,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
+             }
+         } else {
+             // Paused or stopped during load - switch files without starting
+-            await audioEngine.switchActivePlayer()
++            await audioEngine.switchActivePlayerWithVolume()
+             await audioEngine.stopInactivePlayer()
+             // Note: New active player will be scheduled on resume via play()
+         }
+-- 
+2.51.1
+

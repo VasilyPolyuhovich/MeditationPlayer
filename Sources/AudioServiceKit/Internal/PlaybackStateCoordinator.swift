@@ -796,3 +796,29 @@ actor PlaybackStateCoordinator {
         """)
     }
 }
+
+// MARK: - PlaybackStateStore Conformance
+
+extension PlaybackStateCoordinator: PlaybackStateStore {
+    // ✅ Already conforms to most protocol requirements
+    // All query and mutation methods are implemented in the main actor body
+
+    // Additional required methods:
+
+    func captureSnapshot() -> CoordinatorState {
+        return state
+    }
+
+    func restoreSnapshot(_ snapshot: CoordinatorState) {
+        guard snapshot.isConsistent else {
+            Self.logger.error("[StateCoordinator] ❌ Cannot restore inconsistent snapshot")
+            return
+        }
+        state = snapshot
+        Self.logger.debug("[StateCoordinator] ✅ State restored from snapshot")
+    }
+
+    func isStateConsistent() -> Bool {
+        return state.isConsistent
+    }
+}

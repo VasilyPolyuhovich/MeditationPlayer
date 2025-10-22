@@ -1439,3 +1439,10 @@ internal enum PlayerNode {
     case a
     case b
 }
+
+// MARK: - AudioEngineControl Conformance
+
+extension AudioEngineActor: AudioEngineControl {
+    // ✅ Already conforms to all protocol requirements
+    // All methods are implemented in the main actor body
+}
