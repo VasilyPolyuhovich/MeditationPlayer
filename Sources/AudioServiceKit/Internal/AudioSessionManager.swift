@@ -358,6 +358,14 @@ actor AudioSessionManager {
 // MARK: - AudioSessionManaging Conformance
 
 extension AudioSessionManager: AudioSessionManaging {
-    // ✅ Already conforms to all protocol requirements
-    // Methods: activate(), ensureActive(), deactivate()
+    /// Ensure audio session is active (activate if needed)
+    func ensureActive() async throws {
+        try activate()
+    }
+    
+    /// Deactivate audio session (not used in production, kept for protocol)
+    func deactivate() async throws {
+        // Intentionally empty - session should stay active
+        // Following Apple's AVAudioPlayer pattern
+    }
 }

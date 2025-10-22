@@ -14,7 +14,8 @@ import AudioServiceCore
 /// dependency injection and unit testing with mock implementations.
 ///
 /// **Responsibility:** Control Center / Lock Screen integration
-protocol RemoteCommandManaging: Actor {
+/// Note: Implementations are @MainActor (UIKit requirement), not Actor
+protocol RemoteCommandManaging {
     /// Update Now Playing info with track details
     /// - Parameter track: Track information to display
     func updateNowPlaying(track: TrackInfo) async

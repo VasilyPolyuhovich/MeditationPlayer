@@ -43,7 +43,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Internal components
     internal let audioEngine: AudioEngineActor  // Allow internal access for playlist API
-    private let playbackStateCoordinator: PlaybackStateCoordinator  // SSOT for player state
+    private let playbackStateCoordinator: PlaybackStateCoordinator  // SSOT for player state (Phase 5: will become pure StateStore)
+    private let playbackOrchestrator: PlaybackOrchestrator  // PHASE 4: Business logic orchestrator
     internal let sessionManager: AudioSessionManager  // Allow internal access for playlist API
     // RemoteCommandManager is now @MainActor isolated for thread safety
     // Must be created in setup() due to MainActor isolation
@@ -112,6 +113,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.audioEngine = AudioEngineActor()
         self.playbackStateCoordinator = PlaybackStateCoordinator(audioEngine: audioEngine)
         self.sessionManager = AudioSessionManager.shared  // Use singleton
+
+        // ✅ PHASE 4: Initialize PlaybackOrchestrator with protocol dependencies
+        self.playbackOrchestrator = PlaybackOrchestrator(
+            stateStore: playbackStateCoordinator,
+            engineControl: audioEngine,
+            sessionManager: sessionManager
+        )
+
         // Initialize playlist manager with configuration
         self.playlistManager = PlaylistManager(configuration: configuration)
         // Initialize sound effects player with nodes from AudioEngineActor
@@ -119,7 +128,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Create inside actor context to avoid Sendable issues
         self.soundEffectsPlayer = await audioEngine.createSoundEffectsPlayer()
         // remoteCommandManager will be created in setup() on MainActor
-        
+
         // ✅ NEW: Perform full setup immediately
         // Service is ready to use after init completes
         try await setup()
@@ -225,144 +234,72 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Configuration must be set via initializer or `updateConfiguration()`
     /// - Note: fadeDuration is independent from crossfade between tracks
     public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
-        
+        // ✅ PHASE 4: Simplified to thin facade - delegates to orchestrator
+
         // Get current track from playlist
         guard let track = await playlistManager.getCurrentTrack() else {
             throw AudioPlayerError.emptyPlaylist
         }
-        let url = track.url
-        
-        // Store fade-in duration for startEngine()
-        pendingFadeInDuration = fadeDuration
-        
+
         // Validate configuration
         try configuration.validate()
-        
+
         // Sync configuration with playlist manager
         await syncConfigurationToPlaylistManager()
-        
+
         // Reset loop tracking
-        // currentTrackURL removed - coordinator manages active track
         self.currentRepeatCount = 0
-        // Removed: activeCrossfadeOperation = nil (managed by coordinator)
-        
-        // Audio session already configured in setup()
-        // Just ensure it's activated (idempotent operation)
-        do {
-            try await sessionManager.activate()
-            Self.logger.debug("Audio session activated successfully")
-        } catch {
-            Self.logger.error("Failed to activate audio session: \(error.localizedDescription)")
-            throw AudioPlayerError.sessionConfigurationFailed(
-                reason: "Failed to activate: \(error.localizedDescription)"
-            )
-        }
-        
-        // Prepare audio engine (MUST be after session activation)
-        do {
-            try await audioEngine.prepare()
-            Self.logger.debug("Audio engine prepared successfully")
-        } catch {
-            Self.logger.error("Failed to prepare audio engine: \(error.localizedDescription)")
-            throw AudioPlayerError.engineStartFailed(
-                reason: "Failed to prepare engine: \(error.localizedDescription)"
-            )
-        }
-        
-        // Load audio file and set track in coordinator
-        let trackInfo = try await audioEngine.loadAudioFile(url: url)
-        await playbackStateCoordinator.atomicSwitch(newTrack: track, trackInfo: trackInfo)
+
+        // ✅ Delegate to orchestrator (handles session, engine, state)
+        try await playbackOrchestrator.startPlaying(track: track, fadeDuration: fadeDuration)
+
+        // Sync cached state for protocol conformance
+        _cachedState = await playbackOrchestrator.getCurrentState()
         await syncCachedTrackInfo()
-        
-        // Enter preparing state
-        let currentState = await playbackStateCoordinator.getPlaybackMode()
-        await updateState(.preparing)
-        Logger.state.debug("State transition: \(currentState) → preparing")
-        
-        // Coordinator validates automatically via isConsistent
-        guard await playbackStateCoordinator.getPlaybackMode() == .preparing else {
-            let currentState = await state
-            throw AudioPlayerError.invalidState(
-                current: currentState.description,
-                attempted: "start playing"
-            )
-        }
-        
+
         // Update now playing info
         await updateNowPlayingInfo()
-        
-        // Start audio engine and transition to playing
-        try await startEngine()
-        await updateState(.playing)
-        
+
         // Start playback timer
         startPlaybackTimer()
+
+        Self.logger.info("[SERVICE] ✅ Started playing (orchestrator)")
     }
     
     public func pause() async throws {
-        Self.logger.debug("[SERVICE] pause() → coordinator")
-        
-        let currentState = await playbackStateCoordinator.getPlaybackMode()
-        
-        // Guard: only pause if playing or preparing
-        guard currentState == .playing || currentState == .preparing else {
-            if currentState == .paused || currentState == .finished {
-                return
-            }
-            throw AudioPlayerError.invalidState(
-                current: currentState.description,
-                attempted: "pause"
-            )
-        }
+        // ✅ PHASE 4: Simplified to thin facade
+        Self.logger.debug("[SERVICE] pause() → orchestrator")
         
         // Delegate crossfade pause to coordinator (if any active)
         _ = try await playbackStateCoordinator.pauseCrossfade()
         
-        // Pause engine
-        await pausePlayback()
+        // ✅ Delegate to orchestrator
+        try await playbackOrchestrator.pause()
         
-        // Update state
-        await playbackStateCoordinator.updateMode(.paused)
+        // Sync cached state
+        _cachedState = await playbackOrchestrator.getCurrentState()
         
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
     }
     
     public func resume() async throws {
-        Self.logger.debug("[SERVICE] resume() → coordinator")
-        
-        let currentState = await playbackStateCoordinator.getPlaybackMode()
-        
-        // Guard: only resume if paused
-        guard currentState == .paused else {
-            if currentState == .playing {
-                return
-            }
-            if currentState == .finished {
-                throw AudioPlayerError.invalidState(
-                    current: "finished",
-                    attempted: "resume - use startPlaying instead"
-                )
-            }
-            throw AudioPlayerError.invalidState(
-                current: currentState.description,
-                attempted: "resume"
-            )
-        }
+        // ✅ PHASE 4: Simplified to thin facade
+        Self.logger.debug("[SERVICE] resume() → orchestrator")
         
         // Try resume crossfade from coordinator (if any paused)
         let resumedCrossfade = try await playbackStateCoordinator.resumeCrossfade()
         
         if !resumedCrossfade {
-            // No crossfade to resume - normal resume
+            // No crossfade to resume - delegate to orchestrator
             Self.logger.debug("[SERVICE] Normal resume (no paused crossfade)")
             
-            // Resume playback
-            try await resumePlayback()
+            // ✅ Delegate to orchestrator
+            try await playbackOrchestrator.resume()
         }
         
-        // Update state
-        await playbackStateCoordinator.updateMode(.playing)
+        // Sync cached state
+        _cachedState = await playbackOrchestrator.getCurrentState()
         
         // Update UI
         await updateNowPlayingPlaybackRate(1.0)
@@ -373,99 +310,35 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Default is instant stop (fadeDuration = 0.0)
     /// - Note: If stop called during crossfade, crossfade is cancelled and fadeout is performed on active track
     public func stop(fadeDuration: TimeInterval = 0.0) async {
-        // 🔍 DIAGNOSTIC: Log stop entry
-        let playerIsPlaying = await audioEngine.isActivePlayerPlaying()
-        let mixerVolume = await audioEngine.getActiveMixerVolume()
-        let targetVol = await audioEngine.getTargetVolume()
-        let currentState = await state
-        Self.logger.debug("[STOP_DIAGNOSTIC] Entry: fadeDuration=\(fadeDuration), isPlaying=\(playerIsPlaying), mixerVol=\(mixerVolume), targetVol=\(targetVol), state=\(currentState)")
+        // ✅ PHASE 4: Simplified to thin facade
+        Self.logger.debug("[SERVICE] stop(fade: \(fadeDuration)s) → orchestrator")
 
         // Clear paused crossfade state (stop invalidates saved state)
         await playbackStateCoordinator.clearPausedCrossfade()
 
-        // ✅ FIX: If crossfade in progress, cancel it and stop inactive player
-        // Active player will fade out naturally
+        // Cancel active crossfade if any
         if await playbackStateCoordinator.hasActiveCrossfade() {
             Self.logger.debug("[STOP] Cancel crossfade in progress")
             await playbackStateCoordinator.cancelActiveCrossfade()
             await audioEngine.cancelCrossfadeAndStopInactive()
         }
         
-        if fadeDuration > 0 {
-            // Stop with fade
-            await stopWithFade(duration: fadeDuration)
-        } else {
-            // Instant stop (existing behavior)
-            await stopImmediately()
-        }
-    }
-    
-    /// Stop playback with fade out
-    /// - Parameter duration: Duration of fade out (clamped to 0.0-10.0 seconds)
-    private func stopWithFade(duration: TimeInterval) async {
-        // Clamp duration to safe range
-        let clampedDuration = max(0.0, min(10.0, duration))
+        // ✅ Delegate to orchestrator
+        await playbackOrchestrator.stop(fadeDuration: fadeDuration)
         
-        // 🔍 DIAGNOSTIC: Check player state BEFORE getting volume
-        let playerIsPlayingBefore = await audioEngine.isActivePlayerPlaying()
-        Self.logger.debug("[STOP_DIAGNOSTIC] Before fade: playerIsPlaying=\(playerIsPlayingBefore)")
+        // Sync cached state
+        _cachedState = await playbackOrchestrator.getCurrentState()
         
-        // ✅ FIX #2: Get ACTUAL mixer volume, not target volume
-        // targetVolume is for mainMixer (global), we need activeMixer volume
-        let currentVolume = await audioEngine.getActiveMixerVolume()
-        
-        Self.logger.debug("[STOP_FADE] Starting fade: volume=\(currentVolume) → 0.0, duration=\(clampedDuration)s")
-        Self.logger.debug("[STOP_DIAGNOSTIC] Fade params: from=\(currentVolume), to=0.0, duration=\(clampedDuration)s")
-        
-        // Fade out active mixer
-        await audioEngine.fadeActiveMixer(
-            from: currentVolume,
-            to: 0.0,
-            duration: clampedDuration,
-            curve: configuration.fadeCurve
-        )
-        
-        // 🔍 DIAGNOSTIC: Check state AFTER fade
-        let playerIsPlayingAfter = await audioEngine.isActivePlayerPlaying()
-        let mixerVolumeAfter = await audioEngine.getActiveMixerVolume()
-        Self.logger.debug("[STOP_DIAGNOSTIC] After fade: playerIsPlaying=\(playerIsPlayingAfter), mixerVol=\(mixerVolumeAfter)")
-        
-        Self.logger.debug("[STOP_FADE] Fade complete, performing instant stop")
-        
-        // Then perform instant stop
-        await stopImmediately()
-    }
-    
-    /// Stop playback immediately without fade
-    /// - Note: This is the original stop() behavior
-    private func stopImmediately() async {
-        // 🔍 DIAGNOSTIC: Log immediate stop
-        Self.logger.debug("[STOP_DIAGNOSTIC] stopImmediately START")
-        
-        // Stop playback components
+        // Stop timer and clear UI
         stopPlaybackTimer()
-        await audioEngine.stopBothPlayers()
-        
-        Self.logger.debug("[STOP_DIAGNOSTIC] stopImmediately: players stopped")
-        
-        // Session stays active - following Apple's AVAudioPlayer pattern
-        // iOS manages session lifecycle automatically
-        
-        // Reset ALL state for clean restart (including crossfade flags)
-        playbackPosition = nil
-        // currentTrack removed - coordinator manages active track via atomicSwitch()
-        currentRepeatCount = 0
-        // Removed: activeCrossfadeOperation = nil (managed by coordinator)
-        
-        // State change via state machine
-        await updateState(.finished)
-        
-        // Clear UI
-        let manager = remoteCommandManager!  // Capture before MainActor hop
+        let manager = remoteCommandManager!
         Task { @MainActor in
             manager.clearNowPlayingInfo()
         }
     }
+    
+    // ✅ PHASE 4: Removed stopWithFade() and stopImmediately()
+    // Logic moved to PlaybackOrchestrator.stop()
 
     
     public func finish(fadeDuration: TimeInterval?) async throws {
@@ -2155,7 +2028,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await audioEngine.play()
 
         // Update state after starting
-        await updateMode(.playing)
+        await updateState(.playing)
 
         // Clear pending fade after use
         pendingFadeInDuration = 0.0

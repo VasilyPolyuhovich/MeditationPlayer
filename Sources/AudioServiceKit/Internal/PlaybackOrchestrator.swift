@@ -59,11 +59,11 @@ actor PlaybackOrchestrator: PlaybackOrchestrating {
     // MARK: - Active Operation Tracking
 
     /// Currently running operation (for cancellation)
-    private var activeOperation: Task<Void, Never>?
+    private var activeOperation: Task<Void, Error>?
 
     // MARK: - Logging
 
-    private static let logger = Logger(subsystem: "AudioServiceKit", category: "PlaybackOrchestrator")
+    private static let logger = Logger(category: "PlaybackOrchestrator")
 
     // MARK: - Initialization
 
@@ -141,7 +141,7 @@ actor PlaybackOrchestrator: PlaybackOrchestrating {
             await engineControl.scheduleFile(
                 fadeIn: fadeDuration > 0,
                 fadeInDuration: fadeDuration,
-                fadeCurve: .easeInOut
+                fadeCurve: .equalPower
             )
             Self.logger.debug("[Orchestrator] ✅ File scheduled (fade: \(fadeDuration > 0))")
 
@@ -253,7 +253,7 @@ actor PlaybackOrchestrator: PlaybackOrchestrating {
                 from: currentVolume,
                 to: 0.0,
                 duration: fadeDuration,
-                curve: .easeInOut
+                curve: .equalPower
             )
         }
 

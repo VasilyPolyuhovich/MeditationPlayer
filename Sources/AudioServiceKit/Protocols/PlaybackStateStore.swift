@@ -34,9 +34,7 @@ protocol PlaybackStateStore: Actor {
     /// - Returns: TrackInfo or nil if none
     func getActiveTrackInfo() -> TrackInfo?
 
-    /// Get active player node
-    /// - Returns: Currently active player (A or B)
-    func getActivePlayer() -> PlayerNode
+    // Note: getActivePlayer() removed - internal detail not needed in protocol
 
     /// Check if crossfade is active
     /// - Returns: true if crossfading
@@ -50,9 +48,7 @@ protocol PlaybackStateStore: Actor {
     /// - Returns: true if paused crossfade exists
     func hasPausedCrossfade() -> Bool
 
-    /// Get active crossfade operation type
-    /// - Returns: CrossfadeOperation or nil if none
-    func getActiveCrossfadeOperation() -> CrossfadeOperation?
+    // Note: getActiveCrossfadeOperation() removed - internal detail not needed in protocol
 
     // MARK: - Mutations
 
@@ -96,14 +92,7 @@ protocol PlaybackStateStore: Actor {
     func clearPausedCrossfade()
 
     // MARK: - Snapshot & Restore
-
-    /// Capture current state snapshot
-    /// - Returns: Immutable state copy
-    func captureSnapshot() -> CoordinatorState
-
-    /// Restore state from snapshot
-    /// - Parameter snapshot: State to restore
-    func restoreSnapshot(_ snapshot: CoordinatorState)
+    // Note: captureSnapshot/restoreSnapshot removed - internal detail not needed in protocol
 
     // MARK: - Validation
 
