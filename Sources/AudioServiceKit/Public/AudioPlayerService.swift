@@ -2135,24 +2135,28 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 // MARK: - Engine Control (Internal)
 
     func startEngine() async throws {
-        Self.logger.debug("[SERVICE] startEngine → coordinator")
-        
+        Self.logger.debug("[SERVICE] startEngine → engine (Phase 3)")
+
         // Start engine (prepare + start)
         try await audioEngine.start()
-        
+
         // Use pending fade-in if set, otherwise no fade (instant start)
         let fadeInDuration = pendingFadeInDuration
         let shouldFadeIn = fadeInDuration > 0
-        
+
         await audioEngine.scheduleFile(
             fadeIn: shouldFadeIn,
             fadeInDuration: fadeInDuration,
             fadeCurve: configuration.fadeCurve
         )
-        
-        // Delegate playback start to coordinator
-        _ = try await playbackStateCoordinator.startPlayback()
-        
+
+        // ✅ PHASE 3: Start playback directly via engine
+        // Coordinator no longer has engine control methods
+        await audioEngine.play()
+
+        // Update state after starting
+        await updateMode(.playing)
+
         // Clear pending fade after use
         pendingFadeInDuration = 0.0
     }
@@ -2163,27 +2167,27 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     func pausePlayback() async {
-        Self.logger.debug("[SERVICE] pausePlayback → coordinator")
-        
+        Self.logger.debug("[SERVICE] pausePlayback → engine (Phase 3)")
+
         // Stop playback timer BEFORE pausing
         stopPlaybackTimer()
-        
-        // Delegate to coordinator
-        await playbackStateCoordinator.pausePlayback()
-        
+
+        // ✅ PHASE 3: Pause directly via engine
+        await audioEngine.pause()
+
         // Capture position
         playbackPosition = await audioEngine.getCurrentPosition()
     }
 
     func resumePlayback() async throws {
-        Self.logger.debug("[SERVICE] resumePlayback → coordinator")
-        
+        Self.logger.debug("[SERVICE] resumePlayback → engine (Phase 3)")
+
         // Ensure session is active before resuming
         try await ensureSessionActive()
-        
-        // Delegate to coordinator
-        await playbackStateCoordinator.resumePlayback()
-        
+
+        // ✅ PHASE 3: Resume directly via engine
+        await audioEngine.play()
+
         // Restart playback timer
         startPlaybackTimer()
     }
