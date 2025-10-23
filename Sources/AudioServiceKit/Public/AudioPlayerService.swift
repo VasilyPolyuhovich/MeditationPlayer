@@ -233,7 +233,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Configuration must be set via initializer or `updateConfiguration()`
     /// - Note: fadeDuration is independent from crossfade between tracks
     public func startPlaying(fadeDuration: TimeInterval = 0.0) async throws {
-        // ✅ PHASE 4: Simplified to thin facade - delegates to orchestrator
+        // ✅ BUG FIX #3: Check current state and stop if needed
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        if currentState == .playing || currentState == .preparing {
+            Self.logger.debug("[SERVICE] Already playing, stopping first")
+            await stop(fadeDuration: 0.0) // Stop without fade
+        }
+
 
         // Get current track from playlist
         guard let track = await playlistManager.getCurrentTrack() else {
@@ -335,6 +341,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Sync cached state
         _cachedState = await playbackStateCoordinator.getPlaybackMode()
         
+        // 4. Stop playback timer (CRITICAL: prevent crossfade during pause!)
+        stopPlaybackTimer()
+        
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
         
@@ -389,6 +398,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Sync cached state
         _cachedState = await playbackStateCoordinator.getPlaybackMode()
+        
+        // 5. Restart playback timer (CRITICAL: restore crossfade monitoring!)
+        startPlaybackTimer()
         
         // Update UI
         await updateNowPlayingPlaybackRate(1.0)
