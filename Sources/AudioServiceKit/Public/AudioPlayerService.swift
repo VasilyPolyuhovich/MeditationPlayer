@@ -461,18 +461,37 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
     
     public func finish(fadeDuration: TimeInterval?) async throws {
+        // ✅ BUG FIX #4: Implement proper finish() logic
         let duration = fadeDuration ?? 3.0
         
+        // 1. Validate current state
         let currentState = await playbackStateCoordinator.getPlaybackMode()
-        await updateState(.fadingOut)
-        Logger.state.debug("State transition: \(currentState) → fadingOut")
-        
-        guard await playbackStateCoordinator.getPlaybackMode() == .fadingOut else {
+        guard currentState == .playing || currentState == .paused else {
             throw AudioPlayerError.invalidState(
                 current: currentState.description,
                 attempted: "finish"
             )
         }
+        
+        // 2. Transition to fadingOut
+        await updateState(.fadingOut)
+        Self.logger.debug("[FINISH] State transition: \(currentState) → fadingOut")
+        
+        // 3. Perform fade-out
+        let currentVolume = await audioEngine.getActiveMixerVolume()
+        Self.logger.debug("[FINISH] Fading out from \(currentVolume) to 0 (duration: \(duration)s)")
+        await audioEngine.fadeActiveMixer(
+            from: currentVolume,
+            to: 0.0,
+            duration: duration,
+            curve: .equalPower
+        )
+        
+        // 4. Stop playback (reuse stop() logic - no fade as already faded)
+        Self.logger.debug("[FINISH] Fade complete, stopping playback")
+        await stop(fadeDuration: 0.0)
+        
+        Self.logger.info("[FINISH] ✅ Finished with graceful fade-out (\(duration)s)")
     }
     
     public func skip(forward interval: TimeInterval = 15.0) async throws {
@@ -2008,6 +2027,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Stop sound effects (no pause, only stop)
         await soundEffectsPlayer.stop(fadeDuration: 0.0)
         
+        // ✅ BUG FIX #5: Stop playback timer (prevent crossfade during pause!)
+        stopPlaybackTimer()
+
+        
         // Update Now Playing
         await updateNowPlayingPlaybackRate(0.0)
     }
@@ -2045,6 +2068,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Resume overlay separately
         await audioEngine.resumeOverlay()
+        
+        // ✅ BUG FIX #6: Restart playback timer (restore crossfade monitoring!)
+        startPlaybackTimer()
+
         
         // Update Now Playing
         await updateNowPlayingPlaybackRate(1.0)
