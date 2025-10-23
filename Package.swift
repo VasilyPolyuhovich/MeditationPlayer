@@ -40,10 +40,13 @@ let package = Package(
             ]
         ),
         
-        // Tests
+        // Integration Tests
         .testTarget(
-            name: "AudioServiceKitTests",
-            dependencies: ["AudioServiceKit", "AudioServiceCore"]
+            name: "AudioServiceKitIntegrationTests",
+            dependencies: ["AudioServiceKit", "AudioServiceCore"],
+            resources: [
+                .copy("TestResources")
+            ]
         )
     ],
     swiftLanguageModes: [.v6]
