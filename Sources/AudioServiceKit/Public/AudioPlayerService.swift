@@ -44,7 +44,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Internal components
     internal let audioEngine: AudioEngineActor  // Allow internal access for playlist API
     private let playbackStateCoordinator: PlaybackStateCoordinator  // SSOT for player state (Phase 5: will become pure StateStore)
-    private let playbackOrchestrator: PlaybackOrchestrator  // PHASE 4: Business logic orchestrator
     private let crossfadeOrchestrator: CrossfadeOrchestrator  // PHASE 5: Crossfade orchestration
     internal let sessionManager: AudioSessionManager  // Allow internal access for playlist API
     // RemoteCommandManager is now @MainActor isolated for thread safety
@@ -115,16 +114,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         self.playbackStateCoordinator = PlaybackStateCoordinator()  // ✅ Phase 5: No audioEngine dependency
         self.sessionManager = AudioSessionManager.shared  // Use singleton
 
-        // ✅ PHASE 4: Initialize PlaybackOrchestrator with protocol dependencies
-        self.playbackOrchestrator = PlaybackOrchestrator(
-            stateStore: playbackStateCoordinator,
-            engineControl: audioEngine,
-            sessionManager: sessionManager
-        )
-
-        // ✅ PHASE 5: Initialize CrossfadeOrchestrator with protocol dependencies
+        // ✅ PHASE 5: Initialize CrossfadeOrchestrator (PHASE 2: direct AudioEngineActor)
         self.crossfadeOrchestrator = CrossfadeOrchestrator(
-            engineControl: audioEngine,
+            audioEngine: audioEngine,
             stateStore: playbackStateCoordinator
         )
 
@@ -257,11 +249,49 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Reset loop tracking
         self.currentRepeatCount = 0
 
-        // ✅ Delegate to orchestrator (handles session, engine, state)
-        try await playbackOrchestrator.startPlaying(track: track, fadeDuration: fadeDuration)
-
-        // Sync cached state for protocol conformance
-        _cachedState = await playbackOrchestrator.getCurrentState()
+        // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic (5 steps)
+        
+        // 1. Activate audio session
+        do {
+            try await sessionManager.activate()
+            Self.logger.debug("[SERVICE] ✅ Audio session activated")
+        } catch {
+            Self.logger.error("[SERVICE] ❌ Failed to activate session: \(error)")
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Failed to activate: \(error.localizedDescription)"
+            )
+        }
+        
+        // 2. Prepare and start audio engine
+        do {
+            try await audioEngine.prepare()
+            try await audioEngine.start()
+            Self.logger.debug("[SERVICE] ✅ Engine prepared and started")
+        } catch {
+            Self.logger.error("[SERVICE] ❌ Failed to prepare/start engine: \(error)")
+            throw AudioPlayerError.engineStartFailed(
+                reason: "Failed to prepare/start: \(error.localizedDescription)"
+            )
+        }
+        
+        // 3. Load audio file and update state
+        let trackInfo = try await audioEngine.loadAudioFile(url: track.url)
+        await playbackStateCoordinator.atomicSwitch(newTrack: track, trackInfo: trackInfo, mode: .preparing)
+        Self.logger.debug("[SERVICE] ✅ File loaded: \(trackInfo.title)")
+        
+        // 4. Schedule file with optional fade-in
+        await audioEngine.scheduleFile(
+            fadeIn: fadeDuration > 0,
+            fadeInDuration: fadeDuration,
+            fadeCurve: .equalPower
+        )
+        
+        // 5. Start playback and update state
+        await audioEngine.play()
+        await playbackStateCoordinator.updateMode(.playing)
+        
+        // Sync cached state
+        _cachedState = await playbackStateCoordinator.getPlaybackMode()
         await syncCachedTrackInfo()
 
         // Update now playing info
@@ -274,39 +304,91 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
-        // ✅ PHASE 4: Simplified to thin facade
-        Self.logger.debug("[SERVICE] pause() → orchestrator")
+        // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic
+        Self.logger.debug("[SERVICE] pause()")
         
         // Delegate crossfade pause to coordinator (if any active)
         _ = try await crossfadeOrchestrator.pauseCrossfade()
         
-        // ✅ Delegate to orchestrator
-        try await playbackOrchestrator.pause()
+        // 1. Validate current state
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        guard currentState == .playing || currentState == .preparing else {
+            // Already paused - idempotent operation
+            if currentState == .paused {
+                Self.logger.debug("[SERVICE] Already paused - no-op")
+                return
+            }
+            Self.logger.error("[SERVICE] ❌ Invalid state for pause: \(currentState)")
+            throw AudioPlayerError.invalidState(
+                current: currentState.description,
+                attempted: "pause"
+            )
+        }
+        
+        // 2. Pause engine (captures position internally)
+        await audioEngine.pause()
+        Self.logger.debug("[SERVICE] ✅ Engine paused")
+        
+        // 3. Update state ONLY after success
+        await playbackStateCoordinator.updateMode(.paused)
         
         // Sync cached state
-        _cachedState = await playbackOrchestrator.getCurrentState()
+        _cachedState = await playbackStateCoordinator.getPlaybackMode()
         
         // Update UI
         await updateNowPlayingPlaybackRate(0.0)
+        
+        Self.logger.info("[SERVICE] ✅ Paused")
     }
     
     public func resume() async throws {
-        // ✅ PHASE 4: Simplified to thin facade
-        Self.logger.debug("[SERVICE] resume() → orchestrator")
+        // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic
+        Self.logger.debug("[SERVICE] resume()")
         
         // Try resume crossfade from coordinator (if any paused)
         let resumedCrossfade = try await crossfadeOrchestrator.resumeCrossfade()
         
         if !resumedCrossfade {
-            // No crossfade to resume - delegate to orchestrator
+            // No crossfade to resume - normal resume
             Self.logger.debug("[SERVICE] Normal resume (no paused crossfade)")
             
-            // ✅ Delegate to orchestrator
-            try await playbackOrchestrator.resume()
+            // 1. Validate current state
+            let currentState = await playbackStateCoordinator.getPlaybackMode()
+            guard currentState == .paused else {
+                // Already playing - idempotent operation
+                if currentState == .playing {
+                    Self.logger.debug("[SERVICE] Already playing - no-op")
+                    return
+                }
+                Self.logger.error("[SERVICE] ❌ Invalid state for resume: \(currentState)")
+                throw AudioPlayerError.invalidState(
+                    current: currentState.description,
+                    attempted: "resume"
+                )
+            }
+            
+            // 2. Ensure audio session is active
+            do {
+                try await sessionManager.ensureActive()
+                Self.logger.debug("[SERVICE] ✅ Session ensured active")
+            } catch {
+                Self.logger.error("[SERVICE] ❌ Failed to ensure session active: \(error)")
+                throw AudioPlayerError.sessionConfigurationFailed(
+                    reason: "Failed to ensure active: \(error.localizedDescription)"
+                )
+            }
+            
+            // 3. Resume engine playback (restores from saved position)
+            await audioEngine.play()
+            Self.logger.debug("[SERVICE] ✅ Engine resumed")
+            
+            // 4. Update state ONLY after success
+            await playbackStateCoordinator.updateMode(.playing)
+            Self.logger.info("[SERVICE] ✅ Resumed")
         }
         
         // Sync cached state
-        _cachedState = await playbackOrchestrator.getCurrentState()
+        _cachedState = await playbackStateCoordinator.getPlaybackMode()
         
         // Update UI
         await updateNowPlayingPlaybackRate(1.0)
@@ -330,11 +412,29 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await audioEngine.cancelCrossfadeAndStopInactive()
         }
         
-        // ✅ Delegate to orchestrator
-        await playbackOrchestrator.stop(fadeDuration: fadeDuration)
+        // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic
+        
+        // 1. Apply fade-out if requested
+        if fadeDuration > 0 {
+            let currentVolume = await audioEngine.getActiveMixerVolume()
+            Self.logger.debug("[SERVICE] Fading out from \(currentVolume) to 0")
+            await audioEngine.fadeActiveMixer(
+                from: currentVolume,
+                to: 0.0,
+                duration: fadeDuration,
+                curve: .equalPower
+            )
+        }
+        
+        // 2. Stop both players
+        await audioEngine.stopBothPlayers()
+        Self.logger.debug("[SERVICE] ✅ Players stopped")
+        
+        // 3. Update state to finished
+        await playbackStateCoordinator.updateMode(.finished)
         
         // Sync cached state
-        _cachedState = await playbackOrchestrator.getCurrentState()
+        _cachedState = await playbackStateCoordinator.getPlaybackMode()
         
         // Stop timer and clear UI
         stopPlaybackTimer()

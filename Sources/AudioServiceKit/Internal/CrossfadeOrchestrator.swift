@@ -22,7 +22,7 @@ import AudioServiceCore
 actor CrossfadeOrchestrator: CrossfadeOrchestrating {
     // MARK: - Dependencies
 
-    private let engineControl: AudioEngineControl
+    private let audioEngine: AudioEngineActor  // ✅ PHASE 2: Direct usage (no protocol)
     private let stateStore: PlaybackStateStore
 
     // MARK: - Active Crossfade State
@@ -45,10 +45,10 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
     // MARK: - Initialization
 
     init(
-        engineControl: AudioEngineControl,
+        audioEngine: AudioEngineActor,  // ✅ PHASE 2: Direct usage
         stateStore: PlaybackStateStore
     ) {
-        self.engineControl = engineControl
+        self.audioEngine = audioEngine
         self.stateStore = stateStore
 
         Self.logger.info("[CrossfadeOrch] ✅ Initialized with protocol dependencies")
@@ -102,7 +102,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         if let providedInfo = trackInfo {
             inactiveTrackInfo = providedInfo
         } else {
-            inactiveTrackInfo = try await engineControl.loadAudioFileOnSecondaryPlayer(url: track.url)
+            inactiveTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
         }
         await stateStore.loadTrackOnInactive(track, info: inactiveTrackInfo)
 
@@ -110,11 +110,11 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await stateStore.updateCrossfading(true)
 
         // 7. Prepare and start crossfade
-        await engineControl.prepareSecondaryPlayer()
+        await audioEngine.prepareSecondaryPlayer()
 
         Self.logger.info("[CrossfadeOrch] ✅ Starting engine crossfade (duration=\(duration)s)")
 
-        let progressStream = await engineControl.performSynchronizedCrossfade(
+        let progressStream = await audioEngine.performSynchronizedCrossfade(
             duration: duration,
             curve: curve
         )
@@ -144,9 +144,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await stateStore.switchActivePlayer()
 
         // Stop and clear inactive
-        await engineControl.stopInactivePlayer()
-        await engineControl.resetInactiveMixer()
-        await engineControl.clearInactiveFile()
+        await audioEngine.stopInactivePlayer()
+        await audioEngine.resetInactiveMixer()
+        await audioEngine.clearInactiveFile()
 
         // Clear crossfade state
         activeCrossfade = nil
@@ -170,7 +170,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         crossfadeProgressTask = nil
 
         // Get engine crossfade state
-        guard let engineState = await engineControl.getCrossfadeState() else {
+        guard let engineState = await audioEngine.getCrossfadeState() else {
             Self.logger.error("[CrossfadeOrch] ❌ Failed to get engine crossfade state")
             throw AudioPlayerError.invalidState(
                 current: "no engine crossfade state",
@@ -250,7 +250,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         pausedCrossfade = nil
 
         // Cancel engine crossfade
-        await engineControl.cancelActiveCrossfade()
+        await audioEngine.cancelActiveCrossfade()
 
         Self.logger.info("[CrossfadeOrch] ✅ Crossfade cancelled")
     }
@@ -279,7 +279,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         crossfadeProgressTask = nil
 
         // Rollback engine crossfade (0.3s smooth rollback)
-        _ = await engineControl.rollbackCrossfade(rollbackDuration: 0.3)
+        _ = await audioEngine.rollbackCrossfade(rollbackDuration: 0.3)
 
         // Clear crossfade state
         activeCrossfade = nil
@@ -306,7 +306,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         let finishDuration: TimeInterval = 1.0
 
         // Resume crossfade from current volumes
-        let progressStream = await engineControl.performSynchronizedCrossfade(
+        let progressStream = await audioEngine.performSynchronizedCrossfade(
             duration: finishDuration,
             curve: paused.curve
         )
@@ -320,9 +320,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await stateStore.switchActivePlayer()
 
         // Cleanup
-        await engineControl.stopInactivePlayer()
-        await engineControl.resetInactiveMixer()
-        await engineControl.clearInactiveFile()
+        await audioEngine.stopInactivePlayer()
+        await audioEngine.resetInactiveMixer()
+        await audioEngine.clearInactiveFile()
         await stateStore.updateCrossfading(false)
 
         Self.logger.info("[CrossfadeOrch] ✅ Quick finish completed")
