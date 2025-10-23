@@ -615,11 +615,11 @@ actor AudioEngineActor {
     
     // MARK: - Audio File Loading
     
-    func loadAudioFile(url: URL) throws -> TrackInfo {
-        let file = try AVAudioFile(forReading: url)
+    func loadAudioFile(track: Track) throws -> Track {
+        let file = try AVAudioFile(forReading: track.url)
         
         // 🔍 DIAGNOSTIC: Log file format
-        print("[AudioEngine] Load file: \(url.lastPathComponent)")
+        print("[AudioEngine] Load file: \(track.url.lastPathComponent)")
         print("  Format: \(file.fileFormat.sampleRate)Hz, \(file.fileFormat.channelCount)ch")
         
         // Store in active player's slot
@@ -630,7 +630,7 @@ actor AudioEngineActor {
             audioFileB = file
         }
         
-        // Get track info
+        // Extract metadata from audio file
         let duration = Double(file.length) / file.fileFormat.sampleRate
         let format = AudioFormat(
             sampleRate: file.fileFormat.sampleRate,
@@ -639,12 +639,18 @@ actor AudioEngineActor {
             isInterleaved: file.fileFormat.isInterleaved
         )
         
-        return TrackInfo(
-            title: url.lastPathComponent,
+        // Create metadata
+        let metadata = Track.Metadata(
+            title: track.url.lastPathComponent,
             artist: nil,
             duration: duration,
             format: format
         )
+        
+        // Return track with metadata filled
+        var updatedTrack = track
+        updatedTrack.metadata = metadata
+        return updatedTrack
     }
     
     // MARK: - Playback Control
@@ -1225,11 +1231,11 @@ actor AudioEngineActor {
     }
     
     /// Load audio file on the secondary player (for replace/next track)
-    func loadAudioFileOnSecondaryPlayer(url: URL) throws -> TrackInfo {
-        let file = try AVAudioFile(forReading: url)
+    func loadAudioFileOnSecondaryPlayer(track: Track) throws -> Track {
+        let file = try AVAudioFile(forReading: track.url)
         
         // 🔍 DIAGNOSTIC: Log secondary file format
-        print("[AudioEngine] Load secondary file: \(url.lastPathComponent)")
+        print("[AudioEngine] Load secondary file: \(track.url.lastPathComponent)")
         print("  Format: \(file.fileFormat.sampleRate)Hz, \(file.fileFormat.channelCount)ch")
         
         // 🔍 DIAGNOSTIC: Compare with active file format
@@ -1250,7 +1256,7 @@ actor AudioEngineActor {
             audioFileA = file
         }
         
-        // Get track info
+        // Extract metadata from audio file
         let duration = Double(file.length) / file.fileFormat.sampleRate
         let format = AudioFormat(
             sampleRate: file.fileFormat.sampleRate,
@@ -1259,12 +1265,18 @@ actor AudioEngineActor {
             isInterleaved: file.fileFormat.isInterleaved
         )
         
-        return TrackInfo(
-            title: url.lastPathComponent,
+        // Create metadata
+        let metadata = Track.Metadata(
+            title: track.url.lastPathComponent,
             artist: nil,
             duration: duration,
             format: format
         )
+        
+        // Return track with metadata filled
+        var updatedTrack = track
+        updatedTrack.metadata = metadata
+        return updatedTrack
     }
     
 

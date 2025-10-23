@@ -22,6 +22,12 @@ public struct Track: Identifiable, Sendable, Equatable {
 
     /// URL to audio file (local or remote)
     public let url: URL
+    
+    /// Track metadata (filled after AVAudioFile load)
+    ///
+    /// This field is `nil` until the audio file is loaded by AudioEngine.
+    /// Once loaded, contains duration, format, and optional title/artist.
+    public var metadata: Metadata?
 
     /// Create track with validation
     ///
@@ -48,6 +54,38 @@ public struct Track: Identifiable, Sendable, Equatable {
 
     public static func == (lhs: Track, rhs: Track) -> Bool {
         lhs.id == rhs.id
+    }
+    
+    // MARK: - Nested Types
+    
+    /// Track metadata extracted from audio file
+    ///
+    /// Created by AudioEngine when loading AVAudioFile.
+    /// Contains file properties like duration and format.
+    public struct Metadata: Sendable, Equatable {
+        /// Track title (extracted from file metadata or filename)
+        public let title: String?
+        
+        /// Track artist or creator
+        public let artist: String?
+        
+        /// Track duration in seconds
+        public let duration: TimeInterval
+        
+        /// Audio format information
+        public let format: AudioFormat
+        
+        public init(
+            title: String? = nil,
+            artist: String? = nil,
+            duration: TimeInterval,
+            format: AudioFormat
+        ) {
+            self.title = title
+            self.artist = artist
+            self.duration = duration
+            self.format = format
+        }
     }
 }
 

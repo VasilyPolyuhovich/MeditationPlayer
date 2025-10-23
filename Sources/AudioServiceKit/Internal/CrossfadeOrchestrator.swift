@@ -58,7 +58,6 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
     func startCrossfade(
         to track: Track,
-        trackInfo: TrackInfo?,
         duration: TimeInterval,
         curve: FadeCurve,
         operation: CrossfadeOperation
@@ -96,15 +95,10 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             toTrack: track
         )
 
-        // 5. Load track on inactive player
+        // 5. Load track on inactive player and fill metadata
         Self.logger.debug("[CrossfadeOrch] Loading track on inactive player...")
-        let inactiveTrackInfo: TrackInfo
-        if let providedInfo = trackInfo {
-            inactiveTrackInfo = providedInfo
-        } else {
-            inactiveTrackInfo = try await audioEngine.loadAudioFileOnSecondaryPlayer(url: track.url)
-        }
-        await stateStore.loadTrackOnInactive(track, info: inactiveTrackInfo)
+        let trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
+        await stateStore.loadTrackOnInactive(trackWithMetadata)
 
         // 6. Mark as crossfading
         await stateStore.updateCrossfading(true)

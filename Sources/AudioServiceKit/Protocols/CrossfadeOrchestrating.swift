@@ -33,8 +33,7 @@ public enum CrossfadeOperation: Sendable {
 protocol CrossfadeOrchestrating: Actor {
     /// Start crossfade from active track to new track
     /// - Parameters:
-    ///   - track: Target track to crossfade to
-    ///   - trackInfo: Optional pre-loaded track info
+    ///   - track: Target track to crossfade to (metadata will be filled during load)
     ///   - duration: Crossfade duration in seconds
     ///   - curve: Fade curve (equalPower, linear, etc.)
     ///   - operation: Operation type (automatic loop or manual change)
@@ -42,7 +41,6 @@ protocol CrossfadeOrchestrating: Actor {
     /// - Throws: AudioPlayerError if crossfade fails
     func startCrossfade(
         to track: Track,
-        trackInfo: TrackInfo?,
         duration: TimeInterval,
         curve: FadeCurve,
         operation: CrossfadeOperation

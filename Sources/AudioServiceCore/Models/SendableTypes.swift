@@ -63,28 +63,8 @@ public struct PlaybackPosition: Sendable, Equatable {
 }
 
 /// Information about currently playing track
-public struct TrackInfo: Sendable, Equatable {
-    /// Track title
-    public let title: String?
-    
-    /// Track artist or creator
-    public let artist: String?
-    
-    /// Track duration in seconds
-    public let duration: TimeInterval
-    
-    /// Audio format information
-    public let format: AudioFormat
-    
-    public init(
-        title: String? = nil,
-        artist: String? = nil,
-        duration: TimeInterval,
-        format: AudioFormat
-    ) {
-        self.title = title
-        self.artist = artist
-        self.duration = duration
-        self.format = format
-    }
-}
+///
+/// **DEPRECATED:** Use `Track.Metadata` instead.
+/// This typealias provides backward compatibility during migration.
+@available(*, deprecated, renamed: "Track.Metadata", message: "Use Track.Metadata instead of TrackInfo")
+public typealias TrackInfo = Track.Metadata

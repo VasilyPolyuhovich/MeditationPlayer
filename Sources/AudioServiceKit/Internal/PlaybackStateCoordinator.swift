@@ -54,10 +54,8 @@ actor PlaybackStateCoordinator {
     struct CoordinatorState {
         var activePlayer: PlayerNode
         var playbackMode: PlayerState
-        var activeTrack: Track?
-        var activeTrackInfo: TrackInfo?
-        var inactiveTrack: Track?
-        var inactiveTrackInfo: TrackInfo?
+        var activeTrack: Track?  // Contains metadata after load
+        var inactiveTrack: Track?  // Contains metadata after load
         var activeMixerVolume: Float
         var inactiveMixerVolume: Float
         var isCrossfading: Bool
@@ -149,9 +147,7 @@ actor PlaybackStateCoordinator {
             activePlayer: .a,
             playbackMode: .finished,
             activeTrack: nil,
-            activeTrackInfo: nil,
             inactiveTrack: nil,
-            inactiveTrackInfo: nil,
             activeMixerVolume: 1.0,
             inactiveMixerVolume: 0.0,
             isCrossfading: false
@@ -171,9 +167,7 @@ actor PlaybackStateCoordinator {
         var newState = state
         newState.activePlayer = state.activePlayer.opposite
         newState.activeTrack = state.inactiveTrack
-        newState.activeTrackInfo = state.inactiveTrackInfo
         newState.inactiveTrack = state.activeTrack
-        newState.inactiveTrackInfo = state.activeTrackInfo
         newState.activeMixerVolume = state.inactiveMixerVolume
         newState.inactiveMixerVolume = state.activeMixerVolume
         
@@ -208,13 +202,12 @@ actor PlaybackStateCoordinator {
     
     /// Atomically load track on inactive player
     /// USE CASE: Prepare next track during crossfade (REQUIREMENTS: seamless loops)
-    func loadTrackOnInactive(_ track: Track, info: TrackInfo? = nil) {
+    func loadTrackOnInactive(_ track: Track) {
         Self.logger.debug("[StateCoordinator] → loadTrackOnInactive(\(track.url.lastPathComponent))")
         
         // Update inactive track (Variant C pattern)
         var newState = state
         newState.inactiveTrack = track
-        newState.inactiveTrackInfo = info
         
         // Validate and apply
         guard newState.isConsistent else {
@@ -262,16 +255,14 @@ actor PlaybackStateCoordinator {
     
     /// Atomically switch to new track (combines load + switch)
     /// USE CASE: Pause + skip scenario (REQUIREMENTS: skip during pause without crossfade)
-    func atomicSwitch(newTrack: Track, trackInfo: TrackInfo? = nil, mode: PlayerState? = nil) {
+    func atomicSwitch(newTrack: Track, mode: PlayerState? = nil) {
         Self.logger.debug("[StateCoordinator] → atomicSwitch(\(newTrack.url.lastPathComponent))")
         
         // Create new state with immediate track switch (Variant C pattern)
         var newState = state
         newState.activePlayer = state.activePlayer.opposite
         newState.activeTrack = newTrack
-        newState.activeTrackInfo = trackInfo
         newState.inactiveTrack = state.activeTrack
-        newState.inactiveTrackInfo = state.activeTrackInfo
         
         // Update mode if specified
         if let mode = mode {
@@ -334,8 +325,8 @@ actor PlaybackStateCoordinator {
     
     /// Get current active track metadata
     /// USE CASE: Display duration, title in UI
-    func getActiveTrackInfo() -> TrackInfo? {
-        return state.activeTrackInfo
+    func getActiveTrackInfo() -> Track.Metadata? {
+        return state.activeTrack?.metadata
     }
     
     /// Check if there's a paused crossfade

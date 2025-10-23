@@ -30,9 +30,9 @@ protocol PlaybackStateStore: Actor {
     /// - Returns: Active track or nil if none
     func getActiveTrack() -> Track?
 
-    /// Get active track information
-    /// - Returns: TrackInfo or nil if none
-    func getActiveTrackInfo() -> TrackInfo?
+    /// Get active track metadata
+    /// - Returns: Track.Metadata or nil if none
+    func getActiveTrackInfo() -> Track.Metadata?
 
     // Note: getActivePlayer() removed - internal detail not needed in protocol
 
@@ -61,9 +61,8 @@ protocol PlaybackStateStore: Actor {
 
     /// Load track on inactive player atomically
     /// - Parameters:
-    ///   - track: Track to load
-    ///   - info: Optional track info
-    func loadTrackOnInactive(_ track: Track, info: TrackInfo?)
+    ///   - track: Track to load (with metadata filled)
+    func loadTrackOnInactive(_ track: Track)
 
     /// Update mixer volumes atomically
     /// - Parameters:
@@ -78,10 +77,9 @@ protocol PlaybackStateStore: Actor {
     /// Atomically switch to new track (combines load + switch)
     /// Use for pause + skip scenario
     /// - Parameters:
-    ///   - newTrack: New track to load
-    ///   - trackInfo: Optional track info
+    ///   - newTrack: New track to load (with metadata filled)
     ///   - mode: Optional playback mode to set
-    func atomicSwitch(newTrack: Track, trackInfo: TrackInfo?, mode: PlayerState?)
+    func atomicSwitch(newTrack: Track, mode: PlayerState?)
 
     // MARK: - Crossfade State Management
 
