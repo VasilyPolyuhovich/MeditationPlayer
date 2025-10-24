@@ -22,7 +22,7 @@
 - [x] Stage 07: Return Track.Metadata from navigation methods (Commit: f253ff4)
 
 ### Week 3: Robustness (3 stages)
-- [ ] Stage 08: File I/O timeout wrapper + progress
+- [x] Stage 08: File I/O timeout wrapper + progress (Commit: 66ede55)
 - [ ] Stage 09: AsyncStream<PlayerEvent> for long operations
 - [ ] Stage 10: Priority-based queue cancellation
 
