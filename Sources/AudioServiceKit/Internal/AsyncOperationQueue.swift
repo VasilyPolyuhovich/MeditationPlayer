@@ -25,6 +25,9 @@ actor AsyncOperationQueue {
     /// Maximum queue depth (drop operations beyond this)
     private let maxDepth: Int
     
+    /// Queued operations (for priority-based cancellation)
+    private var queuedOperations: [QueuedOperation] = []
+    
     // MARK: - Initialization
     
     init(maxDepth: Int = 10) {
@@ -33,43 +36,75 @@ actor AsyncOperationQueue {
     
     // MARK: - Public API
     
-    /// Enqueue operation for sequential execution
+    /// Enqueue operation for sequential execution with priority
     ///
-    /// - Parameter operation: Async throwing closure to execute
+    /// - Parameters:
+    ///   - priority: Operation priority (default: .normal)
+    ///   - description: Debug description for monitoring
+    ///   - operation: Async throwing closure to execute
     /// - Returns: Result of the operation
-    /// - Throws: Rethrows operation errors, or QueueError if queue full
+    /// - Throws: Operation errors, or QueueError if queue full
     func enqueue<T: Sendable>(
+        priority: OperationPriority = .normal,
+        description: String = "Operation",
         _ operation: @Sendable @escaping () async throws -> T
     ) async throws -> T {
         
-        // 1. Check queue depth limit
-        guard queuedCount < maxDepth else {
+        // 1. Cancel lower priority operations if this is high/critical
+        if priority >= .high {
+            cancelLowerPriorityOperations(below: priority)
+        }
+        
+        // 2. Check queue depth
+        guard queuedOperations.count < maxDepth else {
             throw QueueError.queueFull(maxDepth)
         }
         
-        queuedCount += 1
-        defer { queuedCount -= 1 }
-        
-        // 2. Wait for previous operation to complete
+        // 3. Wait for previous operation
         await currentOperation?.value
         
-        // 3. Execute this operation
+        // 4. Execute operation
         let task = Task<T, Error> {
             try await operation()
         }
         
-        // 4. Store as current operation (for next caller to wait)
-        currentOperation = Task {
-            _ = try? await task.value
+        // 5. Track in queue
+        let queuedOp = QueuedOperation(
+            priority: priority,
+            task: Task { _ = try? await task.value },
+            description: description
+        )
+        queuedOperations.append(queuedOp)
+        
+        currentOperation = queuedOp.task
+        
+        // 6. Cleanup after completion
+        let opID = queuedOp.id
+        defer {
+            queuedOperations.removeAll { $0.id == opID }
         }
         
-        // 5. Return result (rethrow errors)
+        // 7. Return result
         return try await task.value
     }
     
     /// Get current queue depth (for debugging/monitoring)
     func getQueueDepth() -> Int {
-        return queuedCount
+        return queuedOperations.count
+    }
+    
+    // MARK: - Private Helpers
+    
+    /// Cancel operations with priority lower than specified
+    /// - Parameter priority: Minimum priority threshold
+    private func cancelLowerPriorityOperations(below priority: OperationPriority) {
+        let toCancel = queuedOperations.filter { $0.priority < priority }
+        
+        for op in toCancel {
+            op.task.cancel()
+        }
+        
+        queuedOperations.removeAll { $0.priority < priority }
     }
     
     /// Cancel all queued operations (emergency stop)
