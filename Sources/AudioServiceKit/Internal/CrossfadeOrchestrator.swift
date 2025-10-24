@@ -138,9 +138,17 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             snapshotInactivePosition: snapshotInactivePos
         )
 
-        // 5. Load track on inactive player and fill metadata
+        // 5. Load track on inactive player and fill metadata (CRITICAL I/O)
         Self.logger.debug("[CrossfadeOrch] Loading track on inactive player...")
-        let trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
+        let trackWithMetadata: Track
+        do {
+            trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
+        } catch {
+            // ✅ PRIORITY 2: Cleanup state on file load error
+            Self.logger.error("[CrossfadeOrch] ❌ File load failed: \(error)")
+            activeCrossfade = nil
+            throw error
+        }
         await stateStore.loadTrackOnInactive(trackWithMetadata)
 
         // 6. Mark as crossfading
@@ -156,31 +164,34 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             curve: curve
         )
 
-        // 8. Monitor progress
+        // 8. Save crossfade ID for race detection
+        let crossfadeId = activeCrossfade!.id
+        
+        // 9. Monitor progress
         crossfadeProgressTask = Task { [weak self] in
             for await progress in progressStream {
                 await self?.updateCrossfadeProgress(progress)
             }
         }
 
-        // 9. Wait for completion
+        // 10. Wait for completion
         await crossfadeProgressTask?.value
         crossfadeProgressTask = nil
 
-        // 10. Check if cancelled during execution (by another startCrossfade rollback)
-        if activeCrossfade == nil {
-            Self.logger.debug("[CrossfadeOrch] Crossfade was cancelled (rolled back by new crossfade)")
+        // 11. Identity check: cancelled if ID changed or nil (race condition protection)
+        if activeCrossfade?.id != crossfadeId {
+            Self.logger.debug("[CrossfadeOrch] Crossfade was cancelled (identity mismatch: rolled back by new crossfade)")
             return .cancelled
         }
 
-        // 11. Check if paused during crossfade
+        // 12. Check if paused during crossfade
         if pausedCrossfade != nil {
             Self.logger.debug("[CrossfadeOrch] Crossfade paused during execution")
             activeCrossfade = nil
             return .paused
         }
 
-        // 12. Crossfade completed - cleanup
+        // 13. Crossfade completed - cleanup
         Self.logger.debug("[CrossfadeOrch] Crossfade completed, performing cleanup...")
 
         // Switch players
@@ -444,6 +455,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
 /// Active crossfade state
 private struct ActiveCrossfadeState {
+    let id: UUID = UUID()  // ✅ Identity for race condition detection
     let operation: CrossfadeOperation
     let startTime: Date
     let duration: TimeInterval
