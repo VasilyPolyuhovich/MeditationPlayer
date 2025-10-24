@@ -1160,6 +1160,39 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         )
     }
     
+    // MARK: - Peek Methods (Instant UI)
+    
+    /// Peek at next track for instant UI update
+    ///
+    /// Returns immediately without queuing operation.
+    /// UI can show next track info while skipToNext() executes in background.
+    ///
+    /// - Returns: Next track metadata, nil if no next track available
+    /// - Note: Does NOT modify playback state
+    /// - Note: Response time: <20ms (no queue wait)
+    public func peekNextTrack() async -> Track.Metadata? {
+        guard let track = await playlistManager.peekNext() else {
+            return nil
+        }
+        return track.metadata
+    }
+    
+    /// Peek at previous track for instant UI update
+    ///
+    /// Returns immediately without queuing operation.
+    /// UI can show previous track info while skipToPrevious() executes in background.
+    ///
+    /// - Returns: Previous track metadata, nil if no previous track available
+    /// - Note: Does NOT modify playback state
+    /// - Note: Response time: <20ms (no queue wait)
+    public func peekPreviousTrack() async -> Track.Metadata? {
+        guard let track = await playlistManager.peekPrevious() else {
+            return nil
+        }
+        return track.metadata
+    }
+
+    
     // MARK: - Internal Track Replacement
     
     /// Internal method for replacing current track with crossfade (used by skipToNext/skipToPrevious)

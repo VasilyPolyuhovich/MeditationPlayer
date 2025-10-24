@@ -298,6 +298,62 @@ actor PlaylistManager {
         }
     }
     
+    /// Peek at next track without advancing index
+    /// - Returns: Next track without modifying state, nil if at end in sequential mode
+    func peekNext() -> Track? {
+        guard !tracks.isEmpty else { return nil }
+        
+        if tracks.count == 1 {
+            // Single track - return same track for loop
+            return tracks[0]
+        }
+        
+        // Calculate next index based on repeat mode
+        switch configuration.repeatMode {
+        case .off:
+            // Sequential mode - return nil at end
+            if currentIndex + 1 < tracks.count {
+                let nextIndex = currentIndex + 1
+                return tracks[nextIndex]
+            } else {
+                return nil // At end, no wrap-around
+            }
+            
+        case .singleTrack, .playlist:
+            // Loop mode - wrap around
+            let nextIndex = (currentIndex + 1) % tracks.count
+            return tracks[nextIndex]
+        }
+    }
+    
+    /// Peek at previous track without changing index
+    /// - Returns: Previous track without modifying state, nil if at start in sequential mode
+    func peekPrevious() -> Track? {
+        guard !tracks.isEmpty else { return nil }
+        
+        if tracks.count == 1 {
+            // Single track - return same track
+            return tracks[0]
+        }
+        
+        // Calculate previous index based on repeat mode
+        switch configuration.repeatMode {
+        case .off:
+            // Sequential mode - return nil at start
+            if currentIndex > 0 {
+                let prevIndex = currentIndex - 1
+                return tracks[prevIndex]
+            } else {
+                return nil // At start, no wrap-around
+            }
+            
+        case .singleTrack, .playlist:
+            // Loop mode - wrap around
+            let prevIndex = (currentIndex - 1 + tracks.count) % tracks.count
+            return tracks[prevIndex]
+        }
+    }
+
     // MARK: - State Queries
     
     /// Check if playlist is empty
