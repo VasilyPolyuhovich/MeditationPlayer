@@ -77,14 +77,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private var crossfadeCleanupTask: Task<Void, Never>?
     // Removed: currentCrossfadeProgress - not used by Demo app, coordinator manages progress
     
+    // Operation queue for serializing async operations (prevents actor re-entrancy)
+    private let operationQueue = AsyncOperationQueue(maxDepth: 3)
+    
     // Route change debounce (prevents rapid-fire iOS events from breaking state)
     private var routeChangeDebounceTask: Task<Void, Never>?
     private var isHandlingRouteChange = false
-    
-    // Navigation debounce (prevents rapid Next/Prev clicks from overlapping crossfades)
-    private var navigationDebounceTask: Task<Void, Never>?
-    private var isHandlingNavigation = false
-    private let navigationDebounceDelay: TimeInterval = 0.5  // 500ms guard period
     
     // Playlist manager
     internal var playlistManager: PlaylistManager  // Allow internal access for playlist API
@@ -1077,25 +1075,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// Skip to next track in playlist
     /// - Throws: AudioPlayerError.noNextTrack if no next track available
     /// - Note: Uses configuration.crossfadeDuration for crossfade
-    /// - Note: Debounced with 500ms guard period to prevent rapid clicks
+    /// - Note: Operations are queued (no concurrent execution)
     public func skipToNext() async throws {
-        // Debounce: ignore rapid clicks (500ms guard period)
-        guard !isHandlingNavigation else {
-            Self.logger.debug("[NAVIGATION] skipToNext ignored (debounce active)")
-            return
+        try await operationQueue.enqueue(
+            priority: .normal,
+            description: "skipToNext"
+        ) {
+            try await self._skipToNextImpl()
         }
-        
-        isHandlingNavigation = true
-        defer {
-            // Reset flag after debounce delay (prevents rapid clicks)
-            navigationDebounceTask?.cancel()
-            navigationDebounceTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(self?.navigationDebounceDelay ?? 0.5 * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                await self?.setNavigationHandlingFlag(false)
-            }
-        }
-        
+    }
+    
+    private func _skipToNextImpl() async throws {
         guard let nextTrack = await playlistManager.skipToNext() else {
             throw AudioPlayerError.noNextTrack
         }
@@ -1108,25 +1098,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// Skip to previous track in playlist
     /// - Throws: AudioPlayerError.noPreviousTrack if no previous track available
     /// - Note: Uses configuration.crossfadeDuration for crossfade
-    /// - Note: Debounced with 500ms guard period to prevent rapid clicks
+    /// - Note: Operations are queued (no concurrent execution)
     public func skipToPrevious() async throws {
-        // Debounce: ignore rapid clicks (500ms guard period)
-        guard !isHandlingNavigation else {
-            Self.logger.debug("[NAVIGATION] skipToPrevious ignored (debounce active)")
-            return
+        try await operationQueue.enqueue(
+            priority: .normal,
+            description: "skipToPrevious"
+        ) {
+            try await self._skipToPreviousImpl()
         }
-        
-        isHandlingNavigation = true
-        defer {
-            // Reset flag after debounce delay (prevents rapid clicks)
-            navigationDebounceTask?.cancel()
-            navigationDebounceTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(self?.navigationDebounceDelay ?? 0.5 * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                await self?.setNavigationHandlingFlag(false)
-            }
-        }
-        
+    }
+    
+    private func _skipToPreviousImpl() async throws {
         guard let prevTrack = await playlistManager.skipToPrevious() else {
             throw AudioPlayerError.noPreviousTrack
         }
@@ -1134,13 +1116,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             track: prevTrack,
             crossfadeDuration: configuration.crossfadeDuration
         )
-    }
-    
-    // MARK: - Navigation Debounce Helpers
-    
-    /// Actor-isolated helper to reset navigation flag (called from Task)
-    private func setNavigationHandlingFlag(_ value: Bool) {
-        isHandlingNavigation = value
     }
     
     // MARK: - Internal Track Replacement
