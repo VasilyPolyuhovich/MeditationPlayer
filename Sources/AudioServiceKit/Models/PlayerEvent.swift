@@ -44,71 +44,71 @@ import AudioServiceCore
 /// }
 /// ```
 public enum PlayerEvent: Sendable {
-    
+
     // MARK: - File Loading
-    
+
     /// File loading started
     /// - Parameter url: Track URL being loaded
     case fileLoadStarted(URL)
-    
+
     /// File loading progress update
     /// - Parameters:
     ///   - url: Track URL being loaded
     ///   - progress: Loading progress (0.0-1.0)
     case fileLoadProgress(URL, progress: Double)
-    
+
     /// File loading completed successfully
     /// - Parameters:
     ///   - url: Track URL that was loaded
     ///   - duration: Time taken to load
     case fileLoadCompleted(URL, duration: Duration)
-    
+
     /// File loading timed out
     /// - Parameter url: Track URL that timed out
     /// - Note: Timeout duration is adaptive (2x-5x expected time)
     case fileLoadTimeout(URL)
-    
+
     /// File loading failed with error
     /// - Parameters:
     ///   - url: Track URL that failed
     ///   - error: Error that occurred
     case fileLoadError(URL, Error)
-    
+
     // MARK: - Crossfade Progress
-    
+
     /// Crossfade started between tracks
     /// - Parameters:
     ///   - from: Current track title
     ///   - to: Next track title
     case crossfadeStarted(from: String, to: String)
-    
+
     /// Crossfade progress update
     /// - Parameter progress: Crossfade progress (0.0-1.0)
     case crossfadeProgress(Double)
-    
+
     /// Crossfade completed successfully
     case crossfadeCompleted
-    
+
     /// Crossfade cancelled (user skip or stop)
     case crossfadeCancelled
-    
+
     /// Crossfade timed out (exceeded expected duration)
     case crossfadeTimeout
-    
+
     // MARK: - System Events
-    
+
     /// Audio session interrupted (phone call, alarm, etc.)
     case audioSessionInterruption
-    
+
     /// Audio route changed (headphones plug/unplug)
     case audioSessionRouteChange
-    
+
     // MARK: - State Changes
-    
+
     /// Playback state changed
     /// - Parameter state: New playback state
     case stateChanged(PlayerState)
-    
+
     /// Track changed with metadata
     /// - Parameter metadata: New track metadata
     case trackChanged(Track.Metadata)

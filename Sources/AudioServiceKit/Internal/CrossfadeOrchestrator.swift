@@ -79,30 +79,30 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
                 attempted: "start crossfade"
             )
         }
-        
+
         // 2a. Time Remaining Check - decide strategy
         let position = await audioEngine.getCurrentPosition()
         let currentTime = position?.currentTime ?? 0.0
         let trackDuration = position?.duration ?? (fromTrack.metadata?.duration ?? 0.0)
-        
+
         let strategy = TimeRemainingHelper.decideStrategy(
             trackPosition: currentTime,
             trackDuration: trackDuration,
             requestedDuration: duration
         )
-        
+
         Self.logger.info("[CrossfadeOrch] Time check: position=\(String(format: "%.1f", currentTime))s, duration=\(String(format: "%.1f", trackDuration))s, strategy=\(strategy)")
-        
+
         // Adapt duration based on strategy
         let actualDuration: TimeInterval
         switch strategy {
         case .fullCrossfade(let d):
             actualDuration = d
-            
+
         case .reducedCrossfade(let d):
             actualDuration = d
             Self.logger.warning("[CrossfadeOrch] ⚠️ Not enough time for full crossfade, using \(String(format: "%.1f", d))s")
-            
+
         case .separateFades(let fadeOut, let fadeIn):
             // Not enough time for crossfade - use separate fades
             Self.logger.info("[CrossfadeOrch] Using separate fades strategy (fadeOut: \(String(format: "%.1f", fadeOut))s, fadeIn: \(String(format: "%.1f", fadeIn))s)")
@@ -120,11 +120,11 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             Self.logger.debug("[CrossfadeOrch] Clearing paused crossfade (new operation)")
             pausedCrossfade = nil
         }
-        
+
         // 4. Capture position snapshot BEFORE crossfade starts (for rollback)
         let snapshotActivePos = await audioEngine.getCurrentPosition()?.currentTime ?? 0.0
         let snapshotInactivePos: TimeInterval = 0.0  // Inactive not yet loaded
-        
+
         Self.logger.debug("[CrossfadeOrch] Position snapshot: active=\(String(format: "%.2f", snapshotActivePos))s")
 
         // 5. Create active crossfade state with snapshots (using actualDuration)
@@ -149,9 +149,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
                 for: expectedLoad,
                 operation: "fileLoad"
             )
-            
+
             let loadStart = ContinuousClock.now
-            
+
             // Load with timeout protection
             trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayerWithTimeout(
                 track: track,
@@ -162,9 +162,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
                     // Note: Events logged here, can be forwarded via callback in future
                 }
             )
-            
+
             let loadDuration = ContinuousClock.now - loadStart
-            
+
             // Record actual duration for future adaptation
             await timeoutManager.recordDuration(
                 operation: "fileLoad",
@@ -194,7 +194,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
         // 8. Save crossfade ID for race detection
         let crossfadeId = activeCrossfade!.id
-        
+
         // 9. Monitor progress
         crossfadeProgressTask = Task { [weak self] in
             for await progress in progressStream {
@@ -491,7 +491,7 @@ private struct ActiveCrossfadeState {
     let fromTrack: Track
     let toTrack: Track
     var progress: Float = 0.0
-    
+
     // Position snapshots BEFORE crossfade started (for rollback)
     let snapshotActivePosition: TimeInterval
     let snapshotInactivePosition: TimeInterval
