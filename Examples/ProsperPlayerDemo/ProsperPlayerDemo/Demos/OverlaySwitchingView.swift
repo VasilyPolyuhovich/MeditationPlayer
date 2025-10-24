@@ -3,7 +3,7 @@
 //  ProsperPlayerDemo
 //
 //  Multiple overlays demo - switch between different voice overlays
-//  Shows playOverlay() with multiple SoundEffects for guided stages
+//  Shows playOverlay() with multiple Tracks for guided stages
 //
 
 import SwiftUI
@@ -21,7 +21,7 @@ struct OverlaySwitchingView: View {
     @State private var errorMessage: String?
     @State private var audioService: AudioPlayerService?
     @State private var backgroundTrack: Track?
-    @State private var overlays: [String: SoundEffect] = [:]
+    @State private var overlays: [String: Track] = [:]
 
     var body: some View {
         NavigationStack {
@@ -282,12 +282,11 @@ struct OverlaySwitchingView: View {
                 continue
             }
 
-            do {
-                let effect = try await SoundEffect(url: url)
-                overlays[name] = effect
-            } catch {
-                errorMessage = "Failed to load \(name): \(error.localizedDescription)"
+            guard let track = Track(url: url) else {
+                errorMessage = "Failed to load \(name): invalid audio file"
+                continue
             }
+            overlays[name] = track
         }
 
         // Initialize audio service
@@ -318,7 +317,7 @@ struct OverlaySwitchingView: View {
     }
 
     private func switchOverlay(_ name: String) async {
-        guard let service = audioService, let effect = overlays[name] else { return }
+        guard let service = audioService, let track = overlays[name] else { return }
 
         // Stop current overlay if playing
         if overlayPlaying {
@@ -327,7 +326,9 @@ struct OverlaySwitchingView: View {
 
         // Play new overlay
         do {
-            try await service.playOverlay(effect.track.url)
+            // ✅ Correct: playOverlay(track) for voice guidance (Overlay Player)
+            // ❌ Wrong: playSoundEffect() is for short sounds (Sound Effects Player)
+            try await service.playOverlay(track)
             overlayPlaying = true
             currentOverlay = name
             errorMessage = nil

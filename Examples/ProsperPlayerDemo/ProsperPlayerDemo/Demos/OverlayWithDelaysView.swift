@@ -3,7 +3,7 @@
 //  ProsperPlayerDemo
 //
 //  Overlay with delays demo - scheduled overlays with fade and repeat
-//  Shows playOverlayAfterDelay() for timed guided meditation stages
+//  Shows playOverlay() with OverlayConfiguration.loopDelay for timed stages
 //
 
 import SwiftUI
@@ -21,7 +21,7 @@ struct OverlayWithDelaysView: View {
     @State private var errorMessage: String?
     @State private var audioService: AudioPlayerService?
     @State private var backgroundTrack: Track?
-    @State private var overlays: [String: SoundEffect] = [:]
+    @State private var overlays: [String: Track] = [:]
     @State private var overlayDelay: Double = 5.0
     @State private var overlayFadeDuration: Double = 2.0
 
@@ -297,12 +297,11 @@ struct OverlayWithDelaysView: View {
                 continue
             }
 
-            do {
-                let effect = try await SoundEffect(url: url)
-                overlays[name] = effect
-            } catch {
-                errorMessage = "Failed to load \(name): \(error.localizedDescription)"
+            guard let track = Track(url: url) else {
+                errorMessage = "Failed to load \(name): invalid audio file"
+                continue
             }
+            overlays[name] = track
         }
 
         // Initialize audio service
@@ -344,7 +343,7 @@ struct OverlayWithDelaysView: View {
             if let intro = overlays["Intro"] {
                 scheduledOverlays[0] = "Intro (playing)"
                 overlayPlaying = true
-                try? await service.playOverlay(intro.track.url)
+                try? await service.playOverlay(intro)
                 try? await Task.sleep(for: .seconds(3)) // Simulate overlay duration
                 overlayPlaying = false
                 scheduledOverlays[0] = "Intro (done)"
@@ -357,7 +356,7 @@ struct OverlayWithDelaysView: View {
             if let practice = overlays["Practice"] {
                 scheduledOverlays[1] = "Practice (playing)"
                 overlayPlaying = true
-                try? await service.playOverlay(practice.track.url)
+                try? await service.playOverlay(practice)
                 try? await Task.sleep(for: .seconds(3))
                 overlayPlaying = false
                 scheduledOverlays[1] = "Practice (done)"
@@ -370,7 +369,7 @@ struct OverlayWithDelaysView: View {
             if let closing = overlays["Closing"] {
                 scheduledOverlays[2] = "Closing (playing)"
                 overlayPlaying = true
-                try? await service.playOverlay(closing.track.url)
+                try? await service.playOverlay(closing)
                 try? await Task.sleep(for: .seconds(3))
                 overlayPlaying = false
                 scheduledOverlays[2] = "Closing (done)"

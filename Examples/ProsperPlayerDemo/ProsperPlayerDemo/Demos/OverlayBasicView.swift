@@ -20,7 +20,7 @@ struct OverlayBasicView: View {
     @State private var errorMessage: String?
     @State private var audioService: AudioPlayerService?
     @State private var backgroundTrack: Track?
-    @State private var overlayEffect: SoundEffect?
+    @State private var overlayTrack: Track?
 
     var body: some View {
         NavigationStack {
@@ -149,7 +149,7 @@ struct OverlayBasicView: View {
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-            .disabled(playerState != .playing || overlayPlaying || overlayEffect == nil)
+            .disabled(playerState != .playing || overlayPlaying || overlayTrack == nil)
 
             Button(action: { Task { await stopOverlay() } }) {
                 Label("Stop Overlay", systemImage: "mic.slash.fill")
@@ -192,8 +192,8 @@ struct OverlayBasicView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("1. Start background music")
                 Text("2. Play voice overlay on top")
-                Text("3. Background automatically ducked")
-                Text("4. Stop overlay to restore volume")
+                Text("3. Both play simultaneously (no ducking)")
+                Text("4. Stop overlay independently")
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -236,18 +236,13 @@ struct OverlayBasicView: View {
         }
         backgroundTrack = track
 
-        // Load voice overlay
-        guard let voiceURL = Bundle.main.url(forResource: "stage1_intro_music", withExtension: "mp3") else {
+        // Load voice overlay (Track, not SoundEffect!)
+        guard let voiceURL = Bundle.main.url(forResource: "stage1_intro_music", withExtension: "mp3"),
+              let track = Track(url: voiceURL) else {
             errorMessage = "Voice file not found"
             return
         }
-
-        do {
-            overlayEffect = try await SoundEffect(url: voiceURL)
-        } catch {
-            errorMessage = "Failed to load overlay: \(error.localizedDescription)"
-            return
-        }
+        overlayTrack = track
 
         // Initialize audio service
         do {
@@ -277,10 +272,12 @@ struct OverlayBasicView: View {
     }
 
     private func playOverlay() async {
-        guard let service = audioService, let effect = overlayEffect else { return }
+        guard let service = audioService, let track = overlayTrack else { return }
 
         do {
-            try await service.playOverlay(effect.track.url)
+            // ✅ Correct: playOverlay() for long voice guidance (Overlay Player)
+            // ❌ Wrong: playSoundEffect() is for short sounds (Sound Effects Player)
+            try await service.playOverlay(track)
             overlayPlaying = true
             errorMessage = nil
         } catch {
