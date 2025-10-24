@@ -24,6 +24,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
     private let audioEngine: AudioEngineActor  // ✅ PHASE 2: Direct usage (no protocol)
     private let stateStore: PlaybackStateStore
+    private let timeoutManager = AdaptiveTimeoutManager()  // Adaptive timeout for file I/O
 
     // MARK: - Active Crossfade State
 
@@ -138,11 +139,37 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             snapshotInactivePosition: snapshotInactivePos
         )
 
-        // 5. Load track on inactive player and fill metadata (CRITICAL I/O)
+        // 5. Load track on inactive player and fill metadata (CRITICAL I/O with timeout)
         Self.logger.debug("[CrossfadeOrch] Loading track on inactive player...")
         let trackWithMetadata: Track
         do {
-            trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
+            // Calculate adaptive timeout based on past performance
+            let expectedLoad = Duration.milliseconds(500)  // Expected file I/O time
+            let adaptiveTimeout = await timeoutManager.adaptiveTimeout(
+                for: expectedLoad,
+                operation: "fileLoad"
+            )
+            
+            let loadStart = ContinuousClock.now
+            
+            // Load with timeout protection
+            trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayerWithTimeout(
+                track: track,
+                timeout: adaptiveTimeout,
+                onProgress: { event in
+                    // Log progress events
+                    Self.logger.debug("[CrossfadeOrch] File I/O: \(event)")
+                }
+            )
+            
+            let loadDuration = ContinuousClock.now - loadStart
+            
+            // Record actual duration for future adaptation
+            await timeoutManager.recordDuration(
+                operation: "fileLoad",
+                expected: expectedLoad,
+                actual: loadDuration
+            )
         } catch {
             // ✅ PRIORITY 2: Cleanup state on file load error
             Self.logger.error("[CrossfadeOrch] ❌ File load failed: \(error)")

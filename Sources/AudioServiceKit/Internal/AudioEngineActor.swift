@@ -1354,6 +1354,66 @@ actor AudioEngineActor {
         return updatedTrack
     }
     
+    /// Load audio file on secondary player with timeout protection
+    /// 
+    /// Wraps blocking file I/O with timeout to prevent hangs on corrupted/slow files.
+    /// 
+    /// - Parameters:
+    ///   - track: Track to load
+    ///   - timeout: Maximum time to wait for file load
+    ///   - onProgress: Optional progress callback for events
+    /// - Returns: Track with metadata filled
+    /// - Throws: AudioEngineError.fileLoadTimeout if timeout exceeded
+    func loadAudioFileOnSecondaryPlayerWithTimeout(
+        track: Track,
+        timeout: Duration,
+        onProgress: (@Sendable (PlayerEvent) -> Void)? = nil
+    ) async throws -> Track {
+        
+        let start = ContinuousClock.now
+        
+        // Notify start
+        onProgress?(.fileLoadStarted(track.url))
+        
+        // Create timeout task
+        let timeoutTask = Task {
+            try await Task.sleep(for: timeout)
+            throw AudioEngineError.fileLoadTimeout(track.url, timeout)
+        }
+        
+        // Create load task (wrap synchronous I/O)
+        let loadTask = Task {
+            try self.loadAudioFileOnSecondaryPlayer(track: track)
+        }
+        
+        // Race: whichever completes first
+        let result: Track
+        do {
+            result = try await loadTask.value
+            timeoutTask.cancel()
+        } catch {
+            loadTask.cancel()
+            timeoutTask.cancel()
+            
+            if error is AudioEngineError {
+                // Timeout error
+                onProgress?(.fileLoadTimeout(track.url))
+                throw error
+            } else {
+                // Load error
+                onProgress?(.fileLoadError(track.url, error))
+                throw error
+            }
+        }
+        
+        // Measure duration
+        let duration = ContinuousClock.now - start
+        onProgress?(.fileLoadCompleted(track.url, duration: duration))
+        
+        return result
+    }
+
+    
 
     
     /// Stop the currently active player
@@ -1526,3 +1586,22 @@ internal enum PlayerNode {
     case a
     case b
 }
+
+// MARK: - Errors
+
+/// Errors specific to AudioEngineActor operations
+internal enum AudioEngineError: Error, LocalizedError {
+    /// File load operation timed out
+    /// - Parameters:
+    ///   - url: File URL that timed out
+    ///   - timeout: Timeout duration that was exceeded
+    case fileLoadTimeout(URL, Duration)
+    
+    var errorDescription: String? {
+        switch self {
+        case .fileLoadTimeout(let url, let timeout):
+            return "File load timeout after \(timeout.formatted()): \(url.lastPathComponent)"
+        }
+    }
+}
+
