@@ -17,7 +17,7 @@
 
 ### Week 2: Integration (4 stages)
 - [ ] Stage 04: Wrap skipToNext/skipToPrevious
-- [ ] Stage 05: Wrap pause/resume/stop/finish
+- [x] Stage 05: Wrap pause/resume/stop/finish (Commit: 3db0550)
 - [ ] Stage 06: Add peekNext/peekPrevious for instant UI
 - [ ] Stage 07: Return Track.Metadata from navigation methods
 
