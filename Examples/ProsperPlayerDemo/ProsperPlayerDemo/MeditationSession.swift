@@ -157,10 +157,9 @@ final class MeditationSession {
     // MARK: - Private Helpers
 
     private func transitionToStage2() async {
-        currentStage = .stage2
-
         do {
             try await audioService.skipToNext()
+            currentStage = .stage2  // ✅ Після skipToNext
             await updateTrackInfo()
         } catch {
             errorMessage = "Transition error: \(error.localizedDescription)"
@@ -168,10 +167,9 @@ final class MeditationSession {
     }
 
     private func transitionToStage3() async {
-        currentStage = .stage3
-
         do {
             try await audioService.skipToNext()
+            currentStage = .stage3  // ✅ Після skipToNext
             await updateTrackInfo()
         } catch {
             errorMessage = "Transition error: \(error.localizedDescription)"
