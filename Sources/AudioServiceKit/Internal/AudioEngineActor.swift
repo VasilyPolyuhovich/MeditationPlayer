@@ -658,28 +658,50 @@ actor AudioEngineActor {
     
     // MARK: - Playback Control
     
-    func scheduleFile(fadeIn: Bool = false, fadeInDuration: TimeInterval = 3.0, fadeCurve: FadeCurve = .equalPower) {
-        guard let file = getActiveAudioFile() else { return }
-        
-        let player = getActivePlayerNode()
-        let mixer = getActiveMixerNode()
-        
-        // Reset offset when scheduling full file
+    // MARK: Primitives (Single Responsibility)
+    
+    /// Reset playback offset for active player
+    private func resetActivePlaybackOffset() {
         if activePlayer == .a {
             playbackOffsetA = 0
         } else {
             playbackOffsetB = 0
         }
+    }
+    
+    /// Schedule active audio file on active player node
+    private func scheduleActiveFile() {
+        guard let file = getActiveAudioFile() else { return }
+        let player = getActivePlayerNode()
         
-        // Schedule the file for playback
         player.scheduleFile(file, at: nil) {
             // Completion handler - will be called on audio thread
             // Keep it minimal - no heavy operations here
         }
+    }
+    
+    /// Start playback on active player node
+    private func playActivePlayer() {
+        getActivePlayerNode().play()
+    }
+    
+    /// Set active mixer volume
+    private func setActiveMixerVolume(_ volume: Float) {
+        getActiveMixerNode().volume = volume
+    }
+    
+    // MARK: Compositions (for backward compatibility)
+    
+    /// Schedule file and start playback with optional fade-in
+    /// Note: Legacy method for start() - uses Task for async fade
+    func scheduleFile(fadeIn: Bool = false, fadeInDuration: TimeInterval = 3.0, fadeCurve: FadeCurve = .equalPower) {
+        // Use primitives
+        resetActivePlaybackOffset()
+        scheduleActiveFile()
         
         // Set initial volume for fade in
         if fadeIn {
-            mixer.volume = 0.0
+            setActiveMixerVolume(0.0)
             Task {
                 // Use actor method to avoid data races
                 // Fade to targetVolume (not 1.0) to respect user's volume setting
@@ -691,11 +713,10 @@ actor AudioEngineActor {
                 )
             }
         } else {
-            mixer.volume = targetVolume  // Use target, not 1.0
+            setActiveMixerVolume(targetVolume)
         }
         
-        // Start playback
-        player.play()
+        playActivePlayer()
     }
     
     // MARK: - Seeking (REALLY FIXED)
@@ -1261,9 +1282,17 @@ actor AudioEngineActor {
     }
     
     /// Start playback with fade in effect
+    /// Note: Schedules, plays, and waits for fade to complete (using primitives)
     func playWithFadeIn(duration: TimeInterval, curve: FadeCurve = .linear) async {
-        // Use existing scheduleFile method with fade in
-        scheduleFile(fadeIn: true, fadeInDuration: duration, fadeCurve: curve)
+        guard getActiveAudioFile() != nil else { return }
+        
+        // Use primitives for clean composition
+        setActiveMixerVolume(0.0)
+        scheduleActiveFile()
+        playActivePlayer()
+        
+        // Fade in and WAIT for completion (key difference from scheduleFile)
+        await fadeInActivePlayer(duration: duration, curve: curve)
     }
     
     /// Load audio file on primary (active) player
