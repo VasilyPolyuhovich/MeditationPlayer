@@ -37,6 +37,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Helper: Sync cached TrackInfo from coordinator
     private func syncCachedTrackInfo() async {
         _cachedTrackInfo = await playbackStateCoordinator.getActiveTrackInfo()
+        // Yield to AsyncStream
+        trackContinuation?.yield(_cachedTrackInfo)
     }
     public private(set) var configuration: PlayerConfiguration  // Public read, private write (use updateConfiguration)
     public private(set) var playbackPosition: PlaybackPosition?
@@ -56,6 +58,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     
     // Observers
     private var observers: [AudioPlayerObserver] = []
+    
+    // AsyncStream support (SwiftUI-friendly API)
+    private var stateContinuation: AsyncStream<PlayerState>.Continuation?
+    private var trackContinuation: AsyncStream<Track.Metadata?>.Continuation?
+    private var positionContinuation: AsyncStream<PlaybackPosition>.Continuation?
     
     // Loop tracking
     private var currentRepeatCount = 0
@@ -1157,20 +1164,108 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         observers.removeAll()
     }
     
+    // MARK: - AsyncStream API (SwiftUI-friendly)
+    
+    /// Stream of state changes for SwiftUI observation
+    ///
+    /// ## Example:
+    /// ```swift
+    /// .task {
+    ///     for await state in service.stateUpdates {
+    ///         playerState = state
+    ///     }
+    /// }
+    /// ```
+    public var stateUpdates: AsyncStream<PlayerState> {
+        AsyncStream { continuation in
+            self.stateContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { [weak self] in
+                    await self?.cleanupStateContinuation()
+                }
+            }
+        }
+    }
+    
+    /// Stream of track changes for SwiftUI observation
+    ///
+    /// ## Example:
+    /// ```swift
+    /// .task {
+    ///     for await track in service.trackUpdates {
+    ///         currentTrack = track
+    ///     }
+    /// }
+    /// ```
+    public var trackUpdates: AsyncStream<Track.Metadata?> {
+        AsyncStream { continuation in
+            self.trackContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { [weak self] in
+                    await self?.cleanupTrackContinuation()
+                }
+            }
+        }
+    }
+    
+    /// Stream of playback position updates for SwiftUI observation
+    ///
+    /// Updates every 0.5 seconds during playback.
+    ///
+    /// ## Example:
+    /// ```swift
+    /// .task {
+    ///     for await position in service.positionUpdates {
+    ///         currentPosition = position
+    ///     }
+    /// }
+    /// ```
+    public var positionUpdates: AsyncStream<PlaybackPosition> {
+        AsyncStream { continuation in
+            self.positionContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { [weak self] in
+                    await self?.cleanupPositionContinuation()
+                }
+            }
+        }
+    }
+    
+    private func cleanupStateContinuation() {
+        stateContinuation?.finish()
+        stateContinuation = nil
+    }
+    
+    private func cleanupTrackContinuation() {
+        trackContinuation?.finish()
+        trackContinuation = nil
+    }
+    
+    private func cleanupPositionContinuation() {
+        positionContinuation?.finish()
+        positionContinuation = nil
+    }
+    
     private func notifyObservers(stateChange state: PlayerState) {
+        // Notify observers
         for observer in observers {
             Task {
                 await observer.playerStateDidChange(state)
             }
         }
+        // Yield to AsyncStream
+        stateContinuation?.yield(state)
     }
     
     private func notifyObservers(positionUpdate position: PlaybackPosition) {
+        // Notify observers
         for observer in observers {
             Task {
                 await observer.playbackPositionDidUpdate(position)
             }
         }
+        // Yield to AsyncStream
+        positionContinuation?.yield(position)
     }
     
     private func notifyObservers(error: AudioPlayerError) {
