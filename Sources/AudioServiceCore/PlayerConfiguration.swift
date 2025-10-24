@@ -57,7 +57,7 @@ public struct PlayerConfiguration: Sendable {
     /// - Incoming track: fade IN from 0.0 to 1.0 over `crossfadeDuration`
     /// - Total overlap: equals `crossfadeDuration`
     ///
-    /// Valid range: 1.0-30.0 seconds
+    /// Valid range: 0.0-30.0 seconds (0.0 = instant switch, no crossfade)
     public let crossfadeDuration: TimeInterval
     
     /// Fade curve algorithm
@@ -131,7 +131,7 @@ public struct PlayerConfiguration: Sendable {
         volume: Float = 1.0,
         audioSessionOptions: [AVAudioSession.CategoryOptions] = PlayerConfiguration.defaultAudioSessionOptions
     ) {
-        self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
+        self.crossfadeDuration = max(0.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.repeatMode = repeatMode
         self.repeatCount = repeatCount
@@ -168,7 +168,7 @@ public struct PlayerConfiguration: Sendable {
     /// - Throws: ConfigurationError if invalid
     public func validate() throws {
         // Crossfade duration range check
-        if crossfadeDuration < 1.0 || crossfadeDuration > 30.0 {
+        if crossfadeDuration < 0.0 || crossfadeDuration > 30.0 {
             throw ConfigurationError.invalidCrossfadeDuration(crossfadeDuration)
         }
         
@@ -197,7 +197,7 @@ public enum ConfigurationError: Error, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .invalidCrossfadeDuration(let duration):
-            return "Crossfade duration must be between 1.0 and 30.0 seconds (got \(duration))"
+            return "Crossfade duration must be between 0.0 and 30.0 seconds (got \(duration))"
         case .invalidVolume(let volume):
             return "Volume must be between 0.0 and 1.0 (got \(volume))"
         case .invalidRepeatCount(let count):
