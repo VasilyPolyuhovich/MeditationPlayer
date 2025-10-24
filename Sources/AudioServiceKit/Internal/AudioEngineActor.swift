@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import AudioServiceCore
 
 /// Actor that isolates AVAudioEngine for thread-safe access
@@ -38,6 +38,9 @@ actor AudioEngineActor {
     // Playback offset tracking for accurate seeking
     private var playbackOffsetA: AVAudioFramePosition = 0
     private var playbackOffsetB: AVAudioFramePosition = 0
+    
+    // Audio file cache for performance
+    private let cache = AudioFileCache()
     
     // Crossfade task management
     private var activeCrossfadeTask: Task<Void, Never>?
@@ -621,8 +624,8 @@ actor AudioEngineActor {
     
     // MARK: - Audio File Loading
     
-    func loadAudioFile(track: Track) throws -> Track {
-        let file = try AVAudioFile(forReading: track.url)
+    func loadAudioFile(track: Track) async throws -> Track {
+        let file = try await cache.get(url: track.url, priority: .userInitiated)
         
         // 🔍 DIAGNOSTIC: Log file format
         print("[AudioEngine] Load file: \(track.url.lastPathComponent)")
@@ -1300,14 +1303,21 @@ actor AudioEngineActor {
     
     /// Load audio file on primary (active) player
     /// Alias for loadAudioFile for consistency with loadAudioFileOnSecondaryPlayer naming
-    func loadAudioFileOnPrimaryPlayer(track: Track) throws -> Track {
-        return try loadAudioFile(track: track)
+    func loadAudioFileOnPrimaryPlayer(track: Track) async throws -> Track {
+        return try await loadAudioFile(track: track)
     }
+
+    /// Preload audio file into cache for future use
+    /// Call this before skipToNext/Previous to enable instant playback
+    func preloadTrack(url: URL) async {
+        await cache.preload(url: url)
+    }
+
 
     
     /// Load audio file on the secondary player (for replace/next track)
-    func loadAudioFileOnSecondaryPlayer(track: Track) throws -> Track {
-        let file = try AVAudioFile(forReading: track.url)
+    func loadAudioFileOnSecondaryPlayer(track: Track) async throws -> Track {
+        let file = try await cache.get(url: track.url, priority: .userInitiated)
         
         // 🔍 DIAGNOSTIC: Log secondary file format
         print("[AudioEngine] Load secondary file: \(track.url.lastPathComponent)")
@@ -1381,9 +1391,9 @@ actor AudioEngineActor {
             throw AudioEngineError.fileLoadTimeout(track.url, timeout)
         }
         
-        // Create load task (wrap synchronous I/O)
+        // Create load task (wrap async I/O)
         let loadTask = Task {
-            try self.loadAudioFileOnSecondaryPlayer(track: track)
+            try await self.loadAudioFileOnSecondaryPlayer(track: track)
         }
         
         // Race: whichever completes first

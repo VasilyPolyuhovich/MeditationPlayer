@@ -119,6 +119,11 @@ extension AudioPlayerService {
         
         Self.logger.info("Next track: \(nextTrack.url.lastPathComponent)")
         
+        // Preload the track after next (while crossfading to current next)
+        if let trackAfterNext = await playlistManager.peekNext() {
+            await audioEngine.preloadTrack(url: trackAfterNext.url)
+        }
+        
         // Crossfade to next track
         try await crossfadeToTrack(url: nextTrack.url)
     }
@@ -134,6 +139,11 @@ extension AudioPlayerService {
         
         Self.logger.info("Previous track: \(previousTrack.url.lastPathComponent)")
         
+        // Preload the track before previous (while crossfading to current previous)
+        if let trackBeforePrevious = await playlistManager.peekPrevious() {
+            await audioEngine.preloadTrack(url: trackBeforePrevious.url)
+        }
+        
         // Crossfade to previous track
         try await crossfadeToTrack(url: previousTrack.url)
     }
@@ -143,6 +153,11 @@ extension AudioPlayerService {
     /// Auto-advance to next track (called from loop crossfade logic)
     /// - Returns: Next track URL or nil if should stop
     func autoAdvanceToNextTrack() async -> URL? {
+        // Preload the track after next (while crossfading to next)
+        if let trackAfterNext = await playlistManager.peekNext() {
+            await audioEngine.preloadTrack(url: trackAfterNext.url)
+        }
+        
         return await playlistManager.getNextTrack()?.url
     }
     
