@@ -332,18 +332,21 @@ actor AudioEngineActor {
         crossfadeProgressContinuation?.finish()
         crossfadeProgressContinuation = nil
         
-        // 3. Graceful rollback: restore active volume to targetVolume
-        if currentActiveVolume < targetVolume {
+        // 3. Fade out BOTH players on cancel
+        // Requirement: "При скасуванні - ОБИДВА плеєри мають fade out"
+        // Note: Sequential execution to avoid Swift 6 data race warnings
+        // Both fades use same duration, total time = rollbackDuration (overlapping visually)
+        
+        if currentActiveVolume > 0.0 {
             await fadeVolume(
                 mixer: activeMixer,
                 from: currentActiveVolume,
-                to: targetVolume,  // Use target, not 1.0
+                to: 0.0,  // ✅ Fade OUT, not restore
                 duration: rollbackDuration,
-                curve: .linear  // Fast linear restore
+                curve: .linear
             )
         }
         
-        // 4. Fade out inactive player if it's playing
         if currentInactiveVolume > 0.0 {
             await fadeVolume(
                 mixer: inactiveMixer,
