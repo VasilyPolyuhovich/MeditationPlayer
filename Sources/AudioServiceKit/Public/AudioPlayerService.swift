@@ -317,11 +317,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
-        // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic
+        // ✅ PHASE 2: Added fade out before pause
         Self.logger.debug("[SERVICE] pause()")
         
         // Delegate crossfade pause to coordinator (if any active)
-        _ = try await crossfadeOrchestrator.pauseCrossfade()
+        let pausedCrossfade = try await crossfadeOrchestrator.pauseCrossfade()
         
         // 1. Validate current state
         let currentState = await playbackStateCoordinator.getPlaybackMode()
@@ -338,7 +338,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             )
         }
         
-        // 2. Pause engine (captures position internally)
+        // 2. Fade out before pause (only if not pausing crossfade)
+        if pausedCrossfade == nil {
+            await crossfadeOrchestrator.performSimpleFadeOut(duration: 0.3)
+        }
+        
+        // 3. Pause engine (captures position internally)
         await audioEngine.pause()
         Self.logger.debug("[SERVICE] ✅ Engine paused")
         
@@ -398,7 +403,10 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await audioEngine.play()
             Self.logger.debug("[SERVICE] ✅ Engine resumed")
             
-            // 4. Update state ONLY after success
+            // 4. Fade in (PHASE 2: smooth resume)
+            await crossfadeOrchestrator.performSimpleFadeIn(duration: 0.3)
+            
+            // 5. Update state ONLY after success
             await playbackStateCoordinator.updateMode(.playing)
             Self.logger.info("[SERVICE] ✅ Resumed")
         }
@@ -512,13 +520,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Removed: currentCrossfadeProgress = .idle (managed by coordinator)
         }
         
-        // TODO v3.2: Enhanced skip logic during single track fade
-        // Current: Fade is cancelled (reset), seek happens instantly
-        // Future Options:
-        //   1. Skip should preserve fade state if within fade region
-        //   2. Skip outside fade region should restart appropriate fade
-        //   3. Add skipWithFade() API for smooth transition
-        // Recommendation: Option 2 (context-aware fade restart)
+        // ✅ PHASE 2: Enhanced skip with fade-seek-fade
         
         guard let position = playbackPosition else {
             throw AudioPlayerError.invalidState(
@@ -528,7 +530,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         let newTime = min(position.currentTime + interval, position.duration)
-        try await audioEngine.seek(to: newTime)
+        try await crossfadeOrchestrator.performFadeSeekFade(seekTo: newTime, fadeOutDuration: 0.3, fadeInDuration: 0.3)
     }
     
     public func skip(backward interval: TimeInterval = 15.0) async throws {
@@ -542,8 +544,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Removed: currentCrossfadeProgress = .idle (managed by coordinator)
         }
         
-        // TODO v3.2: Enhanced skip logic during single track fade
-        // Same considerations as skipForward (see above)
+        // ✅ PHASE 2: Enhanced skip with fade-seek-fade
         
         guard let position = playbackPosition else {
             throw AudioPlayerError.invalidState(
@@ -553,7 +554,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
         
         let newTime = max(position.currentTime - interval, 0)
-        try await audioEngine.seek(to: newTime)
+        try await crossfadeOrchestrator.performFadeSeekFade(seekTo: newTime, fadeOutDuration: 0.3, fadeInDuration: 0.3)
     }
     
     /// Seek to position with fade to eliminate clicking/popping sounds

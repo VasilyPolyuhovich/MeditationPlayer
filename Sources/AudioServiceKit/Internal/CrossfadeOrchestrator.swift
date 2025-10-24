@@ -103,10 +103,15 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             Self.logger.warning("[CrossfadeOrch] ⚠️ Not enough time for full crossfade, using \(String(format: "%.1f", d))s")
             
         case .separateFades(let fadeOut, let fadeIn):
-            // TODO: Implement separate fades (Phase 2)
-            // For now: use minimum crossfade duration
-            actualDuration = max(0.3, fadeOut)
-            Self.logger.warning("[CrossfadeOrch] ⚠️ Very little time remaining (\(String(format: "%.1f", trackDuration - currentTime))s), using short crossfade \(String(format: "%.1f", actualDuration))s. TODO: Implement separateFades")
+            // Not enough time for crossfade - use separate fades
+            Self.logger.info("[CrossfadeOrch] Using separate fades strategy (fadeOut: \(String(format: "%.1f", fadeOut))s, fadeIn: \(String(format: "%.1f", fadeIn))s)")
+            return try await performSeparateFades(
+                to: track,
+                fadeOutDuration: fadeOut,
+                fadeInDuration: fadeIn,
+                curve: curve,
+                operation: operation
+            )
         }
 
         // 3. Clear any paused crossfade
@@ -358,6 +363,74 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await stateStore.updateCrossfading(false)
 
         Self.logger.info("[CrossfadeOrch] ✅ Quick finish completed")
+    }
+
+    /// Perform separate fades: fade out active → switch → fade in new track
+    /// Used when not enough time for crossfade (near end of track)
+    private func performSeparateFades(
+        to track: Track,
+        fadeOutDuration: TimeInterval,
+        fadeInDuration: TimeInterval,
+        curve: FadeCurve,
+        operation: CrossfadeOperation
+    ) async throws -> CrossfadeResult {
+        Self.logger.info("[CrossfadeOrch] → performSeparateFades(fadeOut: \(String(format: "%.1f", fadeOutDuration))s, fadeIn: \(String(format: "%.1f", fadeInDuration))s)")
+
+        // 1. Fade out active player
+        Self.logger.debug("[CrossfadeOrch] Step 1: Fade out active player")
+        await audioEngine.fadeOutActivePlayer(duration: fadeOutDuration, curve: curve)
+
+        // 2. Stop active player
+        Self.logger.debug("[CrossfadeOrch] Step 2: Stop active player")
+        await audioEngine.stopActivePlayer()
+
+        // 3. Load new track on active player (reuse same player)
+        Self.logger.debug("[CrossfadeOrch] Step 3: Load new track on active player")
+        let trackWithMetadata = try await audioEngine.loadAudioFileOnPrimaryPlayer(track: track)
+        await stateStore.atomicSwitch(newTrack: trackWithMetadata, mode: nil)
+
+        // 4. Start playback with fade in
+        Self.logger.debug("[CrossfadeOrch] Step 4: Start with fade in")
+        await audioEngine.playWithFadeIn(duration: fadeInDuration, curve: curve)
+
+        Self.logger.info("[CrossfadeOrch] ✅ Separate fades completed")
+        return .completed
+    }
+
+    // MARK: - Simple Fade Operations (Pause/Resume/Skip)
+
+    /// Perform simple fade out (for pause operations)
+    func performSimpleFadeOut(duration: TimeInterval = 0.3) async {
+        Self.logger.debug("[CrossfadeOrch] → performSimpleFadeOut(\(String(format: "%.1f", duration))s)")
+        await audioEngine.fadeOutActivePlayer(duration: duration, curve: .linear)
+        Self.logger.debug("[CrossfadeOrch] ✅ Simple fade out completed")
+    }
+
+    /// Perform simple fade in (for resume operations)
+    func performSimpleFadeIn(duration: TimeInterval = 0.3) async {
+        Self.logger.debug("[CrossfadeOrch] → performSimpleFadeIn(\(String(format: "%.1f", duration))s)")
+        await audioEngine.fadeInActivePlayer(duration: duration, curve: .linear)
+        Self.logger.debug("[CrossfadeOrch] ✅ Simple fade in completed")
+    }
+
+    /// Perform fade → seek → fade (for skip forward/backward)
+    func performFadeSeekFade(
+        seekTo time: TimeInterval,
+        fadeOutDuration: TimeInterval = 0.3,
+        fadeInDuration: TimeInterval = 0.3
+    ) async throws {
+        Self.logger.debug("[CrossfadeOrch] → performFadeSeekFade(to: \(String(format: "%.1f", time))s)")
+
+        // 1. Fade out
+        await audioEngine.fadeOutActivePlayer(duration: fadeOutDuration, curve: .linear)
+
+        // 2. Seek
+        try await audioEngine.seek(to: time)
+
+        // 3. Fade in
+        await audioEngine.fadeInActivePlayer(duration: fadeInDuration, curve: .linear)
+
+        Self.logger.info("[CrossfadeOrch] ✅ Fade-seek-fade completed")
     }
 }
 

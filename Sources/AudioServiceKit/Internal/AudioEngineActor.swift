@@ -1233,6 +1233,46 @@ actor AudioEngineActor {
         activeMixer.volume = 1.0
     }
     
+    // MARK: - Simple Fade Operations (for Pause/Resume/Skip)
+    
+    /// Fade out active player to volume 0.0
+    func fadeOutActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear) async {
+        let mixer = getActiveMixerNode()
+        let currentVolume = mixer.volume
+        await fadeVolume(
+            mixer: mixer,
+            from: currentVolume,
+            to: 0.0,
+            duration: duration,
+            curve: curve
+        )
+    }
+    
+    /// Fade in active player from volume 0.0 to 1.0
+    func fadeInActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear) async {
+        let mixer = getActiveMixerNode()
+        await fadeVolume(
+            mixer: mixer,
+            from: 0.0,
+            to: 1.0,
+            duration: duration,
+            curve: curve
+        )
+    }
+    
+    /// Start playback with fade in effect
+    func playWithFadeIn(duration: TimeInterval, curve: FadeCurve = .linear) async {
+        // Use existing scheduleFile method with fade in
+        scheduleFile(fadeIn: true, fadeInDuration: duration, fadeCurve: curve)
+    }
+    
+    /// Load audio file on primary (active) player
+    /// Alias for loadAudioFile for consistency with loadAudioFileOnSecondaryPlayer naming
+    func loadAudioFileOnPrimaryPlayer(track: Track) throws -> Track {
+        return try loadAudioFile(track: track)
+    }
+
+    
     /// Load audio file on the secondary player (for replace/next track)
     func loadAudioFileOnSecondaryPlayer(track: Track) throws -> Track {
         let file = try AVAudioFile(forReading: track.url)
