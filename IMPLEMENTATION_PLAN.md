@@ -23,7 +23,7 @@
 
 ### Week 3: Robustness (3 stages)
 - [x] Stage 08: File I/O timeout wrapper + progress (Commit: 66ede55)
-- [ ] Stage 09: AsyncStream<PlayerEvent> for long operations
+- [x] Stage 09: AsyncStream<PlayerEvent> for long operations (Commit: 1aef5d1)
 - [ ] Stage 10: Priority-based queue cancellation
 
 ### Week 4: Cleanup (3 stages)
