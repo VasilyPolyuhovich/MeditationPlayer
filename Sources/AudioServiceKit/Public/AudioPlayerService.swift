@@ -320,6 +320,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func pause() async throws {
+        try await operationQueue.enqueue(
+            priority: .high,
+            description: "pause"
+        ) {
+            try await self._pauseImpl()
+        }
+    }
+    
+    private func _pauseImpl() async throws {
         // ✅ PHASE 2: Added fade out before pause
         Self.logger.debug("[SERVICE] pause()")
         
@@ -366,6 +375,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     public func resume() async throws {
+        try await operationQueue.enqueue(
+            priority: .normal,
+            description: "resume"
+        ) {
+            try await self._resumeImpl()
+        }
+    }
+    
+    private func _resumeImpl() async throws {
         // ✅ PHASE 1 SIMPLIFICATION: Inline orchestrator logic
         Self.logger.debug("[SERVICE] resume()")
         
@@ -429,6 +447,21 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// - Note: Default is instant stop (fadeDuration = 0.0)
     /// - Note: If stop called during crossfade, crossfade is cancelled and fadeout is performed on active track
     public func stop(fadeDuration: TimeInterval = 0.0) async {
+        do {
+            try await operationQueue.enqueue(
+                priority: .high,
+                description: "stop"
+            ) {
+                await self._stopImpl(fadeDuration: fadeDuration)
+            }
+        } catch {
+            Self.logger.error("[QUEUE] stop() enqueue failed: \(error)")
+            // Fallback: execute directly if queue is full
+            await _stopImpl(fadeDuration: fadeDuration)
+        }
+    }
+    
+    private func _stopImpl(fadeDuration: TimeInterval) async {
         // ✅ PHASE 4: Simplified to thin facade
         Self.logger.debug("[SERVICE] stop(fade: \(fadeDuration)s) → orchestrator")
 
@@ -479,6 +512,15 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
     
     public func finish(fadeDuration: TimeInterval?) async throws {
+        try await operationQueue.enqueue(
+            priority: .high,
+            description: "finish"
+        ) {
+            try await self._finishImpl(fadeDuration: fadeDuration)
+        }
+    }
+    
+    private func _finishImpl(fadeDuration: TimeInterval?) async throws {
         // ✅ BUG FIX #4: Implement proper finish() logic
         let duration = fadeDuration ?? 3.0
         
@@ -505,9 +547,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             curve: .equalPower
         )
         
-        // 4. Stop playback (reuse stop() logic - no fade as already faded)
+        // 4. Stop playback (call impl directly - no fade as already faded)
         Self.logger.debug("[FINISH] Fade complete, stopping playback")
-        await stop(fadeDuration: 0.0)
+        await _stopImpl(fadeDuration: 0.0)
         
         Self.logger.info("[FINISH] ✅ Finished with graceful fade-out (\(duration)s)")
     }
