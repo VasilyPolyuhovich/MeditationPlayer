@@ -13,7 +13,7 @@
 ### Week 1: Core Infrastructure (3 stages)
 - [x] Stage 01: AsyncOperationQueue base implementation
 - [x] Stage 02: Priority enum + cancellation logic
-- [ ] Stage 03: Adaptive timeout manager
+- [x] Stage 03: Adaptive timeout manager
 
 ### Week 2: Integration (4 stages)
 - [ ] Stage 04: Wrap skipToNext/skipToPrevious
