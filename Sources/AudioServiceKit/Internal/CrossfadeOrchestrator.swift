@@ -192,10 +192,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             curve: curve
         )
 
-        // 8. Save crossfade ID for race detection
-        let crossfadeId = activeCrossfade!.id
-
-        // 9. Monitor progress
+        // 8. Monitor progress
         crossfadeProgressTask = Task { [weak self] in
             for await progress in progressStream {
                 await self?.updateCrossfadeProgress(progress)
@@ -206,13 +203,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await crossfadeProgressTask?.value
         crossfadeProgressTask = nil
 
-        // 11. Identity check: cancelled if ID changed or nil (race condition protection)
-        if activeCrossfade?.id != crossfadeId {
-            Self.logger.debug("[CrossfadeOrch] Crossfade was cancelled (identity mismatch: rolled back by new crossfade)")
-            return .cancelled
-        }
-
-        // 12. Check if paused during crossfade
+        // 9. Check if paused during crossfade
         if pausedCrossfade != nil {
             Self.logger.debug("[CrossfadeOrch] Crossfade paused during execution")
             activeCrossfade = nil
@@ -483,7 +474,6 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
 /// Active crossfade state
 private struct ActiveCrossfadeState {
-    let id: UUID = UUID()  // ✅ Identity for race condition detection
     let operation: CrossfadeOperation
     let startTime: Date
     let duration: TimeInterval
