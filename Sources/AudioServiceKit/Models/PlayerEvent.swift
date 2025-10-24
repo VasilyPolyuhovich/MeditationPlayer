@@ -112,6 +112,12 @@ public enum PlayerEvent: Sendable {
     /// Track changed with metadata
     /// - Parameter metadata: New track metadata
     case trackChanged(Track.Metadata)
+    
+    // MARK: - Error Events
+    
+    /// Error occurred during playback
+    /// - Parameter error: The error that occurred
+    case error(AudioPlayerError)
 }
 
 // MARK: - CustomStringConvertible
@@ -147,6 +153,8 @@ extension PlayerEvent: CustomStringConvertible {
             return "StateChanged(\(state))"
         case .trackChanged(let metadata):
             return "TrackChanged(\(metadata.title ?? "Unknown"))"
+        case .error(let error):
+            return "Error(\(error.localizedDescription))"
         }
     }
 }

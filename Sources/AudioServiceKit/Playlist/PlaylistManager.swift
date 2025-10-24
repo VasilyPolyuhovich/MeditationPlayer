@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import AudioServiceCore
 
 /// Manages playlist state and navigation
@@ -380,6 +381,88 @@ actor PlaylistManager {
     func updateConfiguration(_ configuration: PlayerConfiguration) {
         self.configuration = configuration
     }
+    
+    // MARK: - File Load Retry Support (Bug Fix #1)
+    
+    /// Restore playlist index (rollback on validation failure)
+    /// - Parameter index: Index to restore
+    func restoreIndex(_ index: Int) {
+        self.currentIndex = index
+    }
+    
+    /// Validate track file accessibility and audio format
+    /// - Parameter track: Track to validate
+    /// - Returns: True if track is valid and playable
+    func validateTrack(_ track: Track) async -> Bool {
+        // Check file exists
+        guard FileManager.default.fileExists(atPath: track.url.path) else {
+            print("[PlaylistManager] ⚠️ Track validation failed: file not found - \(track.url.lastPathComponent)")
+            return false
+        }
+        
+        // Attempt to open audio file (validates format and readability)
+        do {
+            let file = try AVAudioFile(forReading: track.url)
+            _ = file.processingFormat // Access format to ensure file is readable
+            return true
+        } catch {
+            print("[PlaylistManager] ⚠️ Track validation failed: \(track.url.lastPathComponent), error: \(error.localizedDescription)")
+            return false
+        }
+    }
+    
+    /// Skip to track with automatic retry on validation failure (two-phase commit)
+    /// - Parameters:
+    ///   - direction: Skip direction (.next or .previous)
+    ///   - maxAttempts: Maximum validation attempts (default: 3)
+    /// - Returns: Valid track or nil if all attempts failed
+    func skipToTrackWithRetry(
+        direction: SkipDirection,
+        maxAttempts: Int = 3
+    ) async -> Track? {
+        guard !tracks.isEmpty else { return nil }
+        
+        // Phase 0: Save original index for rollback
+        let originalIndex = currentIndex
+        var attempts = 0
+        
+        while attempts < maxAttempts {
+            attempts += 1
+            
+            // Phase 1: Peek at candidate track (non-destructive)
+            guard let candidateTrack = peekInDirection(direction) else {
+                print("[PlaylistManager] No more tracks in \(direction) direction")
+                restoreIndex(originalIndex)
+                return nil
+            }
+            
+            // Phase 2: Validate track file
+            let isValid = await validateTrack(candidateTrack)
+            
+            if isValid {
+                // Phase 3: Commit index change
+                _ = skipInDirection(direction)
+                print("[PlaylistManager] ✅ Skip successful (attempt \(attempts)): \(candidateTrack.url.lastPathComponent)")
+                return candidateTrack
+            } else {
+                // Validation failed - advance to skip corrupted file
+                print("[PlaylistManager] ⚠️ Attempt \(attempts) failed, trying next track...")
+                _ = skipInDirection(direction)
+                
+                // Detect infinite loop (wrapped back to start)
+                if currentIndex == originalIndex {
+                    print("[PlaylistManager] ❌ Wrapped around - all tracks invalid")
+                    restoreIndex(originalIndex)
+                    return nil
+                }
+            }
+        }
+        
+        // All attempts exhausted
+        print("[PlaylistManager] ❌ All \(maxAttempts) attempts failed")
+        restoreIndex(originalIndex)
+        return nil
+    }
 
     // MARK: - Private Helpers
 
@@ -418,4 +501,32 @@ actor PlaylistManager {
             return nil
         }
     }
+    
+    /// Peek at track in specified direction without modifying index
+    private func peekInDirection(_ direction: SkipDirection) -> Track? {
+        switch direction {
+        case .next:
+            return peekNext()
+        case .previous:
+            return peekPrevious()
+        }
+    }
+    
+    /// Skip in specified direction (commits index change)
+    private func skipInDirection(_ direction: SkipDirection) -> Track? {
+        switch direction {
+        case .next:
+            return skipToNext()
+        case .previous:
+            return skipToPrevious()
+        }
+    }
+}
+
+// MARK: - Skip Direction
+
+/// Direction for track navigation with retry
+enum SkipDirection {
+    case next
+    case previous
 }

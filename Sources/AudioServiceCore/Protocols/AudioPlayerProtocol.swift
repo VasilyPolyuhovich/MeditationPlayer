@@ -84,14 +84,15 @@ public protocol PlaylistAudioPlayerProtocol: AudioPlayerProtocol {
     func skipToPrevious() async throws
 }
 
-/// Protocol for observing player state changes
-public protocol AudioPlayerObserver: AnyObject, Sendable {
-    /// Called when player state changes
-    func playerStateDidChange(_ state: PlayerState) async
-    
-    /// Called when playback position updates
-    func playbackPositionDidUpdate(_ position: PlaybackPosition) async
-    
-    /// Called when an error occurs
-    func playerDidEncounterError(_ error: AudioPlayerError) async
-}
+// MARK: - Observer Protocol Removed (v3.1)
+// AudioPlayerObserver has been removed in favor of AsyncStream.
+// Use the following AsyncStream properties instead:
+//   - stateUpdates: AsyncStream<PlayerState>
+//   - positionUpdates: AsyncStream<PlaybackPosition>
+//   - events: AsyncStream<PlayerEvent> (includes errors)
+//
+// Migration:
+//   OLD: class MyObserver: AudioPlayerObserver {
+//           func playerStateDidChange(_ state: PlayerState) { ... }
+//        }
+//   NEW: for await state in player.stateUpdates { ... }

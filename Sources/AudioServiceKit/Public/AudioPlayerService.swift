@@ -56,8 +56,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Playback timer for position updates
     private var playbackTimer: Task<Void, Never>?
     
-    // Observers
-    private var observers: [AudioPlayerObserver] = []
+    // Observers removed in v3.1 - use AsyncStream APIs instead
     
     // AsyncStream support (SwiftUI-friendly API)
     private var stateContinuation: AsyncStream<PlayerState>.Continuation?
@@ -854,8 +853,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             manager.clearNowPlayingInfo()
         }
         
-        // Clear observers
-        observers.removeAll()
+        // Observers removed in v3.1 - AsyncStream continuations cleared separately
     }
     
 
@@ -1263,22 +1261,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
 
     
-    // MARK: - Observers (Public for Demo App)
-    
-    public func addObserver(_ observer: AudioPlayerObserver) {
-        observers.append(observer)
-    }
-    
-    public func removeObserver(_ observer: AudioPlayerObserver) {
-        // Remove by identity (assuming observers are classes)
-        observers.removeAll { existingObserver in
-            existingObserver === observer
-        }
-    }
-    
-    internal func removeAllObservers() {
-        observers.removeAll()
-    }
+    // MARK: - Observer API Removed (v3.1)
+    // The observer pattern has been removed in favor of AsyncStream.
+    // Use stateUpdates, positionUpdates, and events AsyncStream properties.
+    //
+    // Migration:
+    //   OLD: player.addObserver(self)
+    //   NEW: Task { for await state in player.stateUpdates { ... } }
     
     // MARK: - AsyncStream API (SwiftUI-friendly)
     
@@ -1402,33 +1391,18 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     private func notifyObservers(stateChange state: PlayerState) {
-        // Notify observers
-        for observer in observers {
-            Task {
-                await observer.playerStateDidChange(state)
-            }
-        }
-        // Yield to AsyncStream
+        // Yield to AsyncStream (observers removed in v3.1)
         stateContinuation?.yield(state)
     }
     
     private func notifyObservers(positionUpdate position: PlaybackPosition) {
-        // Notify observers
-        for observer in observers {
-            Task {
-                await observer.playbackPositionDidUpdate(position)
-            }
-        }
-        // Yield to AsyncStream
+        // Yield to AsyncStream (observers removed in v3.1)
         positionContinuation?.yield(position)
     }
     
     private func notifyObservers(error: AudioPlayerError) {
-        for observer in observers {
-            Task {
-                await observer.playerDidEncounterError(error)
-            }
-        }
+        // Errors now go through events stream (observers removed in v3.1)
+        eventContinuation?.yield(.error(error))
     }
     
     // MARK: - Playback Timer
@@ -2385,14 +2359,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Update progress state
         // Removed: currentCrossfadeProgress = .idle (managed by coordinator)
         
-        // Notify observers about rollback
-        for observer in observers {
-            Task {
-                if let progressObserver = observer as? CrossfadeProgressObserver {
-                    await progressObserver.crossfadeProgressDidUpdate(.idle)
-                }
-            }
-        }
+        // Observer notification removed in v3.1 - crossfade progress via coordinator
         
         Self.logger.debug("[ROLLBACK] ✅ Crossfade rollback completed")
     }

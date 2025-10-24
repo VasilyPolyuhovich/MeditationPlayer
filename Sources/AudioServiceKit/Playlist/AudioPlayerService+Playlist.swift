@@ -106,46 +106,68 @@ extension AudioPlayerService {
     // MARK: - Track Navigation
     
     /// Go to next track in playlist (manual)
-    /// - Throws: AudioPlayerError if crossfade fails
+    /// - Throws: AudioPlayerError if crossfade fails or no valid tracks
     public func nextTrack() async throws {
-        guard let nextTrack = await playlistManager.skipToNext() else {
-            // No next track - stop if not looping
+        // Use retry logic to find next valid track
+        guard let nextTrack = await playlistManager.skipToTrackWithRetry(
+            direction: .next,
+            maxAttempts: 3
+        ) else {
+            // All retry attempts failed
             if configuration.repeatMode == .off {
-                Self.logger.info("Reached end of playlist, stopping")
+                Self.logger.info("Reached end of playlist or no valid tracks, stopping")
                 try await finish(fadeDuration: nil)
+            } else {
+                // In loop mode, if all tracks invalid, throw error
+                Self.logger.error("No valid tracks found in playlist")
+                throw AudioPlayerError.noValidTracksInPlaylist
             }
             return
         }
         
         Self.logger.info("Next track: \(nextTrack.url.lastPathComponent)")
         
-        // Preload the track after next (while crossfading to current next)
+        // Preload the track after next (while crossfading)
         if let trackAfterNext = await playlistManager.peekNext() {
             await audioEngine.preloadTrack(url: trackAfterNext.url)
         }
         
         // Crossfade to next track
-        try await crossfadeToTrack(url: nextTrack.url)
+        do {
+            try await crossfadeToTrack(url: nextTrack.url)
+        } catch {
+            Self.logger.error("Crossfade to next track failed: \(error.localizedDescription)")
+            throw AudioPlayerError.skipFailed(reason: "Crossfade failed: \(error.localizedDescription)")
+        }
     }
     
     /// Go to previous track in playlist (manual)
-    /// - Throws: AudioPlayerError if crossfade fails
+    /// - Throws: AudioPlayerError if crossfade fails or no valid tracks
     public func previousTrack() async throws {
-        guard let previousTrack = await playlistManager.skipToPrevious() else {
-            // No previous track
-            Self.logger.debug("Already at first track")
+        // Use retry logic to find previous valid track
+        guard let previousTrack = await playlistManager.skipToTrackWithRetry(
+            direction: .previous,
+            maxAttempts: 3
+        ) else {
+            // All retry attempts failed or at start
+            Self.logger.debug("Already at first track or no valid tracks")
             return
         }
         
         Self.logger.info("Previous track: \(previousTrack.url.lastPathComponent)")
         
-        // Preload the track before previous (while crossfading to current previous)
+        // Preload the track before previous (while crossfading)
         if let trackBeforePrevious = await playlistManager.peekPrevious() {
             await audioEngine.preloadTrack(url: trackBeforePrevious.url)
         }
         
         // Crossfade to previous track
-        try await crossfadeToTrack(url: previousTrack.url)
+        do {
+            try await crossfadeToTrack(url: previousTrack.url)
+        } catch {
+            Self.logger.error("Crossfade to previous track failed: \(error.localizedDescription)")
+            throw AudioPlayerError.skipFailed(reason: "Crossfade failed: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - Internal Auto-Advance

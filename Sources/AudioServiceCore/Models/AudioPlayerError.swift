@@ -239,6 +239,34 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Check loaded effects list
     /// - Handle missing effects gracefully
     case soundEffectNotFound(id: UUID)
+    
+    /// No valid tracks found in playlist after retry attempts
+    ///
+    /// **When it occurs:**
+    /// - All tracks in playlist failed validation (corrupted/missing files)
+    /// - File system errors preventing access to any track
+    /// - Playlist contains only invalid audio files
+    ///
+    /// **How to handle:**
+    /// - Verify all track files exist and are accessible
+    /// - Check file permissions
+    /// - Validate audio file integrity before adding to playlist
+    /// - Prompt user to select valid audio files
+    case noValidTracksInPlaylist
+    
+    /// Failed to skip to next/previous track after retry attempts
+    ///
+    /// **When it occurs:**
+    /// - Multiple consecutive track files are corrupted
+    /// - File system errors during track navigation
+    /// - All retry attempts (default: 3) failed
+    ///
+    /// **How to handle:**
+    /// - Check file system health
+    /// - Verify track files integrity
+    /// - Remove corrupted tracks from playlist
+    /// - Reload playlist with valid files
+    case skipFailed(reason: String)
 
     
     // MARK: - Unknown Errors
@@ -312,6 +340,12 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             
         case .soundEffectNotFound(let id):
             return "Sound effect not found: \(id) - ensure it's preloaded before playing"
+            
+        case .noValidTracksInPlaylist:
+            return "No valid tracks found in playlist - all files are corrupted or missing"
+            
+        case .skipFailed(let reason):
+            return "Failed to skip track after retry attempts: \(reason)"
 
             
         // Unknown Errors
@@ -352,7 +386,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             return .system
         case .bufferSchedulingFailed:
             return .playback
-        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack, .soundEffectNotFound:
+        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack, .soundEffectNotFound, .noValidTracksInPlaylist, .skipFailed:
             return .playlist
         case .unknown:
             return .unknown
