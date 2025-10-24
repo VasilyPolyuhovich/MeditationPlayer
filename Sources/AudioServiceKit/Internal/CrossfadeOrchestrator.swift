@@ -167,14 +167,20 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         await crossfadeProgressTask?.value
         crossfadeProgressTask = nil
 
-        // 10. Check if paused during crossfade
+        // 10. Check if cancelled during execution (by another startCrossfade rollback)
+        if activeCrossfade == nil {
+            Self.logger.debug("[CrossfadeOrch] Crossfade was cancelled (rolled back by new crossfade)")
+            return .cancelled
+        }
+
+        // 11. Check if paused during crossfade
         if pausedCrossfade != nil {
             Self.logger.debug("[CrossfadeOrch] Crossfade paused during execution")
             activeCrossfade = nil
             return .paused
         }
 
-        // 11. Crossfade completed - cleanup
+        // 12. Crossfade completed - cleanup
         Self.logger.debug("[CrossfadeOrch] Crossfade completed, performing cleanup...")
 
         // Switch players
