@@ -252,9 +252,22 @@ actor PlaylistManager {
             return tracks[0]
         }
         
-        // Move to next
-        currentIndex = (currentIndex + 1) % tracks.count
-        return tracks[currentIndex]
+        // Check repeat mode for navigation behavior
+        switch configuration.repeatMode {
+        case .off:
+            // Sequential mode - return nil at end
+            if currentIndex + 1 < tracks.count {
+                currentIndex += 1
+                return tracks[currentIndex]
+            } else {
+                return nil // At end, no wrap-around
+            }
+            
+        case .singleTrack, .playlist:
+            // Loop mode - wrap around
+            currentIndex = (currentIndex + 1) % tracks.count
+            return tracks[currentIndex]
+        }
     }
     
     /// Jump to previous track (manual skip backward)
@@ -267,9 +280,22 @@ actor PlaylistManager {
             return tracks[0]
         }
         
-        // Move to previous (wrap around)
-        currentIndex = (currentIndex - 1 + tracks.count) % tracks.count
-        return tracks[currentIndex]
+        // Check repeat mode for navigation behavior
+        switch configuration.repeatMode {
+        case .off:
+            // Sequential mode - return nil at start
+            if currentIndex > 0 {
+                currentIndex -= 1
+                return tracks[currentIndex]
+            } else {
+                return nil // At start, no wrap-around
+            }
+            
+        case .singleTrack, .playlist:
+            // Loop mode - wrap around
+            currentIndex = (currentIndex - 1 + tracks.count) % tracks.count
+            return tracks[currentIndex]
+        }
     }
     
     // MARK: - State Queries
