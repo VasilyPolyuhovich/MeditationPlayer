@@ -63,6 +63,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private var stateContinuation: AsyncStream<PlayerState>.Continuation?
     private var trackContinuation: AsyncStream<Track.Metadata?>.Continuation?
     private var positionContinuation: AsyncStream<PlaybackPosition>.Continuation?
+    private var eventContinuation: AsyncStream<PlayerEvent>.Continuation?
     
     // Loop tracking
     private var currentRepeatCount = 0
@@ -1346,6 +1347,40 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
     }
     
+    /// Stream of player events (file loading, crossfade progress, etc.)
+    ///
+    /// Provides real-time feedback for long-running operations.
+    ///
+    /// ## Example:
+    /// ```swift
+    /// .task {
+    ///     for await event in player.events {
+    ///         switch event {
+    ///         case .fileLoadStarted(let url):
+    ///             showLoadingIndicator(url)
+    ///         case .fileLoadProgress(_, let progress):
+    ///             updateProgressBar(progress)
+    ///         case .crossfadeProgress(let progress):
+    ///             updateCrossfadeBar(progress)
+    ///         case .fileLoadCompleted(let url, let duration):
+    ///             hideLoadingIndicator()
+    ///             logMetric("fileLoad", duration)
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    public var events: AsyncStream<PlayerEvent> {
+        AsyncStream { continuation in
+            self.eventContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { [weak self] in
+                    await self?.cleanupEventContinuation()
+                }
+            }
+        }
+    }
+
+    
     private func cleanupStateContinuation() {
         stateContinuation?.finish()
         stateContinuation = nil
@@ -1359,6 +1394,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private func cleanupPositionContinuation() {
         positionContinuation?.finish()
         positionContinuation = nil
+    }
+    
+    private func cleanupEventContinuation() {
+        eventContinuation?.finish()
+        eventContinuation = nil
     }
     
     private func notifyObservers(stateChange state: PlayerState) {

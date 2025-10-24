@@ -159,6 +159,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
                 onProgress: { event in
                     // Log progress events
                     Self.logger.debug("[CrossfadeOrch] File I/O: \(event)")
+                    // Note: Events logged here, can be forwarded via callback in future
                 }
             )
             
