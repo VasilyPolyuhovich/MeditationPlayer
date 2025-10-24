@@ -1115,16 +1115,25 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // MARK: - Playlist Navigation
     
     /// Skip to next track in playlist
+    /// - Returns: Next track metadata (returned instantly before audio transition)
     /// - Throws: AudioPlayerError.noNextTrack if no next track available
     /// - Note: Uses configuration.crossfadeDuration for crossfade
     /// - Note: Operations are queued (no concurrent execution)
-    public func skipToNext() async throws {
+    /// - Note: Metadata returned immediately (<20ms), audio transition happens in background
+    public func skipToNext() async throws -> Track.Metadata? {
+        // 1. Get metadata BEFORE queueing (instant)
+        let nextMetadata = await peekNextTrack()
+        
+        // 2. Queue audio operation (background)
         try await operationQueue.enqueue(
             priority: .normal,
             description: "skipToNext"
         ) {
             try await self._skipToNextImpl()
         }
+        
+        // 3. Return metadata (UI can use immediately)
+        return nextMetadata
     }
     
     private func _skipToNextImpl() async throws {
@@ -1138,16 +1147,25 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
     
     /// Skip to previous track in playlist
+    /// - Returns: Previous track metadata (returned instantly before audio transition)
     /// - Throws: AudioPlayerError.noPreviousTrack if no previous track available
     /// - Note: Uses configuration.crossfadeDuration for crossfade
     /// - Note: Operations are queued (no concurrent execution)
-    public func skipToPrevious() async throws {
+    /// - Note: Metadata returned immediately (<20ms), audio transition happens in background
+    public func skipToPrevious() async throws -> Track.Metadata? {
+        // 1. Get metadata BEFORE queueing (instant)
+        let prevMetadata = await peekPreviousTrack()
+        
+        // 2. Queue audio operation (background)
         try await operationQueue.enqueue(
             priority: .normal,
             description: "skipToPrevious"
         ) {
             try await self._skipToPreviousImpl()
         }
+        
+        // 3. Return metadata (UI can use immediately)
+        return prevMetadata
     }
     
     private func _skipToPreviousImpl() async throws {
