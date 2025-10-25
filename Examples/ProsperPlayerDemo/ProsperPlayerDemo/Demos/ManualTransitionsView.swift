@@ -39,11 +39,11 @@ struct ManualTransitionsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadResources()
-            }
-            .task {
+                
                 // AsyncStream: Reactive state updates (v3.1+)
+                // Start AFTER loadResources completes to avoid race condition
                 guard let service = audioService else { return }
-                for await state in service.stateUpdates {
+                for await state in await service.stateUpdates {
                     playerState = state
                 }
             }

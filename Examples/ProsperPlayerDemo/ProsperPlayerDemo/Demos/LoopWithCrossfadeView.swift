@@ -33,15 +33,17 @@ struct LoopWithCrossfadeView: View {
             }
             .navigationTitle("Loop with Crossfade")
             .navigationBarTitleDisplayMode(.inline)
-            .task { await loadResources() }
-            .onChange(of: repeatCount) { _, _ in Task { await updateConfiguration() } }
             .task {
+                await loadResources()
+                
                 // AsyncStream: Reactive state updates (v3.1+)
+                // Start AFTER loadResources completes to avoid race condition
                 guard let service = audioService else { return }
-                for await state in service.stateUpdates {
+                for await state in await service.stateUpdates {
                     playerState = state
                 }
             }
+            .onChange(of: repeatCount) { _, _ in Task { await updateConfiguration() } }
         }
     }
 

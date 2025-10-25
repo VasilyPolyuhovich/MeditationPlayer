@@ -43,19 +43,28 @@ struct MultiInstanceView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadResources()
-            }
-            .task {
-                // AsyncStream: Player 1 state updates (v3.1+)
-                guard let service = audioService1 else { return }
-                for await state in service.stateUpdates {
-                    player1State = state
-                }
-            }
-            .task {
-                // AsyncStream: Player 2 state updates (v3.1+)
-                guard let service = audioService2 else { return }
-                for await state in service.stateUpdates {
-                    player2State = state
+                
+                // AsyncStream: Start both players AFTER loadResources completes
+                // to avoid race condition. Use Task group for concurrent streams.
+                await withTaskGroup(of: Void.self) { group in
+                    // Player 1 stream
+                    group.addTask { @MainActor in
+                        guard let service = audioService1 else { return }
+                        for await state in await service.stateUpdates {
+                            player1State = state
+                        }
+                    }
+                    
+                    // Player 2 stream
+                    group.addTask { @MainActor in
+                        guard let service = audioService2 else { return }
+                        for await state in await service.stateUpdates {
+                            player2State = state
+                        }
+                    }
+                    
+                    // Wait for all tasks
+                    await group.waitForAll()
                 }
             }
         }

@@ -55,16 +55,16 @@ struct CrossfadeWithPauseView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task {
                 await loadResources()
+                
+                // AsyncStream: Reactive state updates (v3.1+)
+                // Start AFTER loadResources completes to avoid race condition
+                guard let service = audioService else { return }
+                for await state in await service.stateUpdates {
+                    playerState = state
+                }
             }
             .onChange(of: crossfadeDuration) { _, _ in
                 Task { await updateConfiguration() }
-            }
-            .task {
-                // AsyncStream: Reactive state updates (v3.1+)
-                guard let service = audioService else { return }
-                for await state in service.stateUpdates {
-                    playerState = state
-                }
             }
         }
     }
