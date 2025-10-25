@@ -30,8 +30,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Helper: Update state via coordinator and sync cache
     private func updateState(_ newState: PlayerState) async {
         await playbackStateCoordinator.updateMode(newState)
-        _cachedState = newState
-        notifyObservers(stateChange: newState)
+        await syncCachedState()  // Read from coordinator + yield
+    }
+    
+    // Helper: Sync cached state from coordinator
+    private func syncCachedState() async {
+        _cachedState = await playbackStateCoordinator.getPlaybackMode()
+        // Yield to AsyncStream
+        stateContinuation?.yield(_cachedState)
     }
     
     // Helper: Sync cached TrackInfo from coordinator
@@ -293,6 +299,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 3. Load audio file and update state
         let trackWithMetadata = try await audioEngine.loadAudioFile(track: track)
         await playbackStateCoordinator.atomicSwitch(newTrack: trackWithMetadata, mode: .preparing)
+        await syncCachedState()  // ✅ Sync .preparing state to AsyncStream
+        await syncCachedTrackInfo()  // ✅ Sync track metadata to AsyncStream
         Self.logger.debug("[SERVICE] ✅ File loaded: \(trackWithMetadata.metadata?.title ?? "Unknown")")
         
         // 4. Schedule file with optional fade-in
@@ -304,11 +312,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 5. Start playback and update state
         await audioEngine.play()
-        await playbackStateCoordinator.updateMode(.playing)
-        
-        // Sync cached state
-        _cachedState = await playbackStateCoordinator.getPlaybackMode()
-        await syncCachedTrackInfo()
+        await updateState(.playing)
 
         // Update now playing info
         await updateNowPlayingInfo()
@@ -360,10 +364,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.debug("[SERVICE] ✅ Engine paused")
         
         // 3. Update state ONLY after success
-        await playbackStateCoordinator.updateMode(.paused)
-        
-        // Sync cached state
-        _cachedState = await playbackStateCoordinator.getPlaybackMode()
+        await updateState(.paused)
         
         // 4. Stop playback timer (CRITICAL: prevent crossfade during pause!)
         stopPlaybackTimer()
@@ -389,6 +390,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // Try resume crossfade from coordinator (if any paused)
         let resumedCrossfade = try await crossfadeOrchestrator.resumeCrossfade()
+        
+        if resumedCrossfade {
+            // ✅ Sync state after crossfade resume (orchestrator changed SSOT internally)
+            await syncCachedState()
+            await syncCachedTrackInfo()
+        }
         
         if !resumedCrossfade {
             // No crossfade to resume - normal resume
@@ -427,13 +434,11 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // 4. Fade in (PHASE 2: smooth resume)
             await crossfadeOrchestrator.performSimpleFadeIn(duration: 0.3)
             
-            // 5. Update state ONLY after success
-            await playbackStateCoordinator.updateMode(.playing)
-            Self.logger.info("[SERVICE] ✅ Resumed")
+            Self.logger.info("[SERVICE] ✅ Normal resume completed")
         }
         
-        // Sync cached state
-        _cachedState = await playbackStateCoordinator.getPlaybackMode()
+        // ✅ CRITICAL FIX: Update state for BOTH paths (normal + crossfade)
+        await updateState(.playing)
         
         // 5. Restart playback timer (CRITICAL: restore crossfade monitoring!)
         startPlaybackTimer()
@@ -494,10 +499,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         Self.logger.debug("[SERVICE] ✅ Players stopped")
         
         // 3. Update state to finished
-        await playbackStateCoordinator.updateMode(.finished)
-        
-        // Sync cached state
-        _cachedState = await playbackStateCoordinator.getPlaybackMode()
+        await updateState(.finished)
         
         // Stop timer and clear UI
         stopPlaybackTimer()
@@ -812,9 +814,6 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // Re-setup engine for fresh start
         try? await audioEngine.setup()
         
-        // Notify observers
-        notifyObservers(stateChange: .finished)
-        
         // Clear Now Playing
         let manager = remoteCommandManager!  // Capture before MainActor hop
         Task { @MainActor in
@@ -995,6 +994,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 8. Update current track state via coordinator
         await playbackStateCoordinator.atomicSwitch(newTrack: firstTrackWithMetadata)
+        await syncCachedState()  // ✅ Sync state (activePlayer, playbackMode)
         await syncCachedTrackInfo()
         // currentTrackURL removed - coordinator manages active track
         
@@ -1092,6 +1092,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         
         // 8. Update current track state via coordinator
         await playbackStateCoordinator.atomicSwitch(newTrack: firstTrackWithMetadata)
+        await syncCachedState()  // ✅ Sync state (activePlayer, playbackMode)
         await syncCachedTrackInfo()
         
         // 9. Reset counters
@@ -1252,6 +1253,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             // Load on inactive and switch
             let trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
             await playbackStateCoordinator.atomicSwitch(newTrack: trackWithMetadata)
+            await syncCachedState()  // ✅ Sync state (activePlayer switch!)
             await syncCachedTrackInfo()
             
             // Switch engine players
@@ -1390,20 +1392,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         eventContinuation = nil
     }
     
-    private func notifyObservers(stateChange state: PlayerState) {
-        // Yield to AsyncStream (observers removed in v3.1)
-        stateContinuation?.yield(state)
-    }
     
     private func notifyObservers(positionUpdate position: PlaybackPosition) {
         // Yield to AsyncStream (observers removed in v3.1)
         positionContinuation?.yield(position)
     }
     
-    private func notifyObservers(error: AudioPlayerError) {
-        // Errors now go through events stream (observers removed in v3.1)
-        eventContinuation?.yield(.error(error))
-    }
     
     // MARK: - Playback Timer
     
