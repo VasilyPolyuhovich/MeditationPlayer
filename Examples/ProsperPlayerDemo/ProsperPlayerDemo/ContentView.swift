@@ -50,7 +50,7 @@ struct ContentView: View {
             case .overlay:
                 return [.overlayBasic, .overlaySwitching, .overlayPause]
             case .advanced:
-                return [.seekAndSkip, .eventsStream, .multiInstance, .audioSessionDemo, .mantraMeditation, .fullMeditation]
+                return [.seekAndSkip, .eventsStream, .queueDiagnostics, .multiInstance, .audioSessionDemo, .mantraMeditation, .fullMeditation]
             }
         }
     }
@@ -78,6 +78,7 @@ struct ContentView: View {
         // Advanced
         case seekAndSkip = "Seek & Skip"
         case eventsStream = "Events Stream"
+        case queueDiagnostics = "Queue Diagnostics"
         case multiInstance = "Multiple Players"
         case audioSessionDemo = "Audio Session Test"
         case mantraMeditation = "Stage 2: Mantra Practice"
@@ -100,6 +101,7 @@ struct ContentView: View {
             case .overlayPause: return "Pause/resume overlay independently"
             case .seekAndSkip: return "Jump to position or skip time"
             case .eventsStream: return "Listen to player events stream"
+            case .queueDiagnostics: return "Monitor queue performance metrics"
             case .multiInstance: return "Run 2+ players simultaneously"
             case .audioSessionDemo: return "Work with external recorders"
             case .mantraMeditation: return "MANY overlay switches (Stage 2)"
@@ -198,6 +200,8 @@ struct ContentView: View {
             SeekAndSkipDemoView()
         case .eventsStream:
             EventStreamDemoView()
+        case .queueDiagnostics:
+            QueueDiagnosticsDemoView()
         case .multiInstance:
             MultiInstanceView()
         case .audioSessionDemo:

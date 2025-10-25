@@ -36,7 +36,8 @@ let package = Package(
             name: "AudioServiceKit",
             dependencies: ["AudioServiceCore"],
             swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
+                .enableExperimentalFeature("StrictConcurrency"),
+                .define("ENABLE_QUEUE_DIAGNOSTICS", .when(configuration: .debug))
             ]
         ),
         
