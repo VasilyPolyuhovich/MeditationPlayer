@@ -61,6 +61,13 @@ struct PauseResumeView: View {
                     await updateConfiguration(crossfadeDuration: newValue)
                 }
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -285,7 +292,7 @@ struct PauseResumeView: View {
         do {
             try await service.loadPlaylist(tracks)
             try await service.startPlaying(fadeDuration: 2.0)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateCurrentTrack()
             errorMessage = nil
         } catch {
@@ -298,7 +305,7 @@ struct PauseResumeView: View {
 
         do {
             try await service.pause()
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             errorMessage = nil
         } catch {
             errorMessage = "Pause error: \(error.localizedDescription)"
@@ -310,7 +317,7 @@ struct PauseResumeView: View {
 
         do {
             try await service.resume()
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateCurrentTrack()
             errorMessage = nil
         } catch {
@@ -322,7 +329,7 @@ struct PauseResumeView: View {
         guard let service = audioService else { return }
 
         await service.stop()
-        playerState = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
         currentTrack = "No track"
     }
 

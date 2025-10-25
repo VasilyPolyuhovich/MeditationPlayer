@@ -40,6 +40,13 @@ struct ManualTransitionsView: View {
             .task {
                 await loadResources()
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -224,7 +231,7 @@ struct ManualTransitionsView: View {
         do {
             try await service.loadPlaylist(tracks)
             try await service.startPlaying(fadeDuration: 2.0)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateTrackInfo()
             errorMessage = nil
         } catch {
@@ -236,7 +243,7 @@ struct ManualTransitionsView: View {
         guard let service = audioService else { return }
         do {
             try await service.skipToNext()
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateTrackInfo()
             errorMessage = nil
         } catch {
@@ -247,7 +254,7 @@ struct ManualTransitionsView: View {
     private func stop() async {
         guard let service = audioService else { return }
         await service.stop()
-        playerState = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
         currentTrack = "No track"
     }
 

@@ -46,6 +46,13 @@ struct OverlayWithDelaysView: View {
             .task {
                 await loadResources()
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -323,7 +330,7 @@ struct OverlayWithDelaysView: View {
         do {
             try await service.loadPlaylist([track])
             try await service.startPlaying(fadeDuration: 2.0)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             currentTrack = "Background Music"
             errorMessage = nil
         } catch {
@@ -382,7 +389,7 @@ struct OverlayWithDelaysView: View {
 
         await service.stop()
         await service.stopOverlay()
-        playerState = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
         currentTrack = "No track"
         overlayPlaying = false
         scheduledOverlays = []

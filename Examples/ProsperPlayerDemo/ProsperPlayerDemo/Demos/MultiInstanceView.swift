@@ -44,6 +44,20 @@ struct MultiInstanceView: View {
             .task {
                 await loadResources()
             }
+            .task {
+                // AsyncStream: Player 1 state updates (v3.1+)
+                guard let service = audioService1 else { return }
+                for await state in service.stateUpdates {
+                    player1State = state
+                }
+            }
+            .task {
+                // AsyncStream: Player 2 state updates (v3.1+)
+                guard let service = audioService2 else { return }
+                for await state in service.stateUpdates {
+                    player2State = state
+                }
+            }
         }
     }
 
@@ -287,7 +301,7 @@ struct MultiInstanceView: View {
         do {
             try await service.loadPlaylist([track])
             try await service.startPlaying(fadeDuration: 1.0)
-            player1State = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             errorMessage = nil
         } catch {
             errorMessage = "Player 1 error: \(error.localizedDescription)"
@@ -298,7 +312,7 @@ struct MultiInstanceView: View {
         guard let service = audioService1 else { return }
 
         await service.stop()
-        player1State = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
     }
 
     private func playPlayer2() async {
@@ -307,7 +321,7 @@ struct MultiInstanceView: View {
         do {
             try await service.loadPlaylist([track])
             try await service.startPlaying(fadeDuration: 1.0)
-            player2State = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             errorMessage = nil
         } catch {
             errorMessage = "Player 2 error: \(error.localizedDescription)"
@@ -318,7 +332,7 @@ struct MultiInstanceView: View {
         guard let service = audioService2 else { return }
 
         await service.stop()
-        player2State = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
     }
 }
 

@@ -54,6 +54,13 @@ struct FadeStartStopView: View {
             .task {
                 await loadResources()
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -293,7 +300,7 @@ struct FadeStartStopView: View {
         do {
             try await service.loadPlaylist([track])
             try await service.startPlaying(fadeDuration: fadeInDuration)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             errorMessage = nil
         } catch {
             errorMessage = "Play error: \(error.localizedDescription)"
@@ -305,7 +312,7 @@ struct FadeStartStopView: View {
 
         do {
             try await service.finish(fadeDuration: fadeOutDuration)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             currentTrack = "Stopped"
         } catch {
             errorMessage = "Stop error: \(error.localizedDescription)"

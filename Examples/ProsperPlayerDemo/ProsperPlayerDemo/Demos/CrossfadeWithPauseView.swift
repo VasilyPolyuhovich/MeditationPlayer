@@ -59,6 +59,13 @@ struct CrossfadeWithPauseView: View {
             .onChange(of: crossfadeDuration) { _, _ in
                 Task { await updateConfiguration() }
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -279,7 +286,7 @@ struct CrossfadeWithPauseView: View {
         do {
             try await service.loadPlaylist(tracks)
             try await service.startPlaying(fadeDuration: 2.0)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateTrackInfo()
             errorMessage = nil
         } catch {
@@ -291,7 +298,7 @@ struct CrossfadeWithPauseView: View {
         guard let service = audioService else { return }
         do {
             try await service.pause()
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             errorMessage = nil
         } catch {
             errorMessage = "Pause error: \(error.localizedDescription)"
@@ -302,7 +309,7 @@ struct CrossfadeWithPauseView: View {
         guard let service = audioService else { return }
         do {
             try await service.resume()
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateTrackInfo()
             errorMessage = nil
         } catch {
@@ -313,7 +320,7 @@ struct CrossfadeWithPauseView: View {
     private func stop() async {
         guard let service = audioService else { return }
         await service.stop()
-        playerState = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
         currentTrack = "No track"
     }
 

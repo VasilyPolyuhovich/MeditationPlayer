@@ -32,6 +32,7 @@ final class MeditationSession {
     // MARK: - Dependencies
 
     private var audioService: AudioPlayerService!
+    private var stateUpdateTask: Task<Void, Never>?
 
     // Test tracks (will be loaded from bundle)
     private var stage1Music: Track?
@@ -59,6 +60,14 @@ final class MeditationSession {
             
             do {
                 self.audioService = try await AudioPlayerService(configuration: config)
+                
+                // AsyncStream: Start listening to state updates (v3.1+)
+                self.stateUpdateTask = Task { @MainActor in
+                    let stream = await self.audioService.stateUpdates
+                    for await state in stream {
+                        self.playbackState = state
+                    }
+                }
             } catch {
                 self.errorMessage = "Failed to initialize audio service: \(error.localizedDescription)"
             }
@@ -89,7 +98,7 @@ final class MeditationSession {
         do {
             try await audioService.loadPlaylist([track1, track2, track3])
             try await audioService.startPlaying(fadeDuration: 2.0)
-            playbackState = await audioService.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             await updateTrackInfo()
         } catch {
             errorMessage = "Failed to start: \(error.localizedDescription)"
@@ -114,7 +123,7 @@ final class MeditationSession {
             } else if playbackState == .paused {
                 try await audioService.resume()
             }
-            playbackState = await audioService.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
         } catch {
             errorMessage = "Playback error: \(error.localizedDescription)"
         }
@@ -139,7 +148,7 @@ final class MeditationSession {
     func stopSession() async {
         await audioService.stop()
         currentStage = .idle
-        playbackState = .finished
+        // ✅ playbackState updated via AsyncStream
         currentTrackInfo = "Session stopped"
         isOverlayPlaying = false
     }
@@ -180,7 +189,7 @@ final class MeditationSession {
         do {
             try await audioService.finish(fadeDuration: 3.0)
             currentStage = .finished
-            playbackState = .finished
+            // ✅ playbackState updated via AsyncStream
             currentTrackInfo = "Session complete"
         } catch {
             errorMessage = "Finish error: \(error.localizedDescription)"

@@ -42,6 +42,13 @@ struct AudioSessionDemoView: View {
             .task {
                 await loadResources()
             }
+            .task {
+                // AsyncStream: Reactive state updates (v3.1+)
+                guard let service = audioService else { return }
+                for await state in service.stateUpdates {
+                    playerState = state
+                }
+            }
         }
     }
 
@@ -259,7 +266,7 @@ struct AudioSessionDemoView: View {
         do {
             try await service.loadPlaylist([track])
             try await service.startPlaying(fadeDuration: 2.0)
-            playerState = await service.state
+            // ✅ State updates via AsyncStream (no manual polling needed)
             sessionInfo = "Playing - audio session active. Try interruptions!"
             errorMessage = nil
         } catch {
@@ -272,7 +279,7 @@ struct AudioSessionDemoView: View {
         guard let service = audioService else { return }
 
         await service.stop()
-        playerState = await service.state
+        // ✅ State updates via AsyncStream (no manual polling needed)
         currentTrack = "Practice Music (long track)"
         sessionInfo = "Stopped - audio session released"
     }
