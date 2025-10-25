@@ -48,9 +48,9 @@ struct ContentView: View {
             case .repeatModes:
                 return [.loopWithCrossfade, .overlayWithDelays]
             case .overlay:
-                return [.overlayBasic, .overlaySwitching]
+                return [.overlayBasic, .overlaySwitching, .overlayPause]
             case .advanced:
-                return [.multiInstance, .audioSessionDemo, .fullMeditation]
+                return [.seekAndSkip, .eventsStream, .multiInstance, .audioSessionDemo, .mantraMeditation, .fullMeditation]
             }
         }
     }
@@ -73,10 +73,14 @@ struct ContentView: View {
         // Overlay
         case overlayBasic = "Basic Overlay"
         case overlaySwitching = "Multiple Overlays"
+        case overlayPause = "Overlay Pause/Resume"
         
         // Advanced
+        case seekAndSkip = "Seek & Skip"
+        case eventsStream = "Events Stream"
         case multiInstance = "Multiple Players"
         case audioSessionDemo = "Audio Session Test"
+        case mantraMeditation = "Stage 2: Mantra Practice"
         case fullMeditation = "3-Stage Meditation"
         
         var id: String { rawValue }
@@ -93,8 +97,12 @@ struct ContentView: View {
             case .overlayWithDelays: return "Overlay loops with fade + delay"
             case .overlayBasic: return "Voice over background music"
             case .overlaySwitching: return "Switch overlays on the fly"
+            case .overlayPause: return "Pause/resume overlay independently"
+            case .seekAndSkip: return "Jump to position or skip time"
+            case .eventsStream: return "Listen to player events stream"
             case .multiInstance: return "Run 2+ players simultaneously"
             case .audioSessionDemo: return "Work with external recorders"
+            case .mantraMeditation: return "MANY overlay switches (Stage 2)"
             case .fullMeditation: return "Complete 30-min session demo"
             }
         }
@@ -184,10 +192,18 @@ struct ContentView: View {
             OverlayBasicView()
         case .overlaySwitching:
             OverlaySwitchingView()
+        case .overlayPause:
+            OverlayPauseDemoView()
+        case .seekAndSkip:
+            SeekAndSkipDemoView()
+        case .eventsStream:
+            EventStreamDemoView()
         case .multiInstance:
             MultiInstanceView()
         case .audioSessionDemo:
             AudioSessionDemoView()
+        case .mantraMeditation:
+            MantraMeditationDemoView()
         case .fullMeditation:
             MeditationSessionView()
         }
