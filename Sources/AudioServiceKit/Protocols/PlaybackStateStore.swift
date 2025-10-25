@@ -54,7 +54,8 @@ protocol PlaybackStateStore: Actor {
 
     /// Update playback mode atomically
     /// - Parameter mode: New playback mode
-    func updateMode(_ mode: PlayerState)
+    /// - Throws: AudioPlayerError.invalidState if new state is inconsistent
+    func updateMode(_ mode: PlayerState) throws
 
     /// Switch active/inactive players atomically
     func switchActivePlayer()

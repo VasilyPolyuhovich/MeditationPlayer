@@ -37,14 +37,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private func syncCachedState() async {
         _cachedState = await playbackStateCoordinator.getPlaybackMode()
         // Yield to AsyncStream
-        stateContinuation?.yield(_cachedState)
+        stateContinuation.yield(_cachedState)  // ✅ Non-optional continuation
     }
     
     // Helper: Sync cached TrackInfo from coordinator
     private func syncCachedTrackInfo() async {
         _cachedTrackInfo = await playbackStateCoordinator.getActiveTrackInfo()
         // Yield to AsyncStream
-        trackContinuation?.yield(_cachedTrackInfo)
+        trackContinuation.yield(_cachedTrackInfo)  // ✅ Non-optional continuation
     }
     public private(set) var configuration: PlayerConfiguration  // Public read, private write (use updateConfiguration)
     public private(set) var playbackPosition: PlaybackPosition?
@@ -65,10 +65,16 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     // Observers removed in v3.1 - use AsyncStream APIs instead
     
     // AsyncStream support (SwiftUI-friendly API)
-    private var stateContinuation: AsyncStream<PlayerState>.Continuation?
-    private var trackContinuation: AsyncStream<Track.Metadata?>.Continuation?
-    private var positionContinuation: AsyncStream<PlaybackPosition>.Continuation?
-    private var eventContinuation: AsyncStream<PlayerEvent>.Continuation?
+    // ✅ FIXED: Producer-owned AsyncStream with makeStream() pattern
+    // Non-optional stored streams + continuations eliminate race conditions
+    private let stateStream: AsyncStream<PlayerState>
+    private let stateContinuation: AsyncStream<PlayerState>.Continuation
+    private let trackStream: AsyncStream<Track.Metadata?>
+    private let trackContinuation: AsyncStream<Track.Metadata?>.Continuation
+    private let positionStream: AsyncStream<PlaybackPosition>
+    private let positionContinuation: AsyncStream<PlaybackPosition>.Continuation
+    private let eventStream: AsyncStream<PlayerEvent>
+    private let eventContinuation: AsyncStream<PlayerEvent>.Continuation
     
     // Loop tracking
     private var currentRepeatCount = 0
@@ -125,6 +131,25 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     ///
     /// - Parameter configuration: Player configuration (optional, uses defaults if not provided)
     public init(configuration: PlayerConfiguration = PlayerConfiguration()) async throws {
+        
+        // ✅ CRITICAL FIX: Initialize AsyncStreams FIRST (before any async calls)
+        // Using makeStream() with buffering ensures early events aren't lost
+        let (stateStream, stateCont) = AsyncStream<PlayerState>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.stateStream = stateStream
+        self.stateContinuation = stateCont
+        
+        let (trackStream, trackCont) = AsyncStream<Track.Metadata?>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.trackStream = trackStream
+        self.trackContinuation = trackCont
+        
+        let (positionStream, posCont) = AsyncStream<PlaybackPosition>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        self.positionStream = positionStream
+        self.positionContinuation = posCont
+        
+        let (eventStream, eventCont) = AsyncStream<PlayerEvent>.makeStream(bufferingPolicy: .bufferingNewest(10))
+        self.eventStream = eventStream
+        self.eventContinuation = eventCont
+        
         self.configuration = configuration
         self.audioEngine = AudioEngineActor()
         self.playbackStateCoordinator = PlaybackStateCoordinator()  // ✅ Phase 5: No audioEngine dependency
@@ -1284,14 +1309,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// }
     /// ```
     public var stateUpdates: AsyncStream<PlayerState> {
-        AsyncStream { continuation in
-            self.stateContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.cleanupStateContinuation()
-                }
-            }
-        }
+        stateStream  // ✅ FIXED: Return stored stream (no race condition!)
     }
     
     /// Stream of track changes for SwiftUI observation
@@ -1305,14 +1323,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// }
     /// ```
     public var trackUpdates: AsyncStream<Track.Metadata?> {
-        AsyncStream { continuation in
-            self.trackContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.cleanupTrackContinuation()
-                }
-            }
-        }
+        trackStream  // ✅ FIXED: Return stored stream (no race condition!)
     }
     
     /// Stream of playback position updates for SwiftUI observation
@@ -1328,14 +1339,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// }
     /// ```
     public var positionUpdates: AsyncStream<PlaybackPosition> {
-        AsyncStream { continuation in
-            self.positionContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.cleanupPositionContinuation()
-                }
-            }
-        }
+        positionStream  // ✅ FIXED: Return stored stream (no race condition!)
     }
     
     /// Stream of player events (file loading, crossfade progress, etc.)
@@ -1361,41 +1365,14 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// }
     /// ```
     public var events: AsyncStream<PlayerEvent> {
-        AsyncStream { continuation in
-            self.eventContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in
-                    await self?.cleanupEventContinuation()
-                }
-            }
-        }
+        eventStream  // ✅ FIXED: Return stored stream (no race condition!)
     }
 
-    
-    private func cleanupStateContinuation() {
-        stateContinuation?.finish()
-        stateContinuation = nil
-    }
-    
-    private func cleanupTrackContinuation() {
-        trackContinuation?.finish()
-        trackContinuation = nil
-    }
-    
-    private func cleanupPositionContinuation() {
-        positionContinuation?.finish()
-        positionContinuation = nil
-    }
-    
-    private func cleanupEventContinuation() {
-        eventContinuation?.finish()
-        eventContinuation = nil
-    }
     
     
     private func notifyObservers(positionUpdate position: PlaybackPosition) {
         // Yield to AsyncStream (observers removed in v3.1)
-        positionContinuation?.yield(position)
+        positionContinuation.yield(position)  // ✅ Non-optional continuation
     }
     
     
