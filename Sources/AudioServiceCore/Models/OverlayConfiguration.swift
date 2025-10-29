@@ -37,12 +37,12 @@ import Foundation
 ///
 /// - SeeAlso: `AudioPlayerService.playOverlay(url:configuration:)`
 public struct OverlayConfiguration: Sendable, Equatable {
-  
+
   // MARK: - Loop Behavior
-  
+
   /// Loop mode determines how many times the overlay audio repeats.
   public var loopMode: LoopMode
-  
+
   /// Delay before starting the next loop iteration (in seconds).
   ///
   /// Used for timer bells or periodic sounds. The delay represents silence between iterations.
@@ -57,9 +57,9 @@ public struct OverlayConfiguration: Sendable, Equatable {
   ///
   /// **Valid Range:** `>= 0.0`
   public var loopDelay: TimeInterval
-  
+
   // MARK: - Volume
-  
+
   /// Overlay volume level, independent from main track volume.
   ///
   /// **Default:** `1.0` (full volume)
@@ -68,32 +68,32 @@ public struct OverlayConfiguration: Sendable, Equatable {
   /// - `0.0` = Silent
   /// - `1.0` = Full volume
   public var volume: Float
-  
+
   // MARK: - Fade Settings
-  
+
   /// Duration of fade-in effect when overlay starts (in seconds).
   ///
   /// **Default:** `0.0` (no fade-in)
   ///
   /// **Valid Range:** `>= 0.0`
   public var fadeInDuration: TimeInterval
-  
+
   /// Duration of fade-out effect when overlay stops (in seconds).
   ///
   /// **Default:** `0.0` (no fade-out)
   ///
   /// **Valid Range:** `>= 0.0`
   public var fadeOutDuration: TimeInterval
-  
+
   /// Fade curve algorithm for volume transitions.
   ///
   /// **Default:** `.linear`
   ///
   /// - SeeAlso: `FadeCurve` for available curve types
   public var fadeCurve: FadeCurve
-  
+
   // MARK: - Initialization
-  
+
   /// Creates a new overlay configuration with default values.
   ///
   /// ## Defaults:
@@ -118,9 +118,9 @@ public struct OverlayConfiguration: Sendable, Equatable {
     self.fadeOutDuration = fadeOutDuration
     self.fadeCurve = fadeCurve
   }
-  
+
   // MARK: - Validation
-  
+
   /// Validates all configuration parameters.
   ///
   /// ## Validation Rules:
@@ -136,12 +136,12 @@ public struct OverlayConfiguration: Sendable, Equatable {
     guard loopDelay >= 0.0 else { return false }
     guard fadeInDuration >= 0.0 else { return false }
     guard fadeOutDuration >= 0.0 else { return false }
-    
+
     // Validate loop count if specified
     if case .count(let times) = loopMode {
       guard times > 0 else { return false }
     }
-    
+
     return true
   }
 }
@@ -153,7 +153,7 @@ public extension OverlayConfiguration {
   enum LoopMode: Sendable, Equatable {
     /// Play audio file once and stop.
     case once
-    
+
     /// Repeat audio a specific number of times.
     ///
     /// - Parameter times: Number of repetitions (must be > 0)
@@ -163,7 +163,7 @@ public extension OverlayConfiguration {
     /// config.loopMode = .count(3)  // Play 3 times total
     /// ```
     case count(Int)
-    
+
     /// Loop audio indefinitely until explicitly stopped.
     ///
     /// ## Example:
@@ -203,7 +203,7 @@ public extension OverlayConfiguration {
       fadeCurve: .linear
     )
   }
-  
+
   /// Preset configuration for ambient sounds (rain, ocean, forest).
   ///
   /// Continuous background atmosphere with smooth transitions.
@@ -228,7 +228,7 @@ public extension OverlayConfiguration {
       fadeCurve: .linear
     )
   }
-  
+
   /// Preset configuration for timer bells or periodic sounds.
   ///
   /// Distinct, clearly separated sound events with fades.

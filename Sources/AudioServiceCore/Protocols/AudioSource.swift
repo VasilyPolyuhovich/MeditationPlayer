@@ -6,11 +6,11 @@ public protocol AudioSource: Sendable {
     /// - Returns: URL of loaded audio file
     /// - Throws: AudioPlayerError if loading fails
     func load() async throws -> URL
-    
+
     /// Get track information without loading full file
     /// - Returns: Track metadata
     func getTrackInfo() async throws -> TrackInfo
-    
+
     /// Release any held resources
     func cleanup() async
 }
@@ -20,13 +20,13 @@ public struct LocalAudioSource: AudioSource {
     private let fileURL: URL
     private let title: String?
     private let artist: String?
-    
+
     public init(fileURL: URL, title: String? = nil, artist: String? = nil) {
         self.fileURL = fileURL
         self.title = title
         self.artist = artist
     }
-    
+
     public func load() async throws -> URL {
         // Verify file exists
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -34,7 +34,7 @@ public struct LocalAudioSource: AudioSource {
         }
         return fileURL
     }
-    
+
     public func getTrackInfo() async throws -> TrackInfo {
         // For now, return basic info - will be enhanced when we load AVAudioFile
         return TrackInfo(
@@ -44,7 +44,7 @@ public struct LocalAudioSource: AudioSource {
             format: .standard
         )
     }
-    
+
     public func cleanup() async {
         // Local files don't need cleanup
     }

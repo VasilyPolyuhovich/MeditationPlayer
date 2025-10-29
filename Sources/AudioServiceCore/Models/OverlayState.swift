@@ -47,13 +47,13 @@ public enum OverlayState: Sendable, Equatable {
   /// This is the initial state and the state after stopping.
   /// No audio file is loaded, and no resources are allocated.
   case idle
-  
+
   /// Overlay audio file is being loaded and prepared for playback.
   ///
   /// Transitioning from `idle` to `playing`. This state is typically brief
   /// as file loading happens asynchronously.
   case preparing
-  
+
   /// Overlay audio is currently playing.
   ///
   /// The audio is actively rendering and can be heard alongside the main track.
@@ -62,13 +62,13 @@ public enum OverlayState: Sendable, Equatable {
   /// - Stop with fade (`stopOverlay()`)
   /// - Replace file (`replaceOverlay(url:)`)
   case playing
-  
+
   /// Overlay audio is paused but can be resumed.
   ///
   /// Audio position is preserved. Calling `resumeOverlay()` will continue
   /// playback from where it was paused.
   case paused
-  
+
   /// Overlay audio is fading out before stopping.
   ///
   /// This state occurs when `stopOverlay()` is called with a fade-out duration.
@@ -97,17 +97,17 @@ public extension OverlayState {
   var isPlaying: Bool {
     self == .playing
   }
-  
+
   /// Indicates whether the overlay is paused and can be resumed.
   var isPaused: Bool {
     self == .paused
   }
-  
+
   /// Indicates whether the overlay is in a transitional state.
   var isTransitioning: Bool {
     self == .preparing || self == .stopping
   }
-  
+
   /// Indicates whether the overlay is ready to load new audio.
   var isIdle: Bool {
     self == .idle

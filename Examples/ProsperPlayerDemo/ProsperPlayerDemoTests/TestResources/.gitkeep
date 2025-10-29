@@ -1,0 +1,15 @@
+# Test Audio Resources
+
+Place test audio files here:
+- stage1_intro_music.mp3
+- stage2_practice_music.mp3
+- stage3_closing_music.mp3
+- breathing_exercise.mp3
+- closing_guidance.mp3
+- mantra_peace.mp3
+- mantra_love.mp3
+- mantra_gratitude.mp3
+- gong.mp3
+- beep.mp3
+
+See Tests/AudioServiceKitIntegrationTests/README.md for details.

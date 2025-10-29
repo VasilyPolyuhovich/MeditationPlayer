@@ -17,43 +17,46 @@ import AudioServiceCore
 /// ```
 actor AudioSessionManager {
     // MARK: - Singleton
-    
+
     /// Shared instance - AVAudioSession is global, so manager must be too
     static let shared = AudioSessionManager()
-    
+
     // MARK: - Properties
-    
+
     private let session: AVAudioSession
-    
+
     // Configuration state
     private var isConfigured = false
     private var configuredOptions: AVAudioSession.CategoryOptions?
-    
+
     // Activation state
     private var isActive = false
     private var isActivating = false  // Reentrancy guard for activate()
-    
+
     // Notification observers setup flag
     private var observersSetup = false
     
+    // Logger
+    private static let logger = Logger.session
+
     // Callbacks for handling session events
     private var interruptionHandler: (@Sendable (Bool) -> Void)?
     private var routeChangeHandler: (@Sendable (AVAudioSession.RouteChangeReason) -> Void)?
     private var mediaServicesResetHandler: (@Sendable () -> Void)?
-    
+
     // MARK: - Initialization
-    
+
     private init() {
         self.session = AVAudioSession.sharedInstance()
-        
+
         // Setup observers in a detached task (init is nonisolated)
         Task { [weak self] in
             await self?.setupNotificationObserversOnce()
         }
     }
-    
+
     // MARK: - Configuration
-    
+
     /// Configure AVAudioSession with specified options.
     /// - Parameters:
     ///   - options: Category options for audio session
@@ -66,87 +69,105 @@ actor AudioSessionManager {
         let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
             result.formUnion(option)
         }
-        
+
         // Already configured - check for conflicts (unless force)
         guard !isConfigured || force else {
             if let existingOptions = configuredOptions, existingOptions != categoryOptions {
-                print("[AudioSession] ⚠️ WARNING: Attempting to reconfigure with different options!")
-                print("[AudioSession] Existing: \(existingOptions.rawValue), New: \(categoryOptions.rawValue)")
-                print("[AudioSession] Using existing configuration (first wins)")
+                Self.logger.warning("WARNING: Attempting to reconfigure with different options!")
+                Self.logger.warning("Existing: \(existingOptions.rawValue), New: \(categoryOptions.rawValue)")
+                Self.logger.warning("Using existing configuration (first wins)")
             } else {
-                print("[AudioSession] ⏭️ Already configured, skipping")
+                Self.logger.debug("⏭️ Already configured, skipping")
             }
             return
         }
-        
+
         // CRITICAL: Set flag IMMEDIATELY after guard to prevent race condition
         // If we set it after setCategory(), two concurrent calls could both pass guard
         // and both try to configure AVAudioSession → Error -50
         isConfigured = true
         configuredOptions = categoryOptions
-        
 
-        
-        print("[AudioSession] 🔧 Configuration started with options: \(categoryOptions.rawValue)")
-        print("[AudioSession] Current state: category=\(session.category.rawValue), mode=\(session.mode.rawValue), active=\(session.isOtherAudioPlaying)")
-        
+        Self.logger.info("🔧 Configuration started with options: \(categoryOptions.rawValue)")
+        Self.logger.debug("Current state: category=\(session.category.rawValue), mode=\(session.mode.rawValue), active=\(session.isOtherAudioPlaying)")
+
         do {
             // MARK: Advanced Configuration for Maximum Stability
             // NOTE: Apple docs say setCategory() CAN be called on active session
             // DO NOT deactivate before configure - it can interfere with other audio
-            
+
             // 1. Set preferred buffer duration (larger = more stable, higher latency)
             // 0.02s (20ms) provides excellent stability while keeping latency acceptable
             // For meditation/ambient apps, latency is less critical than stability
             let preferredBufferDuration: TimeInterval = 0.02
-            print("[AudioSession] ⏳ Step 1/4: Setting buffer duration...")
-            try session.setPreferredIOBufferDuration(preferredBufferDuration)
-            print("[AudioSession] ✅ Step 1/4: Buffer duration set successfully")
-            
+            Self.logger.debug("⏳ Step 1/4: Setting buffer duration...")
+            do {
+                try session.setPreferredIOBufferDuration(preferredBufferDuration)
+                Self.logger.debug("Step 1/4: Buffer duration set successfully")
+            } catch {
+                Self.logger.error("Step 1/4 FAILED: \(error.localizedDescription)")
+                throw error
+            }
+
             // 2. Set preferred sample rate to avoid resampling
             // 44100 Hz is standard for most audio files
             let preferredSampleRate: Double = 44100.0
-            print("[AudioSession] ⏳ Step 2/4: Setting sample rate...")
-            try session.setPreferredSampleRate(preferredSampleRate)
-            print("[AudioSession] ✅ Step 2/4: Sample rate set successfully")
-            
+            Self.logger.debug("⏳ Step 2/4: Setting sample rate...")
+            do {
+                try session.setPreferredSampleRate(preferredSampleRate)
+                Self.logger.debug("Step 2/4: Sample rate set successfully")
+            } catch {
+                Self.logger.error("Step 2/4 FAILED: \(error.localizedDescription)")
+                throw error
+            }
+
             // 3. Minimize interruptions from system alerts (iOS 14.5+)
             if #available(iOS 14.5, *) {
-                print("[AudioSession] ⏳ Step 3/4: Setting prefersNoInterruptionsFromSystemAlerts...")
-                try session.setPrefersNoInterruptionsFromSystemAlerts(true)
-                print("[AudioSession] ✅ Step 3/4: prefersNoInterruptionsFromSystemAlerts set successfully")
+                Self.logger.debug("⏳ Step 3/4: Setting prefersNoInterruptionsFromSystemAlerts...")
+                do {
+                    try session.setPrefersNoInterruptionsFromSystemAlerts(true)
+                    Self.logger.debug("Step 3/4: prefersNoInterruptionsFromSystemAlerts set successfully")
+                } catch {
+                    Self.logger.error("Step 3/4 FAILED: \(error.localizedDescription)")
+                    throw error
+                }
             }
-            
-            // 4. Set category to playAndRecord for background audio + microphone support
+
+            // 4. Set category to .playback for music playback (lock screen controls)
             // CRITICAL: This MUST succeed - user's audioSessionOptions MUST be applied
-            // Using .playAndRecord instead of .playback because app uses microphone
-            print("[AudioSession] ⏳ Step 4/4: Setting category .playAndRecord with options \(categoryOptions.rawValue)...")
-            try session.setCategory(
-                .playAndRecord,
-                mode: .default,
-                options: categoryOptions
-            )
-            print("[AudioSession] ✅ Step 4/4: Category set successfully")
-            
+            Self.logger.info("⏳ Step 4/4: Setting category .playback with options \(categoryOptions.rawValue)...")
+            do {
+                try session.setCategory(
+                    .playback,
+                    mode: .default,
+                    options: categoryOptions
+                )
+                Self.logger.info("Step 4/4: Category set successfully")
+            } catch {
+                Self.logger.error("Step 4/4 FAILED: \(error.localizedDescription)")
+                Self.logger.error("Category: .playback, mode: .default, options: \(categoryOptions.rawValue)")
+                throw error
+            }
+
             // 5. Validate actual vs preferred settings
             let actualBufferDuration = session.ioBufferDuration
             let actualSampleRate = session.sampleRate
-            
-            print("[AudioSession] Configuration:")
-            print("  Preferred buffer: \(preferredBufferDuration)s")
-            print("  Actual buffer: \(actualBufferDuration)s")
-            print("  Preferred sample rate: \(preferredSampleRate) Hz")
-            print("  Actual sample rate: \(actualSampleRate) Hz")
-            
+
+            Self.logger.info("Configuration:")
+            Self.logger.debug("  Preferred buffer: \(preferredBufferDuration)s")
+            Self.logger.debug("  Actual buffer: \(actualBufferDuration)s")
+            Self.logger.debug("  Preferred sample rate: \(preferredSampleRate) Hz")
+            Self.logger.debug("  Actual sample rate: \(actualSampleRate) Hz")
+
             if abs(actualBufferDuration - preferredBufferDuration) > 0.005 {
-                print("  ⚠️ WARNING: Buffer duration mismatch (difference > 5ms)")
+                Self.logger.warning("  WARNING: Buffer duration mismatch (difference > 5ms)")
             }
-            
+
             if abs(actualSampleRate - preferredSampleRate) > 100 {
-                print("  ⚠️ WARNING: Sample rate mismatch (difference > 100 Hz)")
+                Self.logger.warning("  WARNING: Sample rate mismatch (difference > 100 Hz)")
             }
-            
-            print("[AudioSession] ✅ Configured successfully")
+
+            Self.logger.info("Configured successfully")
         } catch {
             // Configuration failed - rollback flag
             isConfigured = false
@@ -156,38 +177,99 @@ actor AudioSessionManager {
             )
         }
     }
-    
+
+    // MARK: - Dynamic Options Update (For Testing)
+
+    /// Update audio session category options dynamically
+    /// **WARNING:** This may cause route changes and affect lock screen controls!
+    /// - Parameter options: New category options to apply
+    /// - Throws: AudioPlayerError if update fails
+    func updateCategoryOptions(_ options: [AVAudioSession.CategoryOptions]) throws {
+        let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
+            result.formUnion(option)
+        }
+
+        Self.logger.warning("⚠️ Dynamically updating category options...")
+        Self.logger.warning("  Old: \(configuredOptions?.rawValue ?? 0)")
+        Self.logger.warning("  New: \(categoryOptions.rawValue)")
+        Self.logger.warning("  This may cause audio route change and lock screen controls may disappear!")
+
+        do {
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                options: categoryOptions
+            )
+            configuredOptions = categoryOptions
+            Self.logger.info("✅ Category options updated successfully")
+        } catch {
+            Self.logger.error("❌ Failed to update category options: \(error.localizedDescription)")
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Failed to update category options: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    // MARK: - Activation
+
     func activate() throws {
         guard isConfigured else {
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "Session must be configured before activation"
             )
         }
-        
+
         // Already active - skip
         guard !isActive else { return }
-        
+
         // Reentrancy guard - prevent concurrent activation attempts
         // Critical for multithreading safety with rapid route changes
         guard !isActivating else {
-            print("[AudioSession] ⚠️ WARNING: Concurrent activate() blocked - already activating")
+            Self.logger.warning("WARNING: Concurrent activate() blocked - already activating")
             return
         }
-        
+
         isActivating = true
         defer { isActivating = false }
-        
+
         do {
             try session.setActive(true)
             isActive = true
-            print("[AudioSession] ✅ Session activated successfully")
+            Self.logger.info("Session activated successfully")
         } catch {
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "Failed to activate audio session: \(error.localizedDescription)"
             )
         }
     }
-    
+
+    /// Force reconfigure audio session with our category and options (internal implementation)
+    /// Used for recovery after external code changes audio session category
+    ///
+    /// **Defensive Pattern:**
+    /// When external code (e.g., developer recording) changes audio session category,
+    /// this method forces our `.playback` category back to restore audio playback.
+    ///
+    /// - Throws: AudioPlayerError if reconfiguration fails
+    private func _forceReconfigureInternal() throws {
+        guard let options = configuredOptions else {
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "No configured options to restore"
+            )
+        }
+        
+        Self.logger.warning("⚠️ Force reconfiguring audio session (defensive recovery)...")
+        Self.logger.warning("  Restoring: category=.playback, options=\(options.rawValue)")
+        
+        // Use configure with force=true to override current configuration
+        try configure(options: [options], force: true)
+        
+        // Ensure session is active
+        try activate()
+        
+        Self.logger.info("✅ Audio session force reconfigured successfully")
+    }
+
     /// ⚠️ DEPRECATED - DO NOT USE!
     /// This method should NEVER be called in production code.
     /// Following Apple's AVAudioPlayer pattern: activate once, never deactivate.
@@ -198,7 +280,7 @@ actor AudioSessionManager {
     @available(*, deprecated, message: "Do not use - violates singleton pattern. Session should stay active.")
     func _internalDeactivateDeprecated() throws {
         guard isActive else { return }
-        
+
         do {
             try session.setActive(false, options: .notifyOthersOnDeactivation)
             isActive = false
@@ -208,23 +290,23 @@ actor AudioSessionManager {
             )
         }
     }
-    
+
     // MARK: - Event Handlers
-    
+
     func setInterruptionHandler(_ handler: @escaping @Sendable (Bool) -> Void) {
         self.interruptionHandler = handler
     }
-    
+
     func setRouteChangeHandler(_ handler: @escaping @Sendable (AVAudioSession.RouteChangeReason) -> Void) {
         self.routeChangeHandler = handler
     }
-    
+
     func setMediaServicesResetHandler(_ handler: @escaping @Sendable () -> Void) {
         self.mediaServicesResetHandler = handler
     }
-    
+
     // MARK: - Notification Observers
-    
+
     /// Setup notification observers once (called from init)
     private func setupNotificationObserversOnce() {
         guard !observersSetup else { return }
@@ -241,7 +323,7 @@ actor AudioSessionManager {
                   let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
                 return
             }
-            
+
             let shouldResume: Bool?
             if type == .ended,
                let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
@@ -250,13 +332,13 @@ actor AudioSessionManager {
             } else {
                 shouldResume = nil
             }
-            
+
             // Now send Sendable data to actor
             Task {
                 await self?.handleInterruption(type: type, shouldResume: shouldResume)
             }
         }
-        
+
         // Route change notifications
         NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification,
@@ -269,13 +351,13 @@ actor AudioSessionManager {
                   let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
                 return
             }
-            
+
             // Now send Sendable data to actor
             Task {
                 await self?.handleRouteChange(reason: reason)
             }
         }
-        
+
         // Media services reset notifications
         // This fires when audio services crash/restart (rare but critical)
         // Also fires when external AVAudioPlayer interferes with our AVAudioEngine
@@ -289,15 +371,15 @@ actor AudioSessionManager {
             }
         }
     }
-    
+
     // MARK: - Interruption Handling
-    
+
     private func handleInterruption(type: AVAudioSession.InterruptionType, shouldResume: Bool?) {
         switch type {
         case .began:
             // Interruption began (phone call, alarm, etc.)
             interruptionHandler?(false)
-            
+
         case .ended:
             // Interruption ended
             if let shouldResume = shouldResume {
@@ -307,50 +389,71 @@ actor AudioSessionManager {
                 // This handles Siri pause case
                 interruptionHandler?(false)
             }
-            
+
         @unknown default:
             break
         }
     }
-    
+
     // MARK: - Route Change Handling
-    
+
     private func handleRouteChange(reason: AVAudioSession.RouteChangeReason) {
         routeChangeHandler?(reason)
     }
-    
+
     // MARK: - Media Services Reset Handling
-    
+
     private func handleMediaServicesReset() {
-        print("[AudioSession] ⚠️ CRITICAL: Media services were reset!")
-        print("[AudioSession] This may happen when:")
-        print("[AudioSession]   - Audio services crash/restart")
-        print("[AudioSession]   - External AVAudioPlayer interferes with our engine")
-        print("[AudioSession]   - System audio reconfiguration")
-        
+        Self.logger.error("CRITICAL: Media services were reset!")
+        Self.logger.error("This may happen when:")
+        Self.logger.error("  - Audio services crash/restart")
+        Self.logger.error("  - External AVAudioPlayer interferes with our engine")
+        Self.logger.error("  - System audio reconfiguration")
+
         // Reset our internal state flags
         isActive = false
         isActivating = false
-        
+
         // Notify the service to reconfigure and restart
         mediaServicesResetHandler?()
     }
-    
+
     // MARK: - Current Route Info
-    
+
     func getCurrentRoute() -> String {
         let route = session.currentRoute
         let outputs = route.outputs.map { $0.portType.rawValue }.joined(separator: ", ")
         return outputs.isEmpty ? "No output" : outputs
     }
-    
+
     func isHeadphonesConnected() -> Bool {
         let route = session.currentRoute
         return route.outputs.contains { output in
-            output.portType == .headphones || 
+            output.portType == .headphones ||
             output.portType == .bluetoothA2DP ||
             output.portType == .bluetoothHFP ||
             output.portType == .bluetoothLE
         }
+    }
+}
+
+// MARK: - AudioSessionManaging Conformance
+
+extension AudioSessionManager: AudioSessionManaging {
+    /// Ensure audio session is active (activate if needed)
+    func ensureActive() async throws {
+        try activate()
+    }
+
+    /// Deactivate audio session (not used in production, kept for protocol)
+    func deactivate() async throws {
+        // Intentionally empty - session should stay active
+        // Following Apple's AVAudioPlayer pattern
+    }
+    
+    /// Force reconfigure audio session (protocol conformance wrapper)
+    func forceReconfigure() async throws {
+        // Forward to internal implementation
+        try _forceReconfigureInternal()
     }
 }

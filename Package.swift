@@ -20,7 +20,9 @@ let package = Package(
             targets: ["AudioServiceCore"]
         )
     ],
-    dependencies: [],
+    dependencies: [
+        .package(url: "https://github.com/sideeffect-io/AsyncExtensions.git", from: "0.5.2")
+    ],
     targets: [
         // Core domain layer - no dependencies
         .target(
@@ -34,16 +36,15 @@ let package = Package(
         // Main implementation layer
         .target(
             name: "AudioServiceKit",
-            dependencies: ["AudioServiceCore"],
+            dependencies: [
+                "AudioServiceCore",
+                .product(name: "AsyncExtensions", package: "AsyncExtensions")
+            ],
             swiftSettings: [
-                .enableExperimentalFeature("StrictConcurrency")
+                .enableExperimentalFeature("StrictConcurrency"),
+                // Uncomment to enable all diagnostics (state transitions, timing, AsyncStream monitoring, queue metrics):
+                .define("ENABLE_DIAGNOSTICS")
             ]
-        ),
-        
-        // Tests
-        .testTarget(
-            name: "AudioServiceKitTests",
-            dependencies: ["AudioServiceKit", "AudioServiceCore"]
         )
     ],
     swiftLanguageModes: [.v6]

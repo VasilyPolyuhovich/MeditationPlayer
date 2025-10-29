@@ -40,7 +40,7 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     ///
     /// **Formula:** volume = cos(π/2 × progress)
     case equalPower = "equal_power"
-    
+
     /// Linear fade (simple proportional)
     ///
     /// **Properties:**
@@ -55,7 +55,7 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     ///
     /// **Formula:** volume = progress
     case linear = "linear"
-    
+
     /// Logarithmic fade (fast attack)
     ///
     /// **Properties:**
@@ -69,7 +69,7 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     ///
     /// **Formula:** volume = log₁₀(9 × progress + 1)
     case logarithmic = "logarithmic"
-    
+
     /// Exponential fade (slow attack)
     ///
     /// **Properties:**
@@ -83,7 +83,7 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     ///
     /// **Formula:** volume = progress²
     case exponential = "exponential"
-    
+
     /// S-curve fade (smooth easing)
     ///
     /// **Properties:**
@@ -98,9 +98,9 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     ///
     /// **Formula:** volume = 3x² - 2x³
     case sCurve = "s_curve"
-    
+
     // MARK: - Volume Calculation
-    
+
     /// Calculate volume for fade-in at given progress.
     ///
     /// - Parameter progress: Fade progress from 0.0 (silent) to 1.0 (full volume)
@@ -114,29 +114,29 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
     public func volume(for progress: Float) -> Float {
         // Clamp progress to valid range
         let p = max(0.0, min(1.0, progress))
-        
+
         switch self {
         case .equalPower:
             // cos(π/2 × (1 - progress)) = sin(π/2 × progress)
             return sin(Float.pi / 2.0 * p)
-            
+
         case .linear:
             return p
-            
+
         case .logarithmic:
             // log₁₀(9x + 1) normalized to [0, 1]
             return log10(9.0 * p + 1.0)
-            
+
         case .exponential:
             // Quadratic curve
             return p * p
-            
+
         case .sCurve:
             // Cubic easing: 3x² - 2x³
             return 3.0 * p * p - 2.0 * p * p * p
         }
     }
-    
+
     /// Calculate volume for fade-out at given progress.
     ///
     /// Equivalent to `volume(for: 1.0 - progress)`.
@@ -178,16 +178,16 @@ public enum FadeCurve: String, Sendable, Equatable, CaseIterable {
 public struct CrossfadeCalculator {
     /// Fade curve algorithm
     public let curve: FadeCurve
-    
+
     /// Total crossfade duration in seconds
     public let duration: TimeInterval
-    
+
     /// Time per step in seconds (e.g., 0.01 = 10ms)
     public let stepTime: TimeInterval
-    
+
     /// Total number of steps for crossfade
     public let steps: Int
-    
+
     /// Creates a crossfade calculator.
     ///
     /// - Parameters:
@@ -200,7 +200,7 @@ public struct CrossfadeCalculator {
         self.stepTime = stepTime
         self.steps = Int(duration / stepTime)
     }
-    
+
     /// Get volumes for both players at specific step.
     ///
     /// - Parameter step: Current step number (0 to steps)

@@ -14,7 +14,7 @@ import Foundation
 /// ].compactMap { $0 }
 ///
 /// let tracks = urls.compactMap { Track(url: $0) }
-/// print("✅ Loaded \(tracks.count) valid tracks")
+/// print("Loaded \(tracks.count) valid tracks")
 /// ```
 public struct Track: Identifiable, Sendable, Equatable {
     /// Unique identifier
@@ -23,6 +23,12 @@ public struct Track: Identifiable, Sendable, Equatable {
     /// URL to audio file (local or remote)
     public let url: URL
 
+    /// Track metadata (filled after AVAudioFile load)
+    ///
+    /// This field is `nil` until the audio file is loaded by AudioEngine.
+    /// Once loaded, contains duration, format, and optional title/artist.
+    public var metadata: Metadata?
+
     /// Create track with validation
     ///
     /// Returns `nil` if:
@@ -30,8 +36,15 @@ public struct Track: Identifiable, Sendable, Equatable {
     ///
     /// Remote URLs (http/https) are not validated.
     ///
-    /// - Parameter url: Audio file URL
-    public init?(url: URL) {
+    /// - Parameters:
+    ///   - url: Audio file URL
+    ///   - title: Optional track title (for lock screen and UI). If nil, filename will be used.
+    ///   - artist: Optional artist name (for lock screen and UI)
+    public init?(
+        url: URL,
+        title: String? = nil,
+        artist: String? = nil
+    ) {
         // Validate file URLs (local files, including bundle)
         if url.isFileURL {
             guard FileManager.default.fileExists(atPath: url.path) else {
@@ -42,12 +55,55 @@ public struct Track: Identifiable, Sendable, Equatable {
 
         self.id = UUID()
         self.url = url
+        
+        // If developer provided title, create metadata immediately
+        // Duration and format will be updated when AudioEngine loads the file
+        if let title = title {
+            self.metadata = Metadata(
+                title: title,
+                artist: artist,
+                duration: 0,  // Placeholder, will be updated
+                format: .standard  // Placeholder, will be updated
+            )
+        }
     }
 
     // MARK: - Equatable
 
     public static func == (lhs: Track, rhs: Track) -> Bool {
         lhs.id == rhs.id
+    }
+
+    // MARK: - Nested Types
+
+    /// Track metadata extracted from audio file
+    ///
+    /// Created by AudioEngine when loading AVAudioFile.
+    /// Contains file properties like duration and format.
+    public struct Metadata: Sendable, Equatable {
+        /// Track title (extracted from file metadata or filename)
+        public let title: String?
+
+        /// Track artist or creator
+        public let artist: String?
+
+        /// Track duration in seconds
+        public let duration: TimeInterval
+
+        /// Audio format information
+        public let format: AudioFormat
+
+        public init(
+            title: String? = nil,
+            artist: String? = nil,
+            duration: TimeInterval,
+            format: AudioFormat
+        ) {
+            self.title = title
+            self.artist = artist
+            self.duration = duration
+            self.format = format
+        }
     }
 }
 
@@ -62,7 +118,7 @@ extension Array where Element == URL {
     /// ```swift
     /// let urls = [validURL, brokenURL, anotherURL]
     /// let tracks = urls.toTracks()  // brokenURL filtered out
-    /// print("⚠️ \(urls.count - tracks.count) tracks removed")
+    /// print("\(urls.count - tracks.count) tracks removed")
     /// ```
     public func toTracks() -> [Track] {
         self.compactMap { Track(url: $0) }

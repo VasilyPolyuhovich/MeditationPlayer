@@ -3,7 +3,7 @@
 //  AudioServiceKit
 //
 //  Created on 2025-10-09.
-//  Feature #4: Overlay Player - Phase 2
+//  Overlay Player
 //
 
 import AVFoundation
@@ -44,37 +44,37 @@ import AudioServiceCore
 ///
 /// - SeeAlso: `OverlayConfiguration`, `OverlayState`
 actor OverlayPlayerActor {
-  
+
   // MARK: - Audio Nodes
-  
+
   /// Player node owned by this actor
   private let player: AVAudioPlayerNode
-  
+
   /// Mixer node for independent volume control
   private let mixer: AVAudioMixerNode
-  
+
   // MARK: - State
-  
+
   /// Current playback state
   private var state: OverlayState = .idle
-  
+
   /// Loaded audio file
   private var audioFile: AVAudioFile?
-  
+
   /// Current configuration
   private var configuration: OverlayConfiguration
-  
+
   /// Current loop iteration count (0-based)
   private var loopCount: Int = 0
-  
+
   /// Active loop cycle task
   private var loopTask: Task<Void, Never>?
-  
+
   /// Continuation for buffer completion synchronization
   private var completionContinuation: CheckedContinuation<Void, Never>?
-  
+
   // MARK: - Initialization
-  
+
   /// Creates a new overlay player actor.
   ///
   /// - Parameters:
@@ -91,16 +91,16 @@ actor OverlayPlayerActor {
     self.player = player
     self.mixer = mixer
     self.configuration = configuration
-    
+
     // Validate configuration
     precondition(configuration.isValid, "Invalid OverlayConfiguration")
-    
+
     // Set initial volume
     mixer.volume = 0.0
   }
-  
+
   // MARK: - Public API
-  
+
   /// Load audio file for overlay playback.
   ///
   /// ## State Transition:
@@ -117,9 +117,9 @@ actor OverlayPlayerActor {
         attempted: "load"
       )
     }
-    
+
     state = .preparing
-    
+
     do {
       let file = try AVAudioFile(forReading: url)
       audioFile = file
@@ -129,7 +129,7 @@ actor OverlayPlayerActor {
       throw AudioPlayerError.fileLoadFailed(reason: "Failed to load file at \(url.path): \(error.localizedDescription)")
     }
   }
-  
+
   /// Start overlay playback with configured loop cycle.
   ///
   /// ## State Transition:
@@ -150,23 +150,23 @@ actor OverlayPlayerActor {
         attempted: "play"
       )
     }
-    
+
     guard audioFile != nil else {
       throw AudioPlayerError.invalidState(
         current: "no file loaded",
         attempted: "play"
       )
     }
-    
+
     state = .playing
     loopCount = 0
-    
+
     // Start loop cycle
     loopTask = Task {
       await self.loopCycle()
     }
   }
-  
+
   /// Stop overlay playback with graceful fade-out.
   ///
   /// ## State Transition:
@@ -180,11 +180,11 @@ actor OverlayPlayerActor {
   func stop() async {
     // 1. Set state FIRST - loopCycle will exit
     state = .stopping
-    
+
     // 2. Cancel loop task
     loopTask?.cancel()
     loopTask = nil
-    
+
     // 3. Fade down mixer (general stop fade, NOT loop fade!)
     if mixer.volume > 0 && configuration.fadeOutDuration > 0 {
       await fadeVolume(
@@ -196,15 +196,15 @@ actor OverlayPlayerActor {
       // Instant stop without fade
       mixer.volume = 0.0
     }
-    
+
     // 4. Stop player (after fade!)
     player.stop()
     player.reset()
-    
+
     // 5. Cleanup
     state = .idle
   }
-  
+
   /// Pause overlay playback.
   ///
   /// ## State Transition:
@@ -216,11 +216,11 @@ actor OverlayPlayerActor {
   /// - Call `resume()` to continue playback
   func pause() {
     guard state == .playing else { return }
-    
+
     player.pause()
     state = .paused
   }
-  
+
   /// Resume overlay playback from paused state.
   ///
   /// ## State Transition:
@@ -231,11 +231,11 @@ actor OverlayPlayerActor {
   /// - Loop cycle continues from where it was paused
   func resume() {
     guard state == .paused else { return }
-    
+
     player.play()
     state = .playing
   }
-  
+
   /// Replace current overlay file with crossfade transition.
   ///
   /// ## Behavior:
@@ -257,16 +257,16 @@ actor OverlayPlayerActor {
     // Cancel loop task (including delay)
     loopTask?.cancel()
     loopTask = nil
-    
+
     // Fade out current (1 second fixed)
     if mixer.volume > 0 {
       await fadeVolume(from: mixer.volume, to: 0.0, duration: 1.0)
     }
-    
+
     // Stop player
     player.stop()
     player.reset()
-    
+
     // Load new file
     state = .preparing
     do {
@@ -277,11 +277,11 @@ actor OverlayPlayerActor {
       state = .idle
       throw AudioPlayerError.fileLoadFailed(reason: "Failed to load file at \(url.path): \(error.localizedDescription)")
     }
-    
+
     // Start playback
     try await play()
   }
-  
+
   /// Set overlay volume independently from main player.
   ///
   /// ## Behavior:
@@ -295,7 +295,7 @@ actor OverlayPlayerActor {
     configuration.volume = clamped
     mixer.volume = clamped
   }
-  
+
   /// Set loop mode dynamically during playback.
   ///
   /// ## Behavior:
@@ -316,7 +316,7 @@ actor OverlayPlayerActor {
   func setLoopMode(_ mode: OverlayConfiguration.LoopMode) {
     configuration.loopMode = mode
   }
-  
+
   /// Set loop delay dynamically during playback.
   ///
   /// ## Behavior:
@@ -336,16 +336,15 @@ actor OverlayPlayerActor {
     configuration.loopDelay = clamped
   }
 
-  
   /// Get current playback state.
   ///
   /// - Returns: Current `OverlayState`
   func getState() -> OverlayState {
     return state
   }
-  
+
   // MARK: - Loop Cycle
-  
+
   /// Main loop cycle - handles iterations with delays and fades.
   ///
   /// ## Algorithm:
@@ -363,7 +362,7 @@ actor OverlayPlayerActor {
     while shouldContinueLooping() {
       // Check cancellation and state before each iteration
       guard !Task.isCancelled && state == .playing else { break }
-      
+
       // 1. Fade in on each iteration (smooth entry)
       if configuration.fadeInDuration > 0 {
         await fadeVolume(
@@ -375,18 +374,18 @@ actor OverlayPlayerActor {
         // First iteration without fade - set volume directly
         mixer.volume = configuration.volume
       }
-      
+
       guard !Task.isCancelled && state == .playing else { break }
-      
+
       // 2. Schedule and play buffer
       scheduleBuffer()
       player.play()
-      
+
       // 3. Wait for playback to finish
       await waitForPlaybackEnd()
-      
+
       guard !Task.isCancelled && state == .playing else { break }
-      
+
       // 4. Fade out on each iteration (smooth exit)
       if configuration.fadeOutDuration > 0 {
         await fadeVolume(
@@ -395,15 +394,15 @@ actor OverlayPlayerActor {
           duration: configuration.fadeOutDuration
         )
       }
-      
+
       // 5. Increment loop counter
       loopCount += 1
-      
+
       // 6. Check if should continue
       if !shouldContinueLooping() {
         break
       }
-      
+
       // 7. Apply loop delay (cancellable)
       if configuration.loopDelay > 0 {
         guard !Task.isCancelled && state == .playing else { break }
@@ -411,11 +410,11 @@ actor OverlayPlayerActor {
         guard !Task.isCancelled && state == .playing else { break }
       }
     }
-    
+
     // Loop cycle completed
     await stop()
   }
-  
+
   /// Check if should continue looping based on mode.
   private func shouldContinueLooping() -> Bool {
     switch configuration.loopMode {
@@ -427,7 +426,7 @@ actor OverlayPlayerActor {
       return true
     }
   }
-  
+
   /// Check if current iteration is the last one.
   private func isLastLoop() -> Bool {
     switch configuration.loopMode {
@@ -439,9 +438,9 @@ actor OverlayPlayerActor {
       return false
     }
   }
-  
+
   // MARK: - Volume Fade
-  
+
   /// Fade mixer volume with adaptive step sizing.
   ///
   /// ## Algorithm:
@@ -464,7 +463,7 @@ actor OverlayPlayerActor {
   ) async {
     // Use config curve if not specified
     let fadeCurve = curve ?? configuration.fadeCurve
-    
+
     // Adaptive step sizing (copied from AudioEngineActor)
     let stepsPerSecond: Int
     if duration < 1.0 {
@@ -476,36 +475,36 @@ actor OverlayPlayerActor {
     } else {
       stepsPerSecond = 20   // 50ms
     }
-    
+
     let steps = Int(duration * Double(stepsPerSecond))
     let stepTime = duration / Double(steps)
-    
+
     for i in 0...steps {
       // Check cancellation
       guard !Task.isCancelled else { return }
-      
+
       let progress = Float(i) / Float(steps)
-      
+
       // Calculate volume based on curve
       // Formula: from + (to - from) * curve automatically handles direction
       // No need for inverseVolume - it would double-invert for fade-out
       let curveValue = fadeCurve.volume(for: progress)
-      
+
       // Apply curve to range [from, to]
       let newVolume = from + (to - from) * curveValue
       mixer.volume = newVolume
-      
+
       try? await Task.sleep(nanoseconds: UInt64(stepTime * 1_000_000_000))
     }
-    
+
     // Ensure final volume (if not cancelled)
     if !Task.isCancelled {
       mixer.volume = to
     }
   }
-  
+
   // MARK: - Buffer Scheduling
-  
+
   /// Schedule audio buffer for playback.
   ///
   /// ## Behavior:
@@ -514,7 +513,7 @@ actor OverlayPlayerActor {
   /// - Callback executes on audio thread - uses Task to hop back to actor
   private func scheduleBuffer() {
     guard let file = audioFile else { return }
-    
+
     // Schedule entire file
     player.scheduleFile(file, at: nil) { [weak self] in
       // Completion on audio thread - signal continuation
@@ -524,7 +523,7 @@ actor OverlayPlayerActor {
       }
     }
   }
-  
+
   /// Wait for buffer playback to complete.
   ///
   /// ## Implementation:
@@ -535,7 +534,7 @@ actor OverlayPlayerActor {
       completionContinuation = continuation
     }
   }
-  
+
   /// Signal that playback completed (called from audio callback).
   ///
   /// ## Thread Safety:

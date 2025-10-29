@@ -6,7 +6,7 @@ enum LogLevel: Int, Comparable {
     case info = 1
     case warning = 2
     case error = 3
-    
+
     var emoji: String {
         switch self {
         case .debug: return "🔍"
@@ -15,7 +15,7 @@ enum LogLevel: Int, Comparable {
         case .error: return "❌"
         }
     }
-    
+
     static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
         return lhs.rawValue < rhs.rawValue
     }
@@ -25,56 +25,51 @@ enum LogLevel: Int, Comparable {
 /// - Note: Quick fix implementation - full logging system planned for v3.2
 struct Logger {
     let category: String
-    
+
     // MARK: - Configuration
-    
+
     /// Minimum log level to display (debug builds show all, release shows warning+)
     #if DEBUG
     private static let minLevel: LogLevel = .debug
     #else
     private static let minLevel: LogLevel = .warning
     #endif
-    
-    // MARK: - Initialization
-    
-    init(category: String) {
-        self.category = category
-    }
-    
+
     // MARK: - Logging Methods
-    
-    func debug(_ message: String, function: String = #function, line: Int = #line) {
-        log(.debug, message, function: function, line: line)
+
+    func debug(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+        log(.debug, message, file: file, function: function, line: line)
     }
-    
-    func info(_ message: String, function: String = #function, line: Int = #line) {
-        log(.info, message, function: function, line: line)
+
+    func info(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+        log(.info, message, file: file, function: function, line: line)
     }
-    
-    func warning(_ message: String, function: String = #function, line: Int = #line) {
-        log(.warning, message, function: function, line: line)
+
+    func warning(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+        log(.warning, message, file: file, function: function, line: line)
     }
-    
-    func error(_ message: String, function: String = #function, line: Int = #line) {
-        log(.error, message, function: function, line: line)
+
+    func error(_ message: String, file: String = #file, function: String = #function, line: Int = #line) {
+        log(.error, message, file: file, function: function, line: line)
     }
-    
+
     // MARK: - Core Logging
-    
-    private func log(_ level: LogLevel, _ message: String, function: String, line: Int) {
+
+    private func log(_ level: LogLevel, _ message: String, file: String, function: String, line: Int) {
         guard level >= Self.minLevel else { return }
-        
+
         let timestamp = Self.timestamp()
-        let location = "[\(category)] \(function):\(line)"
+        let filename = (file as NSString).lastPathComponent
+        let location = "[\(filename):\(line)] [\(category)] \(function)"
         let logMessage = "\(level.emoji) [\(timestamp)] \(location) - \(message)"
-        
+
         // Production: Only print
         // TODO v3.2: Add OSLog, file logging, structured logging
         print(logMessage)
     }
-    
+
     // MARK: - State Transition Assertions
-    
+
     /// Assert state transition success in debug builds
     /// - Parameters:
     ///   - success: Whether transition succeeded
@@ -86,21 +81,22 @@ struct Logger {
         _ success: Bool,
         from: String,
         to: String,
+        file: String = #file,
         function: String = #function,
         line: Int = #line
     ) {
         if !success {
             let message = "State transition failed: \(from) → \(to)"
-            error(message, function: function, line: line)
-            
+            error(message, file: file, function: function, line: line)
+
             #if DEBUG
             assertionFailure(message)
             #endif
         }
     }
-    
+
     // MARK: - Helpers
-    
+
     private static func timestamp() -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"

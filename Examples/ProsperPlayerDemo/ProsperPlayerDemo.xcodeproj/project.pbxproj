@@ -7,60 +7,107 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D9AC3D452E9DDF3300E4F990 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D9AC3D442E9DDF3300E4F990 /* AudioServiceCore */; };
-		D9AC3D472E9DDF3300E4F990 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D9AC3D462E9DDF3300E4F990 /* AudioServiceKit */; };
+		D9D66F1F2EAA9885008AE133 /* AudioServiceCore in Frameworks */ = {isa = PBXBuildFile; productRef = D9D66F1E2EAA9885008AE133 /* AudioServiceCore */; };
+		D9D66F212EAA9885008AE133 /* AudioServiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = D9D66F202EAA9885008AE133 /* AudioServiceKit */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		D9D66EF52EAA9848008AE133 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D9D66EDF2EAA9847008AE133 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D9D66EE62EAA9847008AE133;
+			remoteInfo = ProsperPlayerDemo;
+		};
+		D9D66EFF2EAA9848008AE133 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D9D66EDF2EAA9847008AE133 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D9D66EE62EAA9847008AE133;
+			remoteInfo = ProsperPlayerDemo;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
-		D9AC3D1B2E9DDED900E4F990 /* ProsperPlayerDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProsperPlayerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9D66EE72EAA9847008AE133 /* ProsperPlayerDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProsperPlayerDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9D66EF42EAA9848008AE133 /* ProsperPlayerDemoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProsperPlayerDemoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D9D66EFE2EAA9848008AE133 /* ProsperPlayerDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProsperPlayerDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		D9AC3D582E9DE0A400E4F990 /* Exceptions for "ProsperPlayerDemo" folder in "ProsperPlayerDemo" target */ = {
+		D9379A312EAFA47C00798E5C /* Exceptions for "ProsperPlayerDemo" folder in "ProsperPlayerDemo" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = D9AC3D1A2E9DDED900E4F990 /* ProsperPlayerDemo */;
+			target = D9D66EE62EAA9847008AE133 /* ProsperPlayerDemo */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		D9AC3D1D2E9DDED900E4F990 /* ProsperPlayerDemo */ = {
+		D9D66EE92EAA9847008AE133 /* ProsperPlayerDemo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				D9AC3D582E9DE0A400E4F990 /* Exceptions for "ProsperPlayerDemo" folder in "ProsperPlayerDemo" target */,
+				D9379A312EAFA47C00798E5C /* Exceptions for "ProsperPlayerDemo" folder in "ProsperPlayerDemo" target */,
 			);
 			path = ProsperPlayerDemo;
+			sourceTree = "<group>";
+		};
+		D9D66EF72EAA9848008AE133 /* ProsperPlayerDemoTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ProsperPlayerDemoTests;
+			sourceTree = "<group>";
+		};
+		D9D66F012EAA9848008AE133 /* ProsperPlayerDemoUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ProsperPlayerDemoUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		D9AC3D182E9DDED900E4F990 /* Frameworks */ = {
+		D9D66EE42EAA9847008AE133 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D9AC3D472E9DDF3300E4F990 /* AudioServiceKit in Frameworks */,
-				D9AC3D452E9DDF3300E4F990 /* AudioServiceCore in Frameworks */,
+				D9D66F212EAA9885008AE133 /* AudioServiceKit in Frameworks */,
+				D9D66F1F2EAA9885008AE133 /* AudioServiceCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EF12EAA9848008AE133 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EFB2EAA9848008AE133 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		D9AC3D122E9DDED900E4F990 = {
+		D9D66EDE2EAA9847008AE133 = {
 			isa = PBXGroup;
 			children = (
-				D9AC3D1D2E9DDED900E4F990 /* ProsperPlayerDemo */,
-				D9AC3D1C2E9DDED900E4F990 /* Products */,
+				D9D66EE92EAA9847008AE133 /* ProsperPlayerDemo */,
+				D9D66EF72EAA9848008AE133 /* ProsperPlayerDemoTests */,
+				D9D66F012EAA9848008AE133 /* ProsperPlayerDemoUITests */,
+				D9D66EE82EAA9847008AE133 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		D9AC3D1C2E9DDED900E4F990 /* Products */ = {
+		D9D66EE82EAA9847008AE133 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D9AC3D1B2E9DDED900E4F990 /* ProsperPlayerDemo.app */,
+				D9D66EE72EAA9847008AE133 /* ProsperPlayerDemo.app */,
+				D9D66EF42EAA9848008AE133 /* ProsperPlayerDemoTests.xctest */,
+				D9D66EFE2EAA9848008AE133 /* ProsperPlayerDemoUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -68,69 +115,139 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		D9AC3D1A2E9DDED900E4F990 /* ProsperPlayerDemo */ = {
+		D9D66EE62EAA9847008AE133 /* ProsperPlayerDemo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = D9AC3D262E9DDEDA00E4F990 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemo" */;
+			buildConfigurationList = D9D66F082EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemo" */;
 			buildPhases = (
-				D9AC3D172E9DDED900E4F990 /* Sources */,
-				D9AC3D182E9DDED900E4F990 /* Frameworks */,
-				D9AC3D192E9DDED900E4F990 /* Resources */,
+				D9D66EE32EAA9847008AE133 /* Sources */,
+				D9D66EE42EAA9847008AE133 /* Frameworks */,
+				D9D66EE52EAA9847008AE133 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				D9AC3D1D2E9DDED900E4F990 /* ProsperPlayerDemo */,
+				D9D66EE92EAA9847008AE133 /* ProsperPlayerDemo */,
 			);
 			name = ProsperPlayerDemo;
 			packageProductDependencies = (
-				D9AC3D442E9DDF3300E4F990 /* AudioServiceCore */,
-				D9AC3D462E9DDF3300E4F990 /* AudioServiceKit */,
+				D9D66F1E2EAA9885008AE133 /* AudioServiceCore */,
+				D9D66F202EAA9885008AE133 /* AudioServiceKit */,
 			);
 			productName = ProsperPlayerDemo;
-			productReference = D9AC3D1B2E9DDED900E4F990 /* ProsperPlayerDemo.app */;
+			productReference = D9D66EE72EAA9847008AE133 /* ProsperPlayerDemo.app */;
 			productType = "com.apple.product-type.application";
+		};
+		D9D66EF32EAA9848008AE133 /* ProsperPlayerDemoTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D9D66F0B2EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemoTests" */;
+			buildPhases = (
+				D9D66EF02EAA9848008AE133 /* Sources */,
+				D9D66EF12EAA9848008AE133 /* Frameworks */,
+				D9D66EF22EAA9848008AE133 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D9D66EF62EAA9848008AE133 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D9D66EF72EAA9848008AE133 /* ProsperPlayerDemoTests */,
+			);
+			name = ProsperPlayerDemoTests;
+			packageProductDependencies = (
+			);
+			productName = ProsperPlayerDemoTests;
+			productReference = D9D66EF42EAA9848008AE133 /* ProsperPlayerDemoTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D9D66EFD2EAA9848008AE133 /* ProsperPlayerDemoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D9D66F0E2EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemoUITests" */;
+			buildPhases = (
+				D9D66EFA2EAA9848008AE133 /* Sources */,
+				D9D66EFB2EAA9848008AE133 /* Frameworks */,
+				D9D66EFC2EAA9848008AE133 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D9D66F002EAA9848008AE133 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D9D66F012EAA9848008AE133 /* ProsperPlayerDemoUITests */,
+			);
+			name = ProsperPlayerDemoUITests;
+			packageProductDependencies = (
+			);
+			productName = ProsperPlayerDemoUITests;
+			productReference = D9D66EFE2EAA9848008AE133 /* ProsperPlayerDemoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		D9AC3D132E9DDED900E4F990 /* Project object */ = {
+		D9D66EDF2EAA9847008AE133 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1640;
 				LastUpgradeCheck = 1640;
 				TargetAttributes = {
-					D9AC3D1A2E9DDED900E4F990 = {
+					D9D66EE62EAA9847008AE133 = {
 						CreatedOnToolsVersion = 16.4;
+					};
+					D9D66EF32EAA9848008AE133 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = D9D66EE62EAA9847008AE133;
+					};
+					D9D66EFD2EAA9848008AE133 = {
+						CreatedOnToolsVersion = 16.4;
+						TestTargetID = D9D66EE62EAA9847008AE133;
 					};
 				};
 			};
-			buildConfigurationList = D9AC3D162E9DDED900E4F990 /* Build configuration list for PBXProject "ProsperPlayerDemo" */;
+			buildConfigurationList = D9D66EE22EAA9847008AE133 /* Build configuration list for PBXProject "ProsperPlayerDemo" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
 				Base,
 			);
-			mainGroup = D9AC3D122E9DDED900E4F990;
+			mainGroup = D9D66EDE2EAA9847008AE133;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D9AC3D432E9DDF3300E4F990 /* XCLocalSwiftPackageReference "../../../ProsperPlayer" */,
+				D9D66F1D2EAA9885008AE133 /* XCLocalSwiftPackageReference "../../../ProsperPlayer" */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = D9AC3D1C2E9DDED900E4F990 /* Products */;
+			productRefGroup = D9D66EE82EAA9847008AE133 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				D9AC3D1A2E9DDED900E4F990 /* ProsperPlayerDemo */,
+				D9D66EE62EAA9847008AE133 /* ProsperPlayerDemo */,
+				D9D66EF32EAA9848008AE133 /* ProsperPlayerDemoTests */,
+				D9D66EFD2EAA9848008AE133 /* ProsperPlayerDemoUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		D9AC3D192E9DDED900E4F990 /* Resources */ = {
+		D9D66EE52EAA9847008AE133 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EF22EAA9848008AE133 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EFC2EAA9848008AE133 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -140,7 +257,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		D9AC3D172E9DDED900E4F990 /* Sources */ = {
+		D9D66EE32EAA9847008AE133 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EF02EAA9848008AE133 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D9D66EFA2EAA9848008AE133 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -149,8 +280,21 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		D9D66EF62EAA9848008AE133 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D9D66EE62EAA9847008AE133 /* ProsperPlayerDemo */;
+			targetProxy = D9D66EF52EAA9848008AE133 /* PBXContainerItemProxy */;
+		};
+		D9D66F002EAA9848008AE133 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D9D66EE62EAA9847008AE133 /* ProsperPlayerDemo */;
+			targetProxy = D9D66EFF2EAA9848008AE133 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
-		D9AC3D242E9DDEDA00E4F990 /* Debug */ = {
+		D9D66F062EAA9848008AE133 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -214,7 +358,7 @@
 			};
 			name = Debug;
 		};
-		D9AC3D252E9DDEDA00E4F990 /* Release */ = {
+		D9D66F072EAA9848008AE133 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -271,11 +415,12 @@
 			};
 			name = Release;
 		};
-		D9AC3D272E9DDEDA00E4F990 /* Debug */ = {
+		D9D66F092EAA9848008AE133 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 32QWC5NVBJ;
@@ -284,6 +429,7 @@
 				INFOPLIST_FILE = ProsperPlayerDemo/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				"INFOPLIST_KEY_UIBackgroundModes[sdk=*]" = "audio processing";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -292,19 +438,21 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemo;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vabad.ProsperPlayerDemoPlayer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		D9AC3D282E9DDEDA00E4F990 /* Release */ = {
+		D9D66F0A2EAA9848008AE133 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 32QWC5NVBJ;
@@ -313,6 +461,7 @@
 				INFOPLIST_FILE = ProsperPlayerDemo/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				"INFOPLIST_KEY_UIBackgroundModes[sdk=*]" = "audio processing";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -321,31 +470,122 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemo;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vabad.ProsperPlayerDemoPlayer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
+		D9D66F0C2EAA9848008AE133 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32QWC5NVBJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemoTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ProsperPlayerDemo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ProsperPlayerDemo";
+			};
+			name = Debug;
+		};
+		D9D66F0D2EAA9848008AE133 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32QWC5NVBJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemoTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ProsperPlayerDemo.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ProsperPlayerDemo";
+			};
+			name = Release;
+		};
+		D9D66F0F2EAA9848008AE133 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32QWC5NVBJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemoUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ProsperPlayerDemo;
+			};
+			name = Debug;
+		};
+		D9D66F102EAA9848008AE133 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32QWC5NVBJ;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.demo.ProsperPlayerDemoUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ProsperPlayerDemo;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		D9AC3D162E9DDED900E4F990 /* Build configuration list for PBXProject "ProsperPlayerDemo" */ = {
+		D9D66EE22EAA9847008AE133 /* Build configuration list for PBXProject "ProsperPlayerDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D9AC3D242E9DDEDA00E4F990 /* Debug */,
-				D9AC3D252E9DDEDA00E4F990 /* Release */,
+				D9D66F062EAA9848008AE133 /* Debug */,
+				D9D66F072EAA9848008AE133 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		D9AC3D262E9DDEDA00E4F990 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemo" */ = {
+		D9D66F082EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D9AC3D272E9DDEDA00E4F990 /* Debug */,
-				D9AC3D282E9DDEDA00E4F990 /* Release */,
+				D9D66F092EAA9848008AE133 /* Debug */,
+				D9D66F0A2EAA9848008AE133 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D9D66F0B2EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemoTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D9D66F0C2EAA9848008AE133 /* Debug */,
+				D9D66F0D2EAA9848008AE133 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D9D66F0E2EAA9848008AE133 /* Build configuration list for PBXNativeTarget "ProsperPlayerDemoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D9D66F0F2EAA9848008AE133 /* Debug */,
+				D9D66F102EAA9848008AE133 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -353,22 +593,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		D9AC3D432E9DDF3300E4F990 /* XCLocalSwiftPackageReference "../../../ProsperPlayer" */ = {
+		D9D66F1D2EAA9885008AE133 /* XCLocalSwiftPackageReference "../../../ProsperPlayer" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../../ProsperPlayer;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		D9AC3D442E9DDF3300E4F990 /* AudioServiceCore */ = {
+		D9D66F1E2EAA9885008AE133 /* AudioServiceCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AudioServiceCore;
 		};
-		D9AC3D462E9DDF3300E4F990 /* AudioServiceKit */ = {
+		D9D66F202EAA9885008AE133 /* AudioServiceKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AudioServiceKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = D9AC3D132E9DDED900E4F990 /* Project object */;
+	rootObject = D9D66EDF2EAA9847008AE133 /* Project object */;
 }

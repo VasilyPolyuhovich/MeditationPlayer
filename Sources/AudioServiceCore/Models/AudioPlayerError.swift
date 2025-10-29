@@ -17,10 +17,10 @@ import Foundation
 ///     print("Unexpected error: \(error)")
 /// }
 /// ```
-public enum AudioPlayerError: Error, Sendable, Equatable {
-    
+public enum AudioPlayerError: Error, LocalizedError, Sendable, Equatable {
+
     // MARK: - File & Resource Errors
-    
+
     /// Failed to load audio file from the specified URL
     ///
     /// **When it occurs:**
@@ -35,7 +35,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Ensure file permissions are correct
     /// - Validate file integrity before loading
     case fileLoadFailed(reason: String)
-    
+
     /// Invalid audio format that cannot be processed
     ///
     /// **When it occurs:**
@@ -48,9 +48,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Use AVFoundation-compatible formats
     /// - Check audio file integrity
     case invalidFormat(reason: String)
-    
+
     // MARK: - Configuration Errors
-    
+
     /// Invalid configuration parameter provided
     ///
     /// **When it occurs:**
@@ -76,9 +76,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// }
     /// ```
     case invalidConfiguration(reason: String)
-    
+
     // MARK: - State Errors
-    
+
     /// Invalid operation attempted in current player state
     ///
     /// **When it occurs:**
@@ -98,9 +98,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - playing ↔ paused (via pause/resume)
     /// - playing → fadingOut → finished (via finish)
     case invalidState(current: String, attempted: String)
-    
+
     // MARK: - System Errors
-    
+
     /// Audio session configuration failed
     ///
     /// **When it occurs:**
@@ -115,7 +115,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Handle interruptions (phone calls, alarms)
     /// - Retry activation after brief delay
     case sessionConfigurationFailed(reason: String)
-    
+
     /// Audio engine failed to start
     ///
     /// **When it occurs:**
@@ -130,7 +130,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Reset engine and retry
     /// - Check for resource conflicts
     case engineStartFailed(reason: String)
-    
+
     /// Hardware audio route change failed
     ///
     /// **When it occurs:**
@@ -144,9 +144,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Resume when valid route available
     /// - Handle .oldDeviceUnavailable reason
     case routeChangeFailed(reason: String)
-    
+
     // MARK: - Playback Errors
-    
+
     /// Buffer scheduling failed during playback
     ///
     /// **When it occurs:**
@@ -161,9 +161,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Verify engine state
     /// - Reset and retry playback
     case bufferSchedulingFailed(reason: String)
-    
+
     // MARK: - Playlist Errors
-    
+
     /// Playlist is empty (no tracks to play)
     ///
     /// **When it occurs:**
@@ -177,7 +177,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Provide user feedback for empty state
     /// - Load default playlist if needed
     case emptyPlaylist
-    
+
     /// No active track currently playing
     ///
     /// **When it occurs:**
@@ -190,7 +190,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Verify currentTrack is not nil
     /// - Handle finished state appropriately
     case noActiveTrack
-    
+
     /// Invalid playlist index accessed
     ///
     /// **When it occurs:**
@@ -203,7 +203,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Use safe array access patterns
     /// - Synchronize playlist modifications
     case invalidPlaylistIndex(index: Int, count: Int)
-    
+
     /// No next track available in playlist
     ///
     /// **When it occurs:**
@@ -215,7 +215,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Enable repeat mode for continuous playback
     /// - Disable "next" button when at end
     case noNextTrack
-    
+
     /// No previous track available in playlist
     ///
     /// **When it occurs:**
@@ -226,7 +226,21 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Check if previous track exists before skipping
     /// - Disable "previous" button when at start
     case noPreviousTrack
-    
+
+    /// Skip operation rate limited (too frequent)
+    ///
+    /// **When it occurs:**
+    /// - Calling skipToNext()/skipToPrevious() too rapidly (< 0.5s between calls)
+    /// - User spamming skip buttons
+    /// - Automated skip calls without throttling
+    ///
+    /// **How to handle:**
+    /// - Implement UI debouncing (disable button for 0.5s)
+    /// - Show haptic feedback to indicate rate limiting
+    /// - Add visual indication (button opacity/disabled state)
+    /// - Wait 0.5s before allowing next skip
+    case rateLimited
+
     /// Sound effect not found (not preloaded)
     ///
     /// **When it occurs:**
@@ -240,9 +254,36 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Handle missing effects gracefully
     case soundEffectNotFound(id: UUID)
 
-    
+    /// No valid tracks found in playlist after retry attempts
+    ///
+    /// **When it occurs:**
+    /// - All tracks in playlist failed validation (corrupted/missing files)
+    /// - File system errors preventing access to any track
+    /// - Playlist contains only invalid audio files
+    ///
+    /// **How to handle:**
+    /// - Verify all track files exist and are accessible
+    /// - Check file permissions
+    /// - Validate audio file integrity before adding to playlist
+    /// - Prompt user to select valid audio files
+    case noValidTracksInPlaylist
+
+    /// Failed to skip to next/previous track after retry attempts
+    ///
+    /// **When it occurs:**
+    /// - Multiple consecutive track files are corrupted
+    /// - File system errors during track navigation
+    /// - All retry attempts (default: 3) failed
+    ///
+    /// **How to handle:**
+    /// - Check file system health
+    /// - Verify track files integrity
+    /// - Remove corrupted tracks from playlist
+    /// - Reload playlist with valid files
+    case skipFailed(reason: String)
+
     // MARK: - Unknown Errors
-    
+
     /// Unknown or unexpected error occurred
     ///
     /// **When it occurs:**
@@ -256,9 +297,9 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
     /// - Report to SDK maintainers if reproducible
     /// - Provide generic error message to user
     case unknown(reason: String)
-    
+
     // MARK: - Localized Descriptions
-    
+
     /// Human-readable error description
     ///
     /// Provides user-friendly error messages suitable for display in UI.
@@ -268,58 +309,74 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
         // File & Resource Errors
         case .fileLoadFailed(let reason):
             return "Failed to load audio file: \(reason)"
-            
+
         case .invalidFormat(let reason):
             return "Invalid audio format: \(reason)"
-            
+
         // Configuration Errors
         case .invalidConfiguration(let reason):
             return "Invalid configuration: \(reason)"
-            
+
         // State Errors
         case .invalidState(let current, let attempted):
             return "Cannot \(attempted) in \(current) state"
-            
+
         // System Errors
         case .sessionConfigurationFailed(let reason):
             return "Audio session configuration failed: \(reason)"
-            
+
         case .engineStartFailed(let reason):
             return "Audio engine failed to start: \(reason)"
-            
+
         case .routeChangeFailed(let reason):
             return "Audio route change failed: \(reason)"
-            
+
         // Playback Errors
         case .bufferSchedulingFailed(let reason):
             return "Buffer scheduling failed: \(reason)"
-            
+
         // Playlist Errors
         case .emptyPlaylist:
             return "Playlist is empty - add tracks before playing"
-            
+
         case .noActiveTrack:
             return "No active track playing"
-            
+
         case .invalidPlaylistIndex(let index, let count):
             return "Invalid playlist index \(index) (playlist has \(count) tracks)"
-            
+
         case .noNextTrack:
-            return "No next track available"
-            
+            return "Playlist ended - no more tracks available"
+
         case .noPreviousTrack:
-            return "No previous track available"
-            
+            return "Already at start of playlist"
+
+        case .rateLimited:
+            return "Please wait before skipping again"
+
         case .soundEffectNotFound(let id):
             return "Sound effect not found: \(id) - ensure it's preloaded before playing"
 
-            
+        case .noValidTracksInPlaylist:
+            return "No valid tracks found in playlist - all files are corrupted or missing"
+
+        case .skipFailed(let reason):
+            return "Failed to skip track after retry attempts: \(reason)"
+
         // Unknown Errors
         case .unknown(let reason):
             return "Unknown error: \(reason)"
         }
     }
-    
+
+    /// Required by LocalizedError protocol
+    ///
+    /// Swift uses this property when displaying errors in the UI.
+    /// We delegate to our existing `localizedDescription` implementation.
+    public var errorDescription: String? {
+        return localizedDescription
+    }
+
     /// Error category for grouping and filtering
     ///
     /// Use this property to determine the type of error for logging,
@@ -352,7 +409,7 @@ public enum AudioPlayerError: Error, Sendable, Equatable {
             return .system
         case .bufferSchedulingFailed:
             return .playback
-        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack, .soundEffectNotFound:
+        case .emptyPlaylist, .noActiveTrack, .invalidPlaylistIndex, .noNextTrack, .noPreviousTrack, .rateLimited, .soundEffectNotFound, .noValidTracksInPlaylist, .skipFailed:
             return .playlist
         case .unknown:
             return .unknown

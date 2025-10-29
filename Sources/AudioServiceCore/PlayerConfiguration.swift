@@ -1,14 +1,25 @@
 import Foundation
 import AVFoundation
 
+// MARK: - Platform-specific type aliases
+
+#if canImport(UIKit)
+public typealias AudioSessionOptions = [AVAudioSession.CategoryOptions]
+#else
+// macOS stub - SDK is iOS-only, this is just for compilation compatibility
+public struct AudioSessionOptions: Sendable, Equatable, ExpressibleByArrayLiteral {
+    public init(arrayLiteral elements: Never...) {}
+}
+#endif
+
 /// Repeat mode for playback
 public enum RepeatMode: Sendable, Equatable {
     /// Play once, no repeat
     case off
-    
+
     /// Loop current track with fade in/out
     case singleTrack
-    
+
     /// Loop entire playlist
     case playlist
 }
@@ -16,9 +27,9 @@ public enum RepeatMode: Sendable, Equatable {
 /// Simplified player configuration with automatic fade calculations
 /// Replaces AudioConfiguration with more intuitive API
 public struct PlayerConfiguration: Sendable {
-    
+
     // MARK: - Audio Session Presets
-    
+
     /// Default audio session options for peaceful coexistence with other audio apps
     /// 
     /// **Configuration:**
@@ -41,15 +52,23 @@ public struct PlayerConfiguration: Sendable {
     /// 
     /// **Warning:** Only override if you understand iOS audio session behavior!
     /// Custom options may cause conflicts with other audio sources.
-    public static let defaultAudioSessionOptions: [AVAudioSession.CategoryOptions] = [
-        .mixWithOthers,      // Coexist peacefully with other audio
-        .allowBluetoothA2DP, // Bluetooth support (headsets, speakers)
-        .allowAirPlay,       // AirPlay streaming support
-        .defaultToSpeaker    // Use loudspeaker instead of ear speaker (for .playAndRecord category)
-    ]
-    
+    #if canImport(UIKit)
+    // CRITICAL FIX: Empty options required for lock screen controls to appear!
+    // Source: Stack Overflow - "Passing ANY argument for AVAudioSessionCategoryPlaybackOptions
+    // causes the lock screen controls to not display"
+    // https://stackoverflow.com/questions/34688128/
+    public static let defaultAudioSessionOptions: AudioSessionOptions = []
+
+    // Previously used options (BLOCKED lock screen controls):
+    // .mixWithOthers - Prevents lock screen from showing controls
+    // .allowBluetoothA2DP - May interfere with .playback category
+    // .allowAirPlay - May interfere with .playback category
+    #else
+    public static let defaultAudioSessionOptions: AudioSessionOptions = []
+    #endif
+
     // MARK: - Crossfade Settings
-    
+
     /// Crossfade duration between tracks (Spotify-style)
     ///
     /// Both tracks fade simultaneously over the full duration:
@@ -57,43 +76,42 @@ public struct PlayerConfiguration: Sendable {
     /// - Incoming track: fade IN from 0.0 to 1.0 over `crossfadeDuration`
     /// - Total overlap: equals `crossfadeDuration`
     ///
-    /// Valid range: 1.0-30.0 seconds
+    /// Valid range: 0.0-30.0 seconds (0.0 = instant switch, no crossfade)
     public let crossfadeDuration: TimeInterval
-    
+
     /// Fade curve algorithm
     public let fadeCurve: FadeCurve
-    
+
     // MARK: - Playback Mode
-    
+
     /// Repeat mode for playback (default: .off)
     /// - .off: Play once, no repeat
     /// - .singleTrack: Loop current track with fade in/out
     /// - .playlist: Loop entire playlist
     public let repeatMode: RepeatMode
-    
-    
+
     /// Number of times to repeat playlist
     /// - nil: Infinite repeats (loop forever)
     /// - 0: Play once (same as repeatMode = .off)
     /// - N: Loop N times then stop
     public let repeatCount: Int?
-    
+
     // DELETED (v4.0): singleTrackFadeInDuration and singleTrackFadeOutDuration
     // Now using crossfadeDuration for all track transitions
-    
+
     // MARK: - Audio Settings
-    
+
     /// Volume level (0.0 = silent, 1.0 = maximum)
     /// Standard AVFoundation audio range
     public let volume: Float
-    
+
     // MARK: - Stop Settings
-    
+
     // DELETED (v4.0): stopFadeDuration
     // Now always passed as method parameter in stop(fadeDuration:)
-    
+
     // MARK: - Audio Session Settings
-    
+
     /// Audio session category options
     /// 
     /// **Default:** `PlayerConfiguration.defaultAudioSessionOptions`
@@ -115,33 +133,31 @@ public struct PlayerConfiguration: Sendable {
     ///     audioSessionOptions: [.mixWithOthers, .duckOthers]
     /// )
     /// ```
-    public let audioSessionOptions: [AVAudioSession.CategoryOptions]
-    
+    public let audioSessionOptions: AudioSessionOptions
+
     // MARK: - Computed Properties
-    
-    
-    
+
     // MARK: - Initialization
-    
+
     public init(
         crossfadeDuration: TimeInterval = 10.0,
         fadeCurve: FadeCurve = .equalPower,
         repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
         volume: Float = 1.0,
-        audioSessionOptions: [AVAudioSession.CategoryOptions] = PlayerConfiguration.defaultAudioSessionOptions
+        audioSessionOptions: AudioSessionOptions = PlayerConfiguration.defaultAudioSessionOptions
     ) {
-        self.crossfadeDuration = max(1.0, min(30.0, crossfadeDuration))
+        self.crossfadeDuration = max(0.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
         self.repeatMode = repeatMode
         self.repeatCount = repeatCount
         self.volume = max(0.0, min(1.0, volume))
         self.audioSessionOptions = audioSessionOptions
-        
+
         // Warning: User is overriding default audio session options
         if audioSessionOptions != PlayerConfiguration.defaultAudioSessionOptions {
             print("")
-            print("⚠️ WARNING: Custom audio session options detected!")
+            print("WARNING: Custom audio session options detected!")
             print("  You are using custom AVAudioSession.CategoryOptions instead of defaults.")
             print("  Default options: \(PlayerConfiguration.defaultAudioSessionOptions)")
             print("  Your options:    \(audioSessionOptions)")
@@ -156,32 +172,32 @@ public struct PlayerConfiguration: Sendable {
             print("")
         }
     }
-    
+
     // MARK: - Default Configuration
-    
+
     /// Default configuration with sensible defaults
     public static let `default` = PlayerConfiguration()
-    
+
     // MARK: - Validation
-    
+
     /// Validate configuration values
     /// - Throws: ConfigurationError if invalid
     public func validate() throws {
         // Crossfade duration range check
-        if crossfadeDuration < 1.0 || crossfadeDuration > 30.0 {
+        if crossfadeDuration < 0.0 || crossfadeDuration > 30.0 {
             throw ConfigurationError.invalidCrossfadeDuration(crossfadeDuration)
         }
-        
+
         // Volume range check
         if volume < 0.0 || volume > 1.0 {
             throw ConfigurationError.invalidVolume(volume)
         }
-        
+
         // RepeatCount validation
         if let count = repeatCount, count < 0 {
             throw ConfigurationError.invalidRepeatCount(count)
         }
-        
+
         // DELETED (v4.0): stopFadeDuration, singleTrackFadeInDuration, singleTrackFadeOutDuration validations
     }
 }
@@ -193,11 +209,11 @@ public enum ConfigurationError: Error, LocalizedError {
     case invalidVolume(Float)
     case invalidRepeatCount(Int)
     // DELETED (v4.0): invalidStopFadeDuration, invalidSingleTrackFadeInDuration, invalidSingleTrackFadeOutDuration
-    
+
     public var errorDescription: String? {
         switch self {
         case .invalidCrossfadeDuration(let duration):
-            return "Crossfade duration must be between 1.0 and 30.0 seconds (got \(duration))"
+            return "Crossfade duration must be between 0.0 and 30.0 seconds (got \(duration))"
         case .invalidVolume(let volume):
             return "Volume must be between 0.0 and 1.0 (got \(volume))"
         case .invalidRepeatCount(let count):
@@ -205,4 +221,3 @@ public enum ConfigurationError: Error, LocalizedError {
         }
     }
 }
-

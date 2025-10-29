@@ -63,7 +63,7 @@ public struct SoundEffect: Identifiable, Sendable {
 
         // Load audio file into buffer (RAM)
         let file = try AVAudioFile(forReading: url)
-        
+
         // Create standard stereo format (44.1kHz, 2 channels)
         // This ensures compatibility with the audio engine's stereo pipeline
         guard let stereoFormat = AVAudioFormat(
@@ -72,9 +72,9 @@ public struct SoundEffect: Identifiable, Sendable {
         ) else {
             throw AudioPlayerError.fileLoadFailed(reason: "Cannot create stereo format for \(url.lastPathComponent)")
         }
-        
+
         let buffer: AVAudioPCMBuffer
-        
+
         // If file is already stereo with correct sample rate, use directly
         if file.processingFormat.channelCount == 2 && file.processingFormat.sampleRate == 44100 {
             guard let directBuffer = AVAudioPCMBuffer(
@@ -94,7 +94,7 @@ public struct SoundEffect: Identifiable, Sendable {
                 throw AudioPlayerError.fileLoadFailed(reason: "Cannot create source buffer for \(url.lastPathComponent)")
             }
             try file.read(into: sourceBuffer)
-            
+
             // Create converter
             guard let converter = AVAudioConverter(
                 from: file.processingFormat,
@@ -102,29 +102,29 @@ public struct SoundEffect: Identifiable, Sendable {
             ) else {
                 throw AudioPlayerError.fileLoadFailed(reason: "Cannot create audio converter for \(url.lastPathComponent)")
             }
-            
+
             // Calculate output buffer size (may differ due to sample rate conversion)
             let outputFrameCapacity = AVAudioFrameCount(
                 Double(sourceBuffer.frameLength) * stereoFormat.sampleRate / file.processingFormat.sampleRate
             )
-            
+
             guard let convertedBuffer = AVAudioPCMBuffer(
                 pcmFormat: stereoFormat,
                 frameCapacity: outputFrameCapacity
             ) else {
                 throw AudioPlayerError.fileLoadFailed(reason: "Cannot create converted buffer for \(url.lastPathComponent)")
             }
-            
+
             var error: NSError?
             converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
                 outStatus.pointee = .haveData
                 return sourceBuffer
             }
-            
+
             if let error = error {
                 throw AudioPlayerError.fileLoadFailed(reason: "Conversion failed for \(url.lastPathComponent): \(error.localizedDescription)")
             }
-            
+
             buffer = convertedBuffer
         }
 

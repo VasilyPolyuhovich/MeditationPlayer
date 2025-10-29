@@ -23,18 +23,21 @@ actor SoundEffectsPlayerActor {
 
     /// Cache storage: effect ID -> effect
     private var loadedEffects: [UUID: SoundEffect] = [:]
-    
+
     /// LRU access order: most recent at end
     private var accessOrder: [UUID] = []
-    
+
     /// Cache size limit (default: 10 effects)
     private let cacheLimit: Int
-    
+
     // MARK: - Playback State
 
     private var currentlyPlaying: SoundEffect?
     private var fadeTask: Task<Void, Never>?
     private var volume: Float = 1.0  // Master volume for all effects
+    
+    // Logger
+    private static let logger = Logger.engine
 
     // MARK: - Initialization
 
@@ -52,8 +55,8 @@ actor SoundEffectsPlayerActor {
         self.player = player
         self.mixer = mixer
         self.cacheLimit = cacheLimit
-        
-        print("[SoundEffects] 🎵 Initialized with LRU cache (limit: \(cacheLimit))")
+
+        Self.logger.debug(" 🎵 Initialized with LRU cache (limit: \(cacheLimit))")
     }
 
     // MARK: - Preload (Batch)
@@ -65,29 +68,29 @@ actor SoundEffectsPlayerActor {
         for effect in effects {
             preloadSingleEffect(effect)
         }
-        print("[SoundEffects] ✅ Batch preloaded \(effects.count) effects (cache: \(loadedEffects.count)/\(cacheLimit))")
+        Self.logger.debug(" Batch preloaded \(effects.count) effects (cache: \(loadedEffects.count)/\(cacheLimit))")
     }
 
     /// Internal: Preload single effect with LRU cache management
     private func preloadSingleEffect(_ effect: SoundEffect) {
         let id = effect.id
-        
+
         // If already cached, update access order
         if loadedEffects[id] != nil {
             updateAccessOrder(id: id)
             return
         }
-        
+
         // Check cache limit - evict oldest if needed
         if loadedEffects.count >= cacheLimit {
             evictOldestEffect()
         }
-        
+
         // Add to cache
         loadedEffects[id] = effect
         accessOrder.append(id)
-        
-        print("[SoundEffects] ✅ Preloaded: \(effect.track.url.lastPathComponent) (cache: \(loadedEffects.count)/\(cacheLimit))")
+
+        Self.logger.debug(" Preloaded: \(effect.track.url.lastPathComponent) (cache: \(loadedEffects.count)/\(cacheLimit))")
     }
 
     /// Unload specific sound effects from memory (manual cleanup)
@@ -97,13 +100,13 @@ actor SoundEffectsPlayerActor {
             let id = effect.id
             loadedEffects.removeValue(forKey: id)
             accessOrder.removeAll { $0 == id }
-            
+
             // Stop if currently playing
             if currentlyPlaying?.id == id {
                 stopCurrentEffect()
             }
         }
-        print("[SoundEffects] 🗑️ Unloaded \(effects.count) effects (cache: \(loadedEffects.count)/\(cacheLimit))")
+        Self.logger.debug(" 🗑️ Unloaded \(effects.count) effects (cache: \(loadedEffects.count)/\(cacheLimit))")
     }
 
     // MARK: - LRU Cache Management
@@ -117,7 +120,7 @@ actor SoundEffectsPlayerActor {
     /// Evict oldest (least recently used) effect from cache
     private func evictOldestEffect() {
         guard let oldestId = accessOrder.first else { return }
-        
+
         // Don't evict if currently playing
         if currentlyPlaying?.id == oldestId {
             // Find next oldest that's not playing
@@ -128,18 +131,18 @@ actor SoundEffectsPlayerActor {
             // All effects are playing (shouldn't happen) - skip eviction
             return
         }
-        
+
         evictEffect(id: oldestId)
     }
 
     /// Evict specific effect from cache
     private func evictEffect(id: UUID) {
         guard let effect = loadedEffects[id] else { return }
-        
+
         loadedEffects.removeValue(forKey: id)
         accessOrder.removeAll { $0 == id }
-        
-        print("[SoundEffects] 🗑️ LRU evicted: \(effect.track.url.lastPathComponent) (cache: \(loadedEffects.count)/\(cacheLimit))")
+
+        Self.logger.debug(" 🗑️ LRU evicted: \(effect.track.url.lastPathComponent) (cache: \(loadedEffects.count)/\(cacheLimit))")
     }
 
     // MARK: - Playback
@@ -155,7 +158,7 @@ actor SoundEffectsPlayerActor {
     func play(_ effect: SoundEffect, fadeDuration: TimeInterval = 0.0) {
         // Auto-preload if not in cache
         if loadedEffects[effect.id] == nil {
-            print("[SoundEffects] ⚠️ Auto-preloading '\(effect.track.url.lastPathComponent)' - consider calling preloadSoundEffects() upfront for instant playback")
+            Self.logger.debug(" Auto-preloading '\(effect.track.url.lastPathComponent)' - consider calling preloadSoundEffects() upfront for instant playback")
             preloadSingleEffect(effect)
         } else {
             // Update LRU access order
@@ -171,7 +174,7 @@ actor SoundEffectsPlayerActor {
 
         // Volume = effect's volume * master volume
         let finalVolume = effect.volume * volume
-        
+
         // Set mixer volume to 1.0 (full output)
         // Player volume controls the actual level
         mixer.volume = 1.0
@@ -199,7 +202,7 @@ actor SoundEffectsPlayerActor {
             player.volume = finalVolume
         }
 
-        print("[SoundEffects] ▶️ Playing: \(effect.track.url.lastPathComponent) (effect: \(effect.volume), master: \(volume), final: \(finalVolume), fadeIn: \(fadeDuration)s)")
+        Self.logger.debug(" ▶️ Playing: \(effect.track.url.lastPathComponent) (effect: \(effect.volume), master: \(volume), final: \(finalVolume), fadeIn: \(fadeDuration)s)")
     }
 
     /// Stop current sound effect
@@ -229,7 +232,7 @@ actor SoundEffectsPlayerActor {
         player.volume = 0.0
 
         if let effect = currentlyPlaying {
-            print("[SoundEffects] ⏹️ Stopped: \(effect.track.url.lastPathComponent)")
+            Self.logger.debug(" ⏹️ Stopped: \(effect.track.url.lastPathComponent)")
         }
 
         currentlyPlaying = nil
@@ -277,29 +280,29 @@ actor SoundEffectsPlayerActor {
     private func handleEffectFinished(id: UUID) {
         guard currentlyPlaying?.id == id else { return }
 
-        print("[SoundEffects] ✅ Finished: \(id)")
+        Self.logger.debug(" Finished: \(id)")
         currentlyPlaying = nil
         player.volume = 0.0
     }
 
     // MARK: - Volume Control
-    
+
     /// Set master volume for all sound effects
     /// - Parameter volume: Volume level (0.0 - 1.0)
     /// - Note: Applies to all effects, multiplied by individual effect volume
     func setVolume(_ newVolume: Float) {
         let clampedVolume = min(1.0, max(0.0, newVolume))
         volume = clampedVolume
-        
+
         // Update current playing effect volume if any
         if currentlyPlaying != nil {
             let finalVolume = (currentlyPlaying?.volume ?? 1.0) * volume
             player.volume = finalVolume
         }
-        
-        print("[SoundEffects] 🔊 Volume set to \(Int(volume * 100))%")
+
+        Self.logger.debug(" 🔊 Volume set to \(Int(volume * 100))%")
     }
-    
+
     // MARK: - Status
 
     /// Check if any sound effect is currently playing
