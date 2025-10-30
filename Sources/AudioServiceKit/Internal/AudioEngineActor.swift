@@ -1455,13 +1455,13 @@ actor AudioEngineActor {
         )
     }
 
-    /// Fade in active player from volume 0.0 to 1.0
+    /// Fade in active player from volume 0.0 to targetVolume
     func fadeInActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear) async {
         let mixer = getActiveMixerNode()
         await fadeVolume(
             mixer: mixer,
             from: 0.0,
-            to: 1.0,
+            to: targetVolume,
             duration: duration,
             curve: curve
         )
