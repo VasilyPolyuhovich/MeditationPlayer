@@ -250,6 +250,58 @@ actor AudioSessionManager {
             Self.logger.warning("  Recommendation: Add .defaultToSpeaker option")
         }
         
+        // Check 4: Warn about missing Bluetooth support (critical for route changes)
+        let hasBluetoothSupport = categoryOptions.contains(.allowBluetooth) || 
+                                 categoryOptions.contains(.allowBluetoothA2DP)
+        
+        if !hasBluetoothSupport {
+            Self.logger.warning("")
+            Self.logger.warning("⚠️ ⚠️ BLUETOOTH NOT ENABLED ⚠️ ⚠️")
+            Self.logger.warning("")
+            Self.logger.warning("Your audio session does NOT support Bluetooth devices!")
+            Self.logger.warning("")
+            Self.logger.warning("Issues you may experience:")
+            Self.logger.warning("  ❌ Audio won't route to Bluetooth headphones/speakers")
+            Self.logger.warning("  ❌ Connecting Bluetooth device won't switch audio")
+            Self.logger.warning("  ❌ User will only hear audio from iPhone speaker")
+            Self.logger.warning("")
+            Self.logger.warning("To fix, configure session with Bluetooth options:")
+            Self.logger.warning("")
+            Self.logger.warning("let session = AVAudioSession.sharedInstance()")
+            Self.logger.warning("try session.setCategory(")
+            Self.logger.warning("    .playback,  // or .playAndRecord")
+            Self.logger.warning("    options: [")
+            Self.logger.warning("        .allowBluetooth,      // Basic Bluetooth support")
+            Self.logger.warning("        .allowBluetoothA2DP,  // High-quality Bluetooth audio")
+            Self.logger.warning("        .allowAirPlay         // AirPlay support (optional)")
+            Self.logger.warning("    ]")
+            Self.logger.warning(")")
+            Self.logger.warning("try session.setActive(true)")
+            Self.logger.warning("")
+            Self.logger.warning("Then create player with external mode.")
+            Self.logger.warning("")
+        } else {
+            Self.logger.info("✅ Bluetooth support detected")
+            if categoryOptions.contains(.allowBluetooth) && categoryOptions.contains(.allowBluetoothA2DP) {
+                Self.logger.info("  • .allowBluetooth: Basic Bluetooth ✅")
+                Self.logger.info("  • .allowBluetoothA2DP: High-quality Bluetooth ✅")
+            } else if categoryOptions.contains(.allowBluetoothA2DP) {
+                Self.logger.info("  • .allowBluetoothA2DP: High-quality Bluetooth ✅")
+            } else {
+                Self.logger.info("  • .allowBluetooth: Basic Bluetooth ✅")
+                Self.logger.warning("  ⚠️ Missing .allowBluetoothA2DP for high-quality audio")
+            }
+        }
+        
+        // Check 5: Warn about AirPlay
+        if !categoryOptions.contains(.allowAirPlay) {
+            Self.logger.warning("⚠️ AirPlay not enabled (.allowAirPlay option missing)")
+            Self.logger.warning("  Audio won't stream to AirPlay devices (Apple TV, HomePod, etc.)")
+        } else {
+            Self.logger.info("✅ AirPlay support enabled")
+        }
+        
+        Self.logger.info("")
         Self.logger.info("✅ External session validation passed")
         Self.logger.info("  SDK will use app-managed audio session")
     }
@@ -298,6 +350,10 @@ actor AudioSessionManager {
         // External mode: skip activation (app manages it)
         if mode == .external {
             Self.logger.debug("🔍 External mode: Skipping activation (app-managed)")
+            Self.logger.info("  App is responsible for calling session.setActive(true)")
+            Self.logger.info("  If audio doesn't route to Bluetooth/headphones:")
+            Self.logger.info("    1. Ensure session is active before creating player")
+            Self.logger.info("    2. Reactivate session on route changes if needed")
             isActive = true  // Mark as active to pass guards
             return
         }
