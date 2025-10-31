@@ -25,6 +25,9 @@ actor AudioSessionManager {
 
     private let session: AVAudioSession
 
+    // Session management mode (set during configure)
+    private var mode: AudioSessionMode = .managed
+
     // Configuration state
     private var isConfigured = false
     private var configuredOptions: AVAudioSession.CategoryOptions?
@@ -60,14 +63,27 @@ actor AudioSessionManager {
     /// Configure AVAudioSession with specified options.
     /// - Parameters:
     ///   - options: Category options for audio session
+    ///   - mode: Session management mode (.managed or .external)
     ///   - force: Force reconfiguration even if already configured (for media services reset)
     /// - Throws: AudioPlayerError if configuration fails
     ///
     /// **Important**: Can only be called once. Subsequent calls with different options will log a warning.
-    func configure(options: [AVAudioSession.CategoryOptions], force: Bool = false) throws {
+    func configure(options: [AVAudioSession.CategoryOptions], mode: AudioSessionMode = .managed, force: Bool = false) throws {
+        // Store mode for later use
+        self.mode = mode
+        
         // Combine array into single OptionSet
         let categoryOptions = options.reduce(into: AVAudioSession.CategoryOptions()) { result, option in
             result.formUnion(option)
+        }
+        
+        // External mode: validate instead of configure
+        if mode == .external {
+            Self.logger.info("🔍 External mode: Validating audio session (not configuring)")
+            try validateExternalSession()
+            isConfigured = true
+            configuredOptions = categoryOptions
+            return
         }
 
         // Already configured - check for conflicts (unless force)
@@ -178,6 +194,66 @@ actor AudioSessionManager {
         }
     }
 
+    // MARK: - External Mode Validation
+    
+    /// Validate audio session configuration in external mode
+    /// - Throws: AudioPlayerError if session incompatible
+    private func validateExternalSession() throws {
+        let category = session.category
+        let categoryOptions = session.categoryOptions
+        
+        Self.logger.info("📋 Validating external audio session:")
+        Self.logger.info("  Category: \(category.rawValue)")
+        Self.logger.info("  Options: \(categoryOptions.rawValue)")
+        Self.logger.info("  Active: \(session.isOtherAudioPlaying)")
+        
+        // Check 1: Category must be compatible with playback
+        let compatibleCategories: [AVAudioSession.Category] = [
+            .playback,
+            .playAndRecord,
+            .multiRoute
+        ]
+        
+        guard compatibleCategories.contains(category) else {
+            Self.logger.error("❌ INCOMPATIBLE CATEGORY: \(category.rawValue)")
+            Self.logger.error("")
+            Self.logger.error("Audio session category '\(category.rawValue)' does not support playback.")
+            Self.logger.error("")
+            Self.logger.error("To fix this issue, configure audio session before creating AudioPlayerService:")
+            Self.logger.error("")
+            Self.logger.error("let session = AVAudioSession.sharedInstance()")
+            Self.logger.error("try session.setCategory(.playback)  // or .playAndRecord")
+            Self.logger.error("try session.setActive(true)")
+            Self.logger.error("")
+            Self.logger.error("Then create player:")
+            Self.logger.error("let player = try await AudioPlayerService(")
+            Self.logger.error("    configuration: PlayerConfiguration(audioSessionMode: .external)")
+            Self.logger.error(")")
+            Self.logger.error("")
+            
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Audio session category '\(category.rawValue)' is incompatible with playback. Use .playback or .playAndRecord. See console for detailed instructions."
+            )
+        }
+        
+        // Check 2: Warn if session not active (not critical, but suboptimal)
+        if !session.isOtherAudioPlaying {
+            Self.logger.warning("⚠️ Audio session is not active")
+            Self.logger.warning("  Recommendation: Call session.setActive(true) before creating player")
+            Self.logger.warning("  This is not critical, but may cause audio routing issues")
+        }
+        
+        // Check 3: Warn about suboptimal options
+        if category == .playAndRecord && !categoryOptions.contains(.defaultToSpeaker) {
+            Self.logger.warning("⚠️ Using .playAndRecord without .defaultToSpeaker")
+            Self.logger.warning("  Audio may route to earpiece instead of speaker")
+            Self.logger.warning("  Recommendation: Add .defaultToSpeaker option")
+        }
+        
+        Self.logger.info("✅ External session validation passed")
+        Self.logger.info("  SDK will use app-managed audio session")
+    }
+    
     // MARK: - Dynamic Options Update (For Testing)
 
     /// Update audio session category options dynamically
@@ -218,6 +294,13 @@ actor AudioSessionManager {
                 reason: "Session must be configured before activation"
             )
         }
+        
+        // External mode: skip activation (app manages it)
+        if mode == .external {
+            Self.logger.debug("🔍 External mode: Skipping activation (app-managed)")
+            isActive = true  // Mark as active to pass guards
+            return
+        }
 
         // Already active - skip
         guard !isActive else { return }
@@ -252,6 +335,16 @@ actor AudioSessionManager {
     ///
     /// - Throws: AudioPlayerError if reconfiguration fails
     private func _forceReconfigureInternal() throws {
+        // External mode: do NOT force reconfigure (app manages session)
+        if mode == .external {
+            Self.logger.warning("⚠️ External mode: Cannot force reconfigure (app-managed session)")
+            Self.logger.warning("  Audio session was changed externally")
+            Self.logger.warning("  App developer must restore session configuration")
+            throw AudioPlayerError.sessionConfigurationFailed(
+                reason: "Cannot force reconfigure in external mode. App must manage audio session."
+            )
+        }
+        
         guard let options = configuredOptions else {
             throw AudioPlayerError.sessionConfigurationFailed(
                 reason: "No configured options to restore"

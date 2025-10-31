@@ -155,7 +155,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         isSetupComplete = true
 
         do {
-            try await sessionManager.configure(options: configuration.audioSessionOptions)
+            try await sessionManager.configure(options: configuration.audioSessionOptions, mode: configuration.audioSessionMode)
             try await sessionManager.activate()
             Self.logger.debug("Audio session activated in setup()")
         } catch {
@@ -1733,7 +1733,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
         // Step 2: Reconfigure audio session from scratch with user's options
         do {
-            try await sessionManager.configure(options: configuration.audioSessionOptions, force: true)
+            try await sessionManager.configure(options: configuration.audioSessionOptions, mode: configuration.audioSessionMode, force: true)
             Self.logger.debug("[MEDIA_SERVICES] Session reconfigured successfully (force)")
         } catch {
             Self.logger.error("[MEDIA_SERVICES] Failed to reconfigure session: \(error.localizedDescription)")

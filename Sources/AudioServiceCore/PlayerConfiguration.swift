@@ -112,6 +112,17 @@ public struct PlayerConfiguration: Sendable {
 
     // MARK: - Audio Session Settings
 
+    // MARK: - Audio Session Mode
+
+    /// Audio session management mode
+    /// 
+    /// **Default:** `.managed` (SDK manages session)
+    /// - `.managed`: SDK configures and activates session (recommended)
+    /// - `.external`: App developer manages session (advanced)
+    /// 
+    /// **See:** `AudioSessionMode` for detailed behavior
+    public let audioSessionMode: AudioSessionMode
+
     /// Audio session category options
     /// 
     /// **Default:** `PlayerConfiguration.defaultAudioSessionOptions`
@@ -145,7 +156,8 @@ public struct PlayerConfiguration: Sendable {
         repeatMode: RepeatMode = .off,
         repeatCount: Int? = nil,
         volume: Float = 1.0,
-        audioSessionOptions: AudioSessionOptions = PlayerConfiguration.defaultAudioSessionOptions
+        audioSessionOptions: AudioSessionOptions = PlayerConfiguration.defaultAudioSessionOptions,
+        audioSessionMode: AudioSessionMode = .managed
     ) {
         self.crossfadeDuration = max(0.0, min(30.0, crossfadeDuration))
         self.fadeCurve = fadeCurve
@@ -153,6 +165,7 @@ public struct PlayerConfiguration: Sendable {
         self.repeatCount = repeatCount
         self.volume = max(0.0, min(1.0, volume))
         self.audioSessionOptions = audioSessionOptions
+        self.audioSessionMode = audioSessionMode
 
         // Warning: User is overriding default audio session options
         if audioSessionOptions != PlayerConfiguration.defaultAudioSessionOptions {
