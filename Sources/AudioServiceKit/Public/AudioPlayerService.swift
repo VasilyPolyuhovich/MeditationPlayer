@@ -12,7 +12,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private static let logger = Logger.audio
 
     /// Cached state for synchronous protocol conformance
-    private var _cachedState: PlayerState = .finished
+    private var _cachedState: PlayerState = .idle
     public var state: PlayerState { _cachedState }
 
     /// Cached track metadata for synchronous protocol conformance
@@ -117,7 +117,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     public init(configuration: PlayerConfiguration = PlayerConfiguration()) async throws {
 
         // Initialize AsyncCurrentValueSubject for state management with current value guarantee
-        self.stateSubject = AsyncCurrentValueSubject(.finished)
+        self.stateSubject = AsyncCurrentValueSubject(.idle)
         self.trackSubject = AsyncCurrentValueSubject(nil)
         self.positionSubject = AsyncCurrentValueSubject(PlaybackPosition(currentTime: 0, duration: 0))
 
@@ -2708,6 +2708,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 internal extension PlayerState {  // Made internal for playlist extension access
     var description: String {
         switch self {
+        case .idle: return "idle"
         case .preparing: return "preparing"
         case .playing: return "playing"
         case .paused: return "paused"

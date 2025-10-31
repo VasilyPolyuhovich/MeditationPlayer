@@ -2,6 +2,9 @@ import Foundation
 
 /// Represents the current state of the audio player
 public enum PlayerState: Sendable, Equatable {
+    /// Player is idle and ready to accept commands
+    case idle
+
     /// Player is preparing audio resources
     case preparing
 
@@ -22,7 +25,8 @@ public enum PlayerState: Sendable, Equatable {
 
     public static func == (lhs: PlayerState, rhs: PlayerState) -> Bool {
         switch (lhs, rhs) {
-        case (.preparing, .preparing),
+        case (.idle, .idle),
+             (.preparing, .preparing),
              (.playing, .playing),
              (.paused, .paused),
              (.fadingOut, .fadingOut),

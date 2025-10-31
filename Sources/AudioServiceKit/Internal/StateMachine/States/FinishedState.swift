@@ -6,8 +6,8 @@ struct FinishedState: AudioStateProtocol {
     var playerState: PlayerState { .finished }
 
     func isValidTransition(to state: any AudioStateProtocol) -> Bool {
-        // Can restart from finished state
-        return state.playerState == .preparing
+        // Can restart from finished state or go to idle
+        return state.playerState == .preparing || state.playerState == .idle
     }
 
     func didEnter(from previousState: (any AudioStateProtocol)?, context: AudioStateMachineContext) async {

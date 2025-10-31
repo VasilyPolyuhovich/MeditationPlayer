@@ -17,7 +17,7 @@ actor AudioStateMachine {
 
     init(context: any AudioStateMachineContext) {
         self.context = context
-        self.currentStateBox = FinishedState()
+        self.currentStateBox = IdleState()
     }
 
     // MARK: - State Transitions
@@ -55,6 +55,10 @@ actor AudioStateMachine {
 
     // MARK: - Convenience Methods
 
+    func enterIdle() async -> Bool {
+        await enter(IdleState())
+    }
+
     func enterPreparing() async -> Bool {
         await enter(PreparingState())
     }
@@ -86,6 +90,8 @@ actor AudioStateMachine {
         let tempState: any AudioStateProtocol
 
         switch stateType {
+        case .idle:
+            tempState = IdleState()
         case .preparing:
             tempState = PreparingState()
         case .playing:
