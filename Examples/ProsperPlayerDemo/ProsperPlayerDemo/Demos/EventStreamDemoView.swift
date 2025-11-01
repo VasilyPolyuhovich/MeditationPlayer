@@ -76,6 +76,9 @@ struct EventStreamDemoView: View {
             let eventType: EventEntry.EventType
             
             switch newValue {
+            case .idle:
+                eventName = "Player idle"
+                eventType = .info
             case .finished:
                 eventName = "Playback finished"
                 eventType = .success

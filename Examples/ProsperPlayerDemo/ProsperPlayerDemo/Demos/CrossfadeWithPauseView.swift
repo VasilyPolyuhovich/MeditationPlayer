@@ -146,6 +146,9 @@ struct CrossfadeWithPauseView: View {
     @ViewBuilder
     private var stateLabel: some View {
         switch playerState {
+        case .idle:
+            Label("Idle", systemImage: "circle")
+                .foregroundStyle(.secondary)
         case .preparing:
             Label("Preparing", systemImage: "hourglass")
                 .foregroundStyle(.orange)

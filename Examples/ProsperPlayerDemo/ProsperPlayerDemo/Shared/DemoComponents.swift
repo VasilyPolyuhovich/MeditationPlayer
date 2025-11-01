@@ -75,6 +75,9 @@ struct StateLabel: View {
     
     var body: some View {
         switch state {
+        case .idle:
+            Label("Idle", systemImage: "circle")
+                .foregroundStyle(.secondary)
         case .preparing:
             Label("Preparing", systemImage: "hourglass")
                 .foregroundStyle(.orange)

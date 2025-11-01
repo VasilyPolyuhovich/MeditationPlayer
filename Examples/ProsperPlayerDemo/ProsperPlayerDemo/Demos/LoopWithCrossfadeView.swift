@@ -114,6 +114,7 @@ struct LoopWithCrossfadeView: View {
     @ViewBuilder
     private var stateLabel: some View {
         switch playerState {
+        case .idle: Label("Idle", systemImage: "circle").foregroundStyle(.secondary)
         case .preparing: Label("Preparing", systemImage: "hourglass").foregroundStyle(.orange)
         case .playing: Label("Playing", systemImage: "play.fill").foregroundStyle(.green)
         case .paused: Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)

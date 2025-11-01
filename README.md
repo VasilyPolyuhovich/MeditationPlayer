@@ -417,6 +417,123 @@ ProsperPlayer includes production-grade audio stability optimizations:
 - **CPU Usage**: Minimal increase (<1%)
 
 ## 🧪 Testing
+## 🎚️ Audio Session Management
+
+ProsperPlayer offers two modes for managing `AVAudioSession`:
+
+### Managed Mode (Default) ✅
+
+SDK automatically configures and manages the audio session:
+
+```swift
+// Simple - SDK handles everything
+let service = try await AudioPlayerService()
+
+// SDK automatically:
+// - Sets category: .playback
+// - Enables Bluetooth: .allowBluetooth, .allowBluetoothA2DP
+// - Activates session
+// - Recovers from interruptions
+```
+
+**When to use:**
+- ✅ Most apps (95% of use cases)
+- ✅ Simple integration
+- ✅ Self-healing from external changes
+- ✅ Production-tested configuration
+
+---
+
+### External Mode (Advanced) ⚙️
+
+App developer manually configures audio session **before** creating player:
+
+```swift
+// 1. Configure audio session FIRST
+let session = AVAudioSession.sharedInstance()
+
+// Option 1: Simple playback (recommended)
+try session.setCategory(
+    .playback,
+    options: [
+        .allowBluetooth,      // Basic Bluetooth
+        .allowBluetoothA2DP   // High-quality Bluetooth
+    ]
+)
+try session.setActive(true)
+
+// 2. THEN create player with external mode
+let config = PlayerConfiguration(audioSessionMode: .external)
+let service = try await AudioPlayerService(configuration: config)
+```
+
+**When to use:**
+- ⚙️ Need custom audio session configuration
+- ⚙️ App has multiple audio components
+- ⚙️ Recording + playback (`.playAndRecord` category)
+- ⚙️ Custom audio routing requirements
+
+**⚠️ Important:** SDK validates your configuration and shows errors if incompatible!
+
+---
+
+### External Mode with Recording
+
+If you need recording capability, use `.playAndRecord` with **`.defaultToSpeaker`**:
+
+```swift
+try session.setCategory(
+    .playAndRecord,
+    options: [
+        .defaultToSpeaker,    // ⚠️ REQUIRED: Routes to speaker, not earpiece
+        .allowBluetooth,
+        .allowBluetoothA2DP
+    ]
+)
+```
+
+**Why `.defaultToSpeaker`?**
+- Without it: audio routes to **earpiece** (quiet, low quality)
+- With it: audio routes to **speaker** (proper volume, high quality)
+
+---
+
+### Validation & Debugging
+
+External mode includes comprehensive validation:
+
+**4 Validation Checks:**
+1. **Category compatibility** - throws error if incompatible (e.g., `.record` category)
+2. **Session active** - warns if not activated
+3. **`.playAndRecord` needs `.defaultToSpeaker`** - warns if missing
+4. **Bluetooth support** - shows error if missing (uses `Logger.error()` - always visible!)
+
+**Example error output** (missing Bluetooth):
+```
+⚠️⚠️ BLUETOOTH NOT ENABLED ⚠️⚠️
+
+Your audio session does NOT support Bluetooth devices!
+
+Issues you may experience:
+  ❌ Audio won't route to Bluetooth headphones/speakers
+  ❌ Connecting Bluetooth device won't switch audio
+  ❌ User will only hear audio from iPhone speaker
+
+To fix, choose one of these configurations:
+
+Option 1: .playback category (recommended for music/meditation)
+  [exact code provided]
+
+Option 2: .playAndRecord category (if you need recording)
+  [exact code with .defaultToSpeaker]
+```
+
+💡 **Tip:** Check `ExternalModeDemo` in ProsperPlayerDemo for interactive examples!
+
+---
+
+## 🧪 Testing
+
 
 **Run tests on physical device recommended** (simulator lacks full audio support):
 

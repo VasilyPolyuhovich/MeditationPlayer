@@ -230,6 +230,9 @@ struct MultiInstanceView: View {
     @ViewBuilder
     private func stateLabel(for state: PlayerState) -> some View {
         switch state {
+        case .idle:
+            Label("Idle", systemImage: "circle")
+                .foregroundStyle(.secondary)
         case .preparing:
             Label("Preparing", systemImage: "hourglass")
                 .foregroundStyle(.orange)
