@@ -251,8 +251,7 @@ actor AudioSessionManager {
         }
         
         // Check 4: Warn about missing Bluetooth support (critical for route changes)
-        let hasBluetoothSupport = categoryOptions.contains(.allowBluetooth) || 
-                                 categoryOptions.contains(.allowBluetoothA2DP)
+        let hasBluetoothSupport = categoryOptions.contains(.allowBluetoothA2DP)
         
         if !hasBluetoothSupport {
             Self.logger.error("")
@@ -272,7 +271,6 @@ actor AudioSessionManager {
             Self.logger.error("try session.setCategory(")
             Self.logger.error("    .playback,")
             Self.logger.error("    options: [")
-            Self.logger.error("        .allowBluetooth,      // Basic Bluetooth support")
             Self.logger.error("        .allowBluetoothA2DP   // High-quality Bluetooth audio")
             Self.logger.error("    ]")
             Self.logger.error(")")
@@ -283,7 +281,6 @@ actor AudioSessionManager {
             Self.logger.error("    .playAndRecord,")
             Self.logger.error("    options: [")
             Self.logger.error("        .defaultToSpeaker,    // REQUIRED: Route to speaker, not earpiece")
-            Self.logger.error("        .allowBluetooth,      // Basic Bluetooth support")
             Self.logger.error("        .allowBluetoothA2DP   // High-quality Bluetooth audio")
             Self.logger.error("    ]")
             Self.logger.error(")")
@@ -293,15 +290,7 @@ actor AudioSessionManager {
             Self.logger.error("")
         } else {
             Self.logger.info("✅ Bluetooth support detected")
-            if categoryOptions.contains(.allowBluetooth) && categoryOptions.contains(.allowBluetoothA2DP) {
-                Self.logger.info("  • .allowBluetooth: Basic Bluetooth ✅")
-                Self.logger.info("  • .allowBluetoothA2DP: High-quality Bluetooth ✅")
-            } else if categoryOptions.contains(.allowBluetoothA2DP) {
-                Self.logger.info("  • .allowBluetoothA2DP: High-quality Bluetooth ✅")
-            } else {
-                Self.logger.info("  • .allowBluetooth: Basic Bluetooth ✅")
-                Self.logger.warning("  ⚠️ Missing .allowBluetoothA2DP for high-quality audio")
-            }
+            Self.logger.info("  • .allowBluetoothA2DP: High-quality Bluetooth ✅")
         }
         
         

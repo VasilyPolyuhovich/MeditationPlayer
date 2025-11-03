@@ -314,6 +314,30 @@ actor AudioEngineActor {
         mixerNodeB.volume = 0.0
     }
 
+    /// Pause active crossfade task and cleanup (preserves mixer volumes for resume)
+    /// - Note: Similar to cancelActiveCrossfade() but WITHOUT resetting mixer volumes
+    /// - Note: Used when pause() is called during active crossfade
+    func pauseCrossfadeTask() async {
+        guard let task = activeCrossfadeTask else { return }
+
+        // Cancel task
+        isCrossfadeCancelled = true
+        task.cancel()
+        Self.logger.info("[PAUSE] Waiting for crossfade Task to complete...")
+        _ = await task.value  // Block until Task finishes (prevents zombie Task)
+        Self.logger.info("[PAUSE] Crossfade Task completed")
+        activeCrossfadeTask = nil
+
+        // Report idle state
+        crossfadeProgressContinuation?.yield(.idle)
+        crossfadeProgressContinuation?.finish()
+        crossfadeProgressContinuation = nil
+
+        // NOTE: Mixer volumes are NOT reset - preserved for smooth resume
+        Self.logger.debug("[PAUSE] Crossfade task paused, volumes preserved: A=\(mixerNodeA.volume), B=\(mixerNodeB.volume)")
+    }
+
+
     /// Cancel crossfade and stop inactive player
     /// - Note: Used when stop() is called during crossfade
     /// - Note: Leaves active mixer volume unchanged for subsequent fadeout

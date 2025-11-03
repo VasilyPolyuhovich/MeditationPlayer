@@ -39,7 +39,7 @@ public enum AudioSessionMode: Sendable, Equatable {
     /// ```swift
     /// // 1. Configure session (app responsibility)
     /// let session = AVAudioSession.sharedInstance()
-    /// try session.setCategory(.playAndRecord, options: [.allowBluetooth])
+    /// try session.setCategory(.playAndRecord, options: [.allowBluetoothA2DP])
     /// try session.setActive(true)
     ///
     /// // 2. Create player (will validate session)

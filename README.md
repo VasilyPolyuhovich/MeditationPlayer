@@ -431,7 +431,7 @@ let service = try await AudioPlayerService()
 
 // SDK automatically:
 // - Sets category: .playback
-// - Enables Bluetooth: .allowBluetooth, .allowBluetoothA2DP
+// - Enables Bluetooth: .allowBluetoothA2DP
 // - Activates session
 // - Recovers from interruptions
 ```
@@ -456,7 +456,6 @@ let session = AVAudioSession.sharedInstance()
 try session.setCategory(
     .playback,
     options: [
-        .allowBluetooth,      // Basic Bluetooth
         .allowBluetoothA2DP   // High-quality Bluetooth
     ]
 )
@@ -486,7 +485,6 @@ try session.setCategory(
     .playAndRecord,
     options: [
         .defaultToSpeaker,    // ⚠️ REQUIRED: Routes to speaker, not earpiece
-        .allowBluetooth,
         .allowBluetoothA2DP
     ]
 )

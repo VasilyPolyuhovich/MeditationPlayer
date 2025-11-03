@@ -275,6 +275,10 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             )
         }
 
+        // Stop crossfade task (preserves mixer volumes for resume)
+        await audioEngine.pauseCrossfadeTask()
+
+
         // Calculate resume strategy
         let strategy: PausedCrossfadeState.ResumeStrategy = active.progress < 0.5 ? .continueFromProgress : .quickFinish
 
@@ -485,10 +489,11 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         // Determine remaining duration (1 second for quick finish)
         let finishDuration: TimeInterval = 1.0
 
-        // Resume crossfade from current volumes
-        let progressStream = await audioEngine.performSynchronizedCrossfade(
+        // Resume crossfade from saved volumes
+        let progressStream = await audioEngine.resumeCrossfadeFromState(
             duration: finishDuration,
-            curve: paused.curve
+            curve: paused.curve,
+            startVolumes: (active: paused.activeMixerVolume, inactive: paused.inactiveMixerVolume)
         )
 
         // Wait for completion

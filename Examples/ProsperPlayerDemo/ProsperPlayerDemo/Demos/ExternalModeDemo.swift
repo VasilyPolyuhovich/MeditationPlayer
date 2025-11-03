@@ -374,10 +374,10 @@ struct ExternalModeDemo: View {
                 // Option 1: Simple playback (matches SDK managed mode)
                 try session.setCategory(
                     .playback,
-                    options: [.allowBluetooth, .allowBluetoothA2DP]
+                    options: [.allowBluetoothA2DP]
                 )
                 validationLogs.append("✅ Set category: .playback")
-                validationLogs.append("✅ Options: [.allowBluetooth, .allowBluetoothA2DP]")
+                validationLogs.append("✅ Options: [.allowBluetoothA2DP] (high-quality Bluetooth)")
                 
             case .playAndRecord:
                 // Option 2: Recording + playback
@@ -385,12 +385,11 @@ struct ExternalModeDemo: View {
                     .playAndRecord,
                     options: [
                         .defaultToSpeaker,
-                        .allowBluetooth,
                         .allowBluetoothA2DP
                     ]
                 )
                 validationLogs.append("✅ Set category: .playAndRecord")
-                validationLogs.append("✅ Options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP]")
+                validationLogs.append("✅ Options: [.defaultToSpeaker, .allowBluetoothA2DP] (high-quality Bluetooth)")
                 validationLogs.append("ℹ️  .defaultToSpeaker routes to speaker, not earpiece")
                 
             case .missingBluetooth:
