@@ -36,6 +36,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
     // MARK: - Paused Crossfade State
 
+    /// Flag indicating pause is in progress (prevents cleanup during pause)
+    private var isPausing: Bool = false
+
     /// Saved state for pause/resume
     private var pausedCrossfade: PausedCrossfadeState?
 
@@ -215,9 +218,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         }
 
 
-        // 9. Check if paused during crossfade
-        if pausedCrossfade != nil {
-            Self.logger.debug("[CrossfadeOrch] Crossfade paused during execution")
+        // 9. Check if pause was initiated during crossfade
+        if isPausing {
+            Self.logger.debug("[CrossfadeOrch] Crossfade paused during execution, skipping cleanup")
             activeCrossfade = nil
             return .paused
         }
@@ -266,17 +269,26 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         crossfadeProgressTask?.cancel()
         crossfadeProgressTask = nil
 
-        // Get engine crossfade state
+        // Set flag BEFORE stopping task to prevent cleanup in crossfade task
+        isPausing = true
+
+        // Stop crossfade task FIRST (prevents race condition)
+        Self.logger.info("[CrossfadeOrch] Calling pauseCrossfadeTask()...")
+        await audioEngine.pauseCrossfadeTask()
+        Self.logger.info("[CrossfadeOrch] pauseCrossfadeTask() completed")
+
+        // Get engine crossfade state AFTER stopping Task (ensures synchronized state)
+        Self.logger.info("[CrossfadeOrch] Getting crossfade state AFTER pauseCrossfadeTask()...")
         guard let engineState = await audioEngine.getCrossfadeState() else {
             Self.logger.error("[CrossfadeOrch] Failed to get engine crossfade state")
+            isPausing = false  // Reset flag on error
             throw AudioPlayerError.invalidState(
                 current: "no engine crossfade state",
                 attempted: "pause crossfade"
             )
         }
 
-        // Stop crossfade task (preserves mixer volumes for resume)
-        await audioEngine.pauseCrossfadeTask()
+        Self.logger.info("[CrossfadeOrch] State captured: activePlayer=\(engineState.activePlayer), activeMixer=\(engineState.activeMixerVolume), inactiveMixer=\(engineState.inactiveMixerVolume)")
 
 
         // Calculate resume strategy
@@ -298,6 +310,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
         // Clear active crossfade
         activeCrossfade = nil
+
+        // Reset pause flag
+        isPausing = false
 
         Self.logger.info("[CrossfadeOrch] Crossfade paused (progress: \(Int(active.progress * 100))%, strategy: \(strategy))")
 
@@ -327,10 +342,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
         switch paused.resumeStrategy {
         case .continueFromProgress:
             Self.logger.info("[CrossfadeOrch] Resuming crossfade from \(Int(paused.progress * 100))%")
-            // TODO: Implement continue from progress
-            // Need engine support for resuming crossfade mid-way
-            Self.logger.warning("[CrossfadeOrch] Continue from progress not yet implemented, using quick finish")
-            fallthrough
+            try await continueFromProgress(from: paused)
 
         case .quickFinish:
             Self.logger.info("[CrossfadeOrch] Quick finish crossfade in 1s")
@@ -515,7 +527,12 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             return
         }
 
-        // Switch players
+        // Switch players (new track now on inactive at full volume after quick finish)
+        // Note: quickFinish always completes fade (active→0.0, inactive→1.0)
+        // activePlayer still points to old track, so switch is always needed
+        Self.logger.debug("[CrossfadeOrch] Quick finish completed, switching to new track")
+        Self.logger.debug("[CrossfadeOrch]   Before switch: activePlayer=\(paused.activePlayer)")
+        Self.logger.debug("[CrossfadeOrch]   Paused volumes: active=\(paused.activeMixerVolume), inactive=\(paused.inactiveMixerVolume)")
         await stateStore.switchActivePlayer()
         await audioEngine.switchActivePlayer()
 
@@ -527,6 +544,55 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
         Self.logger.info("[CrossfadeOrch] Quick finish completed")
     }
+
+    /// Continue paused crossfade from current progress
+    private func continueFromProgress(from paused: PausedCrossfadeState) async throws {
+        Self.logger.debug("[CrossfadeOrch] → continueFromProgress()")
+
+        // Calculate remaining duration
+        let remainingDuration = paused.remainingDuration
+        Self.logger.info("[CrossfadeOrch] Continuing: \(Int(paused.progress * 100))% done, \(String(format: "%.1f", remainingDuration))s remaining")
+
+        // Resume crossfade from saved volumes
+        let progressStream = await audioEngine.resumeCrossfadeFromState(
+            duration: remainingDuration,
+            curve: paused.curve,
+            startVolumes: (active: paused.activeMixerVolume, inactive: paused.inactiveMixerVolume)
+        )
+
+        // Wait for completion
+        for await _ in progressStream {
+            // Just consume the stream
+        }
+
+        // CRITICAL: Check if new crossfade started during await
+        guard activeCrossfade == nil else {
+            Self.logger.info("[CrossfadeOrch] New crossfade started during continue, aborting cleanup")
+            return
+        }
+
+        // CRITICAL: Check cancellation before cleanup
+        guard !Task.isCancelled else {
+            Self.logger.info("[CrossfadeOrch] Continue cancelled, skipping cleanup")
+            return
+        }
+
+        // Switch players (new track now on inactive at full volume)
+        Self.logger.debug("[CrossfadeOrch] Continue completed, switching to new track")
+        Self.logger.debug("[CrossfadeOrch]   Before switch: activePlayer=\(paused.activePlayer)")
+        Self.logger.debug("[CrossfadeOrch]   Paused volumes: active=\(paused.activeMixerVolume), inactive=\(paused.inactiveMixerVolume)")
+        await stateStore.switchActivePlayer()
+        await audioEngine.switchActivePlayer()
+
+        // Cleanup
+        await audioEngine.stopInactivePlayer()
+        await audioEngine.resetInactiveMixer()
+        await audioEngine.clearInactiveFile()
+        await stateStore.updateCrossfading(false)
+
+        Self.logger.info("[CrossfadeOrch] Continue from progress completed")
+    }
+
 
     /// Perform separate fades: fade out active → switch → fade in new track
     /// Used when not enough time for crossfade (near end of track)
@@ -541,7 +607,7 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
 
         // 1. Fade out active player
         Self.logger.debug("[CrossfadeOrch] Step 1: Fade out active player")
-        await audioEngine.fadeOutActivePlayer(duration: fadeOutDuration, curve: curve)
+        await audioEngine.fadeOutActivePlayer(duration: fadeOutDuration, curve: curve, checkCancellation: true)
 
         // 2. Stop active player
         Self.logger.debug("[CrossfadeOrch] Step 2: Stop active player")

@@ -548,22 +548,24 @@ actor AudioEngineActor {
     }
 
     /// Get current crossfade state for pausing
+    /// - Note: Can be called even when isCrossfading=false to capture final state
     func getCrossfadeState() -> CrossfadeState? {
-        guard isCrossfading else { return nil }
-
+        let currentActivePlayer = activePlayer  // Capture BEFORE reading volumes
         let activeMixer = getActiveMixerNode()
         let inactiveMixer = getInactiveMixerNode()
 
+        Self.logger.debug("[GET_STATE] Reading: activePlayer=\(currentActivePlayer), activeMixer=\(activeMixer.volume), inactiveMixer=\(inactiveMixer.volume), mixerA=\(mixerNodeA.volume), mixerB=\(mixerNodeB.volume)")
+
         // Get positions from both players
-        let activePos = getPlayerPosition(for: activePlayer)
-        let inactivePos = getPlayerPosition(for: activePlayer == .a ? .b : .a)
+        let activePos = getPlayerPosition(for: currentActivePlayer)
+        let inactivePos = getPlayerPosition(for: currentActivePlayer == .a ? .b : .a)
 
         return CrossfadeState(
             activeMixerVolume: activeMixer.volume,
             inactiveMixerVolume: inactiveMixer.volume,
             activePlayerPosition: activePos,
             inactivePlayerPosition: inactivePos,
-            activePlayer: activePlayer
+            activePlayer: currentActivePlayer
         )
     }
 
@@ -985,7 +987,8 @@ actor AudioEngineActor {
         from: Float,
         to: Float,
         duration: TimeInterval,
-        curve: FadeCurve = .equalPower
+        curve: FadeCurve = .equalPower,
+        checkCancellation: Bool = true
     ) async {
         let mixerName = (mixer === mixerNodeA) ? "MixerA" : "MixerB"
         let playerNode = getActivePlayerNode()
@@ -1029,7 +1032,8 @@ actor AudioEngineActor {
         for i in 0...steps {
             // FIXED Issue #10A: Check for task cancellation on every step
             // If fade is interrupted (pause/stop) → abort gracefully
-            guard !isCrossfadeCancelled else {
+            // Only check cancellation if requested (crossfade fades check, simple fades don't)
+            guard !checkCancellation || !isCrossfadeCancelled else {
                 Self.logger.debug("[FADE_DEBUG] \(mixerName): CANCELLED at step \(i)/\(steps)")
                 return // Exit immediately without throwing
             }
@@ -1069,7 +1073,7 @@ actor AudioEngineActor {
 
         // Ensure final volume is exact (only if not cancelled)
         let isPlayingEnd = playerNode.isPlaying
-        if !isCrossfadeCancelled {
+        if !checkCancellation || !isCrossfadeCancelled {
             mixer.volume = to
             Self.logger.debug("[FADE_DEBUG] \(mixerName): COMPLETE - final volume=\(to)")
             Self.logger.debug("[STOP_DIAGNOSTIC] fadeVolume END: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd), finalMixerVol=\(mixer.volume)")
@@ -1467,7 +1471,8 @@ actor AudioEngineActor {
     // MARK: - Simple Fade Operations (for Pause/Resume/Skip)
 
     /// Fade out active player to volume 0.0
-    func fadeOutActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear) async {
+    /// - Parameter checkCancellation: If true, checks isCrossfadeCancelled flag (for crossfade). If false, ignores flag (for simple pause/resume).
+    func fadeOutActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear, checkCancellation: Bool = false) async {
         let mixer = getActiveMixerNode()
         let currentVolume = mixer.volume
         await fadeVolume(
@@ -1475,19 +1480,22 @@ actor AudioEngineActor {
             from: currentVolume,
             to: 0.0,
             duration: duration,
-            curve: curve
+            curve: curve,
+            checkCancellation: checkCancellation
         )
     }
 
     /// Fade in active player from volume 0.0 to targetVolume
-    func fadeInActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear) async {
+    /// - Parameter checkCancellation: If true, checks isCrossfadeCancelled flag (for crossfade). If false, ignores flag (for simple pause/resume).
+    func fadeInActivePlayer(duration: TimeInterval, curve: FadeCurve = .linear, checkCancellation: Bool = false) async {
         let mixer = getActiveMixerNode()
         await fadeVolume(
             mixer: mixer,
             from: 0.0,
             to: targetVolume,
             duration: duration,
-            curve: curve
+            curve: curve,
+            checkCancellation: checkCancellation
         )
     }
 
@@ -1651,7 +1659,8 @@ actor AudioEngineActor {
                 from: mixer.volume,
                 to: 0.0,
                 duration: 0.02,  // 20ms - imperceptible but eliminates clicks
-                curve: .linear
+                curve: .linear,
+                checkCancellation: false  // Cleanup shouldn't be interrupted
             )
         }
 

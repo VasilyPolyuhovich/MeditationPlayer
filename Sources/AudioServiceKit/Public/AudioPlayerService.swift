@@ -401,7 +401,12 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         let resumedCrossfade = try await crossfadeOrchestrator.resumeCrossfade()
 
         if resumedCrossfade {
-
+            Self.logger.debug("[SERVICE] Crossfade resumed, ensuring playback")
+            
+            // Ensure active player is playing after crossfade resume
+            await audioEngine.play()
+            Self.logger.debug("[SERVICE] Active player playing after crossfade resume")
+            
             await syncCachedState()
             await syncCachedTrackInfo()
         }
@@ -1413,12 +1418,17 @@ public actor AudioPlayerService: AudioPlayerProtocol {
 
             // Load on inactive and switch
             let trackWithMetadata = try await audioEngine.loadAudioFileOnSecondaryPlayer(track: track)
+            
+            // Prepare secondary player: schedule file, reset offset, set mixer.volume = 0.0
+            // This ensures buffer is scheduled for playback (fixes skip-on-pause → resume silence bug)
+            await audioEngine.prepareSecondaryPlayer()
+            
             await playbackStateCoordinator.atomicSwitch(newTrack: trackWithMetadata)
             await syncCachedState()
             await syncCachedTrackInfo()
 
-            // Switch engine players
-            await audioEngine.switchActivePlayerWithVolume()
+            // Switch engine players (without setting volume - fade-in will handle it)
+            await audioEngine.switchActivePlayer()
             await audioEngine.stopInactivePlayer()
         }
     }
