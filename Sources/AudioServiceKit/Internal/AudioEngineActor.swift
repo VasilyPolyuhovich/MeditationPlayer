@@ -45,6 +45,9 @@ actor AudioEngineActor {
     // Crossfade task management
     private var activeCrossfadeTask: Task<Void, Never>?
     private var crossfadeProgressContinuation: AsyncStream<CrossfadeProgress>.Continuation?
+    
+    // Fade-in task management (for initial playback fade-in)
+    private var activeFadeInTask: Task<Void, Never>?
 
     /// Is crossfade currently in progress
     var isCrossfading: Bool { activeCrossfadeTask != nil }
@@ -878,7 +881,8 @@ actor AudioEngineActor {
         // Set initial volume for fade in
         if fadeIn {
             setActiveMixerVolume(0.0)
-            Task {
+            // Store fade-in task so it can be cancelled if needed (e.g., skip during fade-in)
+            activeFadeInTask = Task {
                 // Use actor method to avoid data races
                 // Fade to targetVolume (not 1.0) to respect user's volume setting
                 await self.fadeActiveMixer(
@@ -887,6 +891,8 @@ actor AudioEngineActor {
                     duration: fadeInDuration,
                     curve: fadeCurve
                 )
+                // Clear task reference after completion
+                self.activeFadeInTask = nil
             }
         } else {
             setActiveMixerVolume(targetVolume)
@@ -1031,10 +1037,11 @@ actor AudioEngineActor {
 
         for i in 0...steps {
             // FIXED Issue #10A: Check for task cancellation on every step
-            // If fade is interrupted (pause/stop) → abort gracefully
+            // If fade is interrupted (pause/stop/skip) → abort gracefully
+            // Checks both crossfade cancellation and Task cancellation (for fade-in)
             // Only check cancellation if requested (crossfade fades check, simple fades don't)
-            guard !checkCancellation || !isCrossfadeCancelled else {
-                Self.logger.debug("[FADE_DEBUG] \(mixerName): CANCELLED at step \(i)/\(steps)")
+            guard !checkCancellation || (!isCrossfadeCancelled && !Task.isCancelled) else {
+                Self.logger.debug("[FADE_DEBUG] \(mixerName): CANCELLED at step \(i)/\(steps) (crossfade=\(isCrossfadeCancelled), task=\(Task.isCancelled))")
                 return // Exit immediately without throwing
             }
 
@@ -1434,6 +1441,20 @@ actor AudioEngineActor {
             curve: curve
         )
     }
+    
+    /// Cancel active fade-in task if running
+    /// 
+    /// Called before operations that conflict with fade-in:
+    /// - Crossfade (skip during fade-in)
+    /// - Seek (fade-out before seek)
+    /// - Stop (fade-out before stop)
+    func cancelActiveFadeIn() {
+        if let task = activeFadeInTask {
+            Self.logger.debug("[FADE_IN] Cancelling active fade-in task")
+            task.cancel()
+            activeFadeInTask = nil
+        }
+    }
 
     /// Switch the active player (used after crossfade completes)
     /// NOTE: For track replacement, files are already loaded correctly.
@@ -1712,7 +1733,7 @@ actor AudioEngineActor {
         // 2. Create overlay player actor with pre-attached nodes
         // Nodes (playerNodeC, mixerNodeC) are already attached and connected during setup
         // This ensures overlay doesn't interrupt main playback
-        overlayPlayer = OverlayPlayerActor(
+        overlayPlayer = try OverlayPlayerActor(
             player: playerNodeC,
             mixer: mixerNodeC,
             configuration: configuration

@@ -485,6 +485,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await crossfadeOrchestrator.cancelActiveCrossfade()
             await audioEngine.cancelCrossfadeAndStopInactive()
         }
+        
+        // Cancel any active fade-in (prevents conflict with stop fade-out)
+        await audioEngine.cancelActiveFadeIn()
 
         // 1. Apply fade-out if requested
         if fadeDuration > 0 {
@@ -613,6 +616,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             await audioEngine.cancelCrossfadeAndStopInactive()
 
         }
+        
+        // Cancel any active fade-in (prevents conflict with seek fade-out)
+        await audioEngine.cancelActiveFadeIn()
 
         let wasPlaying = await state == .playing
 

@@ -82,18 +82,22 @@ actor OverlayPlayerActor {
   ///   - mixer: AVAudioMixerNode for volume control
   ///   - configuration: Playback configuration
   ///
-  /// - Precondition: Configuration must be valid (`configuration.isValid == true`)
+  /// - Throws: `AudioPlayerError.invalidConfiguration` if configuration is invalid
   init(
     player: AVAudioPlayerNode,
     mixer: AVAudioMixerNode,
     configuration: OverlayConfiguration
-  ) {
+  ) throws {
     self.player = player
     self.mixer = mixer
     self.configuration = configuration
 
     // Validate configuration
-    precondition(configuration.isValid, "Invalid OverlayConfiguration")
+    guard configuration.isValid else {
+      throw AudioPlayerError.invalidConfiguration(
+        reason: "Invalid OverlayConfiguration: volume must be 0.0-1.0, durations >= 0.0, loop count > 0"
+      )
+    }
 
     // Set initial volume
     mixer.volume = 0.0

@@ -73,6 +73,9 @@ actor CrossfadeOrchestrator: CrossfadeOrchestrating {
             Self.logger.debug("[CrossfadeOrch] Active crossfade exists, rolling back...")
             await rollbackCurrentCrossfade()
         }
+        
+        // 1a. Cancel any active fade-in (prevents conflict with crossfade)
+        await audioEngine.cancelActiveFadeIn()
 
         // 2. Validate we have active track
         guard let fromTrack = await stateStore.getCurrentTrack() else {
