@@ -8,6 +8,7 @@
 
 import AVFoundation
 import AudioServiceCore
+import os.log
 
 /// Actor-isolated overlay audio player with independent lifecycle and looping support.
 ///
@@ -123,13 +124,17 @@ actor OverlayPlayerActor {
     }
 
     state = .preparing
+    Logger.audio.info("[Overlay] Loading file: \(url.lastPathComponent)")
 
     do {
       let file = try AVAudioFile(forReading: url)
+      let duration = Double(file.length) / file.fileFormat.sampleRate
       audioFile = file
       state = .idle  // Ready to play
+      Logger.audio.info("[Overlay] File loaded: \(url.lastPathComponent) (\(String(format: "%.2f", duration))s, \(file.length) frames @ \(Int(file.fileFormat.sampleRate))Hz)")
     } catch {
       state = .idle
+      Logger.audio.error("[Overlay] Failed to load file: \(error.localizedDescription)")
       throw AudioPlayerError.fileLoadFailed(reason: "Failed to load file at \(url.path): \(error.localizedDescription)")
     }
   }
@@ -162,6 +167,7 @@ actor OverlayPlayerActor {
       )
     }
 
+    Logger.audio.info("[Overlay] ▶️ Starting playback (loopMode: \(String(describing: configuration.loopMode)), fadeIn: \(String(format: "%.2f", configuration.fadeInDuration))s, fadeOut: \(String(format: "%.2f", configuration.fadeOutDuration))s)")
     state = .playing
     loopCount = 0
 
@@ -182,15 +188,19 @@ actor OverlayPlayerActor {
   /// - Adds micro-fade to prevent audio clicks
   /// - Cleans up player and mixer state
   func stop() async {
+    Logger.audio.info("[Overlay] ⏹️ Stopping playback...")
+    
     // 1. Set state FIRST - loopCycle will exit
     state = .stopping
 
     // 2. Cancel loop task
     loopTask?.cancel()
     loopTask = nil
+    Logger.audio.debug("[Overlay] Loop task cancelled")
 
     // 3. Fade down mixer (general stop fade, NOT loop fade!)
     if mixer.volume > 0 && configuration.fadeOutDuration > 0 {
+      Logger.audio.debug("[Overlay] 🔻 Stop fade out (\(String(format: "%.2f", configuration.fadeOutDuration))s)")
       await fadeVolume(
         from: mixer.volume,
         to: 0.0,
@@ -199,14 +209,17 @@ actor OverlayPlayerActor {
     } else {
       // Instant stop without fade
       mixer.volume = 0.0
+      Logger.audio.debug("[Overlay] Volume set to 0.0 (instant stop)")
     }
 
     // 4. Stop player (after fade!)
     player.stop()
     player.reset()
+    Logger.audio.debug("[Overlay] Player stopped and reset")
 
     // 5. Cleanup
     state = .idle
+    Logger.audio.info("[Overlay] ✅ Stopped (state: idle)")
   }
 
   /// Pause overlay playback.
@@ -363,57 +376,104 @@ actor OverlayPlayerActor {
   ///   7. Apply delay (cancellable)
   /// ```
   private func loopCycle() async {
+    Logger.audio.debug("[Overlay] ➡️ Loop cycle started")
+    let cycleStartTime = Date()
+    
     while shouldContinueLooping() {
       // Check cancellation and state before each iteration
-      guard !Task.isCancelled && state == .playing else { break }
+      guard !Task.isCancelled && state == .playing else { 
+        Logger.audio.debug("[Overlay] Loop cycle cancelled (isCancelled: \(Task.isCancelled), state: \(state.description))")
+        break 
+      }
+
+      let iterationStartTime = Date()
+      Logger.audio.info("[Overlay] ➡️ Iteration \(loopCount + 1) started")
 
       // 1. Fade in on each iteration (smooth entry)
       if configuration.fadeInDuration > 0 {
+        Logger.audio.debug("[Overlay] 🔺 Fade in (\(String(format: "%.2f", configuration.fadeInDuration))s)")
         await fadeVolume(
           from: 0.0,
           to: configuration.volume,
           duration: configuration.fadeInDuration
         )
+        Logger.audio.debug("[Overlay] ✅ Fade in complete")
       } else if loopCount == 0 {
         // First iteration without fade - set volume directly
         mixer.volume = configuration.volume
+        Logger.audio.debug("[Overlay] Volume set directly: \(String(format: "%.2f", configuration.volume))")
       }
 
-      guard !Task.isCancelled && state == .playing else { break }
+      guard !Task.isCancelled && state == .playing else { 
+        Logger.audio.debug("[Overlay] Cancelled after fade in")
+        break 
+      }
 
       // 2. Schedule and play buffer
+      let scheduleTime = Date()
       scheduleBuffer()
       player.play()
+      Logger.audio.info("[Overlay] 🎵 Buffer scheduled and player started")
 
       // 3. Wait for playback to finish
+      let waitStartTime = Date()
+      Logger.audio.debug("[Overlay] ⏳ Waiting for playback to complete...")
       await waitForPlaybackEnd()
+      let completionTime = Date()
+      let playbackDuration = completionTime.timeIntervalSince(waitStartTime)
+      Logger.audio.info("[Overlay] ✅ Playback completion callback received (after \(String(format: "%.3f", playbackDuration))s)")
 
-      guard !Task.isCancelled && state == .playing else { break }
+      guard !Task.isCancelled && state == .playing else { 
+        Logger.audio.debug("[Overlay] Cancelled after playback end")
+        break 
+      }
+
+      // 3.5. Buffer safety delay - wait for audio hardware to finish rendering
+      // AVAudioPlayerNode completion callback fires when last frame leaves the player node,
+      // but audio hardware still has 300-500ms of audio in its internal buffers.
+      // Without this delay, fade-out would cut off the last ~1 second of audio.
+      Logger.audio.debug("[Overlay] ⏸️ Buffer safety delay (600ms) - waiting for hardware to finish rendering...")
+      try? await Task.sleep(nanoseconds: 600_000_000)  // 600ms safety margin
+      Logger.audio.debug("[Overlay] ✅ Buffer safety delay completed")
+
+      guard !Task.isCancelled && state == .playing else { 
+        Logger.audio.debug("[Overlay] Cancelled after buffer delay")
+        break 
+      }
 
       // 4. Fade out on each iteration (smooth exit)
       if configuration.fadeOutDuration > 0 {
+        Logger.audio.debug("[Overlay] 🔻 Fade out (\(String(format: "%.2f", configuration.fadeOutDuration))s)")
         await fadeVolume(
           from: configuration.volume,
           to: 0.0,
           duration: configuration.fadeOutDuration
         )
+        Logger.audio.debug("[Overlay] ✅ Fade out complete")
       }
 
       // 5. Increment loop counter
       loopCount += 1
+      let iterationDuration = Date().timeIntervalSince(iterationStartTime)
+      Logger.audio.info("[Overlay] ✅ Iteration \(loopCount) completed (\(String(format: "%.3f", iterationDuration))s total)")
 
       // 6. Check if should continue
       if !shouldContinueLooping() {
+        Logger.audio.debug("[Overlay] No more iterations, exiting loop")
         break
       }
 
       // 7. Apply loop delay (cancellable)
       if configuration.loopDelay > 0 {
         guard !Task.isCancelled && state == .playing else { break }
+        Logger.audio.debug("[Overlay] ⏸️ Loop delay: \(String(format: "%.2f", configuration.loopDelay))s")
         try? await Task.sleep(nanoseconds: UInt64(configuration.loopDelay * 1_000_000_000))
         guard !Task.isCancelled && state == .playing else { break }
       }
     }
+
+    let cycleDuration = Date().timeIntervalSince(cycleStartTime)
+    Logger.audio.info("[Overlay] ✅ Loop cycle completed (\(String(format: "%.3f", cycleDuration))s total, \(loopCount) iteration(s))")
 
     // Loop cycle completed
     await stop()
@@ -518,6 +578,11 @@ actor OverlayPlayerActor {
   private func scheduleBuffer() {
     guard let file = audioFile else { return }
 
+    let fileLength = file.length
+    let sampleRate = file.fileFormat.sampleRate
+    let expectedDuration = Double(fileLength) / sampleRate
+    Logger.audio.debug("[Overlay] 📄 Scheduling buffer: \(fileLength) frames (expected: \(String(format: "%.3f", expectedDuration))s)")
+
     // Schedule entire file
     player.scheduleFile(file, at: nil) { [weak self] in
       // Completion on audio thread - signal continuation
@@ -544,6 +609,7 @@ actor OverlayPlayerActor {
   /// ## Thread Safety:
   /// Called via Task from audio thread callback, ensuring actor isolation.
   private func signalPlaybackEnd() {
+    Logger.audio.debug("[Overlay] 🔔 Completion callback fired (from audio thread)")
     completionContinuation?.resume()
     completionContinuation = nil
   }
