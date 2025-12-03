@@ -432,8 +432,13 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             do {
                 try await sessionManager.ensureActive()
                 Self.logger.debug("[SERVICE] Session ensured active")
+                
+                // CRITICAL: Restart engine after interruption
+                // iOS stops AVAudioEngine during phone calls/Siri
+                try await audioEngine.start()
+                Self.logger.debug("[SERVICE] Engine restarted")
             } catch {
-                Self.logger.error("[SERVICE] Failed to ensure session active: \(error)")
+                Self.logger.error("[SERVICE] Failed to ensure session/engine active: \(error)")
                 throw AudioPlayerError.sessionConfigurationFailed(
                     reason: "Failed to ensure active: \(error.localizedDescription)"
                 )
@@ -1636,6 +1641,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     }
 
     private func handleInterruption(shouldResume: Bool) async {
+        let currentState = await playbackStateCoordinator.getPlaybackMode()
+        Self.logger.info("[INTERRUPTION] Handler called - shouldResume: \(shouldResume), currentState: \(currentState)")
+        
         if shouldResume {
             // Reactivate audio session after interruption (critical for phone calls)
             // iOS deactivates session during interruption - must reactivate before resume
@@ -1648,10 +1656,20 @@ public actor AudioPlayerService: AudioPlayerProtocol {
             }
 
             // Try to resume playback
-            try? await resume()
+            do {
+                try await resume()
+                Self.logger.info("[INTERRUPTION] ✅ Playback resumed successfully")
+            } catch {
+                Self.logger.error("[INTERRUPTION] ❌ Failed to resume: \(error)")
+            }
         } else {
-            // Pause playback
-            try? await pause()
+            // Pause playback (interruption began OR ended without resume option)
+            do {
+                try await pause()
+                Self.logger.info("[INTERRUPTION] Playback paused")
+            } catch {
+                Self.logger.warning("[INTERRUPTION] Pause skipped (likely already paused): \(error)")
+            }
         }
     }
 

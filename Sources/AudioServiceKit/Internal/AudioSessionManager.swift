@@ -520,19 +520,23 @@ actor AudioSessionManager {
         switch type {
         case .began:
             // Interruption began (phone call, alarm, etc.)
+            Self.logger.warning("[INTERRUPTION] ⚠️ BEGAN - pausing playback")
             interruptionHandler?(false)
 
         case .ended:
             // Interruption ended
             if let shouldResume = shouldResume {
+                Self.logger.info("[INTERRUPTION] ✅ ENDED - shouldResume: \(shouldResume)")
                 interruptionHandler?(shouldResume)
             } else {
                 // No resume option provided - don't auto-resume
                 // This handles Siri pause case
+                Self.logger.info("[INTERRUPTION] ⏸️ ENDED - no shouldResume option (Siri case)")
                 interruptionHandler?(false)
             }
 
         @unknown default:
+            Self.logger.warning("[INTERRUPTION] Unknown type: \(type.rawValue)")
             break
         }
     }
