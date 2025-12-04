@@ -54,6 +54,9 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private var remoteCommandManager: RemoteCommandManager!
 
     private var playbackTimer: Task<Void, Never>?
+    
+    /// Task monitoring natural playback end for loop triggers
+    private var playbackEndObserverTask: Task<Void, Never>?
 
     // MARK: - AsyncStream Support
     private let stateSubject: AsyncCurrentValueSubject<PlayerState>
@@ -321,6 +324,7 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         await updateNowPlayingInfo()
 
         startPlaybackTimer()
+        startPlaybackEndObserver()
 
         Self.logger.info("[SERVICE] Started playing")
         Self.logger.debug("← startPlaying() completed successfully")
@@ -517,8 +521,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         // 4. Update state to finished
         await updateState(.finished)
 
-        // Stop timer and clear UI
-        stopPlaybackTimer()
+        // Stop all playback monitoring and clear UI
+        stopPlaybackMonitoring()
         let manager = remoteCommandManager!
         Task { @MainActor in
             manager.clearNowPlayingInfo()
@@ -833,8 +837,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// await player.setup()
     /// ```
     public func reset() async {
-        // Stop timer first
-        stopPlaybackTimer()
+        // Stop all playback monitoring first
+        stopPlaybackMonitoring()
 
         // Full engine reset (clears all files and state)
         await audioEngine.fullReset()
@@ -878,8 +882,8 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     /// AudioPlayerService is deallocated. This method exists for
     /// explicit cleanup in special scenarios.
     internal func cleanup() async {
-        // Stop timer and playback
-        stopPlaybackTimer()
+        // Stop all monitoring and playback
+        stopPlaybackMonitoring()
         await audioEngine.fullReset()
 
         // Session stays active - following Apple's AVAudioPlayer pattern
@@ -1576,6 +1580,64 @@ public actor AudioPlayerService: AudioPlayerProtocol {
     private func stopPlaybackTimer() {
         playbackTimer?.cancel()
         playbackTimer = nil
+    }
+    
+    /// Stop all playback monitoring (timer + natural end observer)
+    private func stopPlaybackMonitoring() {
+        stopPlaybackTimer()
+        stopPlaybackEndObserver()
+    }
+    
+    // MARK: - Natural Playback End Observer
+    
+    /// Start observing natural playback end for loop triggers
+    /// Uses completion callback instead of timer-based detection for reliability
+    private func startPlaybackEndObserver() {
+        stopPlaybackEndObserver()
+        
+        playbackEndObserverTask = Task { [weak self] in
+            guard let self = self else { return }
+            
+            let stream = await self.audioEngine.playbackEndStream()
+            
+            for await player in stream {
+                guard !Task.isCancelled else { break }
+                
+                Self.logger.info("[NATURAL_END] Received playback end signal for player \(player)")
+                await self.handleNaturalPlaybackEnd()
+            }
+        }
+    }
+    
+    /// Stop observing playback end
+    private func stopPlaybackEndObserver() {
+        playbackEndObserverTask?.cancel()
+        playbackEndObserverTask = nil
+    }
+    
+    /// Handle natural playback end - triggers loop if configured
+    private func handleNaturalPlaybackEnd() async {
+        // Only handle for singleTrack repeat mode
+        guard configuration.repeatMode == .singleTrack else {
+            Self.logger.debug("[NATURAL_END] Ignoring - repeatMode is \(configuration.repeatMode)")
+            return
+        }
+        
+        // Check we're in playing state
+        guard await state == .playing else {
+            Self.logger.debug("[NATURAL_END] Ignoring - not in playing state")
+            return
+        }
+        
+        // Check no crossfade already in progress
+        let hasActiveCrossfade = await crossfadeOrchestrator.hasActiveCrossfade()
+        guard !hasActiveCrossfade else {
+            Self.logger.debug("[NATURAL_END] Ignoring - crossfade already active")
+            return
+        }
+        
+        Self.logger.info("[NATURAL_END] Triggering loop crossfade for singleTrack mode")
+        await startLoopCrossfade()
     }
 
     // MARK: - Now Playing Updates

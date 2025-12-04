@@ -60,6 +60,16 @@ actor AudioEngineActor {
     /// Crossfade curves are scaled to this target for smooth volume changes
     private var targetVolume: Float = 1.0
     
+    // MARK: - Natural Playback End Detection
+    
+    /// Flag to distinguish manual stop from natural audio end
+    /// Set to true before calling player.stop(), reset after scheduling
+    private var isManualStopA = false
+    private var isManualStopB = false
+    
+    /// Continuation for signaling natural playback end to subscribers
+    private var playbackEndContinuation: AsyncStream<PlayerNode>.Continuation?
+    
     // Logger
     private static let logger = Logger.engine
 
@@ -183,6 +193,9 @@ actor AudioEngineActor {
 
         guard isEngineRunning else { return }
 
+        // Mark as manual stop to prevent false natural-end callbacks
+        markManualStop()
+        
         playerNodeA.stop()
         playerNodeB.stop()
         engine.stop()
@@ -246,11 +259,22 @@ actor AudioEngineActor {
 
         if needsReschedule {
             // Resume from saved position
+            // Mark as manual stop before clearing state
+            markManualStop()
+            
             // Stop player completely to clear any stale state
             player.stop()
+            
+            // Reset manual stop flag for new schedule
+            if activePlayer == .a {
+                isManualStopA = false
+            } else {
+                isManualStopB = false
+            }
 
-            // Reschedule from offset (like seek)
+            // Reschedule from offset (like seek) with natural end detection
             let remainingFrames = AVAudioFrameCount(file.length - offset)
+            let currentActivePlayer = activePlayer
             if remainingFrames > 0 {
                 player.scheduleSegment(
                     file,
@@ -258,8 +282,10 @@ actor AudioEngineActor {
                     frameCount: remainingFrames,
                     at: nil,
                     completionCallbackType: .dataPlayedBack
-                ) { _ in
-                    // Completion on audio thread - keep minimal
+                ) { [weak self] _ in
+                    Task { [weak self] in
+                        await self?.handlePlaybackCompletion(for: currentActivePlayer)
+                    }
                 }
             }
         }
@@ -283,15 +309,22 @@ actor AudioEngineActor {
         // Cancel active crossfade if running
         await cancelActiveCrossfade()
 
+        // Mark as manual stop to prevent false natural-end callbacks
+        markManualStop()
+        
         playerNodeA.stop()
         playerNodeB.stop()
         mixerNodeA.volume = 0.0
         mixerNodeB.volume = 0.0
         Self.logger.debug("[STOP_DIAGNOSTIC] stopBothPlayers: DONE - players stopped, mixers reset to 0")
 
-        if isEngineRunning {
+        // Only stop engine if overlay is not active
+        // Overlay uses the same engine - stopping it would kill overlay audio
+        if isEngineRunning && overlayPlayer == nil {
             engine.stop()
             isEngineRunning = false
+        } else if overlayPlayer != nil {
+            Self.logger.debug("[STOP_DIAGNOSTIC] Engine kept running for active overlay")
         }
     }
 
@@ -848,15 +881,49 @@ actor AudioEngineActor {
         }
     }
 
-    /// Schedule active audio file on active player node
+    /// Schedule active audio file on active player node with natural end detection
+    /// Uses `.dataPlayedBack` callback type for reliable end-of-playback notification
     private func scheduleActiveFile() {
         guard let file = getActiveAudioFile() else { return }
         let player = getActivePlayerNode()
-
-        player.scheduleFile(file, at: nil) {
-            // Completion handler - will be called on audio thread
-            // Keep it minimal - no heavy operations here
+        let currentActivePlayer = activePlayer
+        
+        // Reset manual stop flag when scheduling new playback
+        if currentActivePlayer == .a {
+            isManualStopA = false
+        } else {
+            isManualStopB = false
         }
+        
+        // Schedule with dataPlayedBack - only fires when audio actually finishes
+        // (accounts for downstream latency and device playback delay)
+        player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] callbackType in
+            // Completion on audio render thread - hop to actor
+            Task { [weak self] in
+                await self?.handlePlaybackCompletion(for: currentActivePlayer)
+            }
+        }
+    }
+    
+    /// Handle playback completion callback from AVAudioPlayerNode
+    /// Filters out manual stops and signals only natural audio end
+    private func handlePlaybackCompletion(for player: PlayerNode) {
+        // Check if this was a manual stop (not natural end)
+        let wasManualStop = player == .a ? isManualStopA : isManualStopB
+        
+        guard !wasManualStop else {
+            Self.logger.debug("[PLAYBACK_END] Ignoring completion for player \(player) - was manual stop")
+            return
+        }
+        
+        // Check if this player is still active (crossfade might have switched)
+        guard player == activePlayer else {
+            Self.logger.debug("[PLAYBACK_END] Ignoring completion for player \(player) - no longer active")
+            return
+        }
+        
+        Self.logger.info("[PLAYBACK_END] Natural playback end detected for player \(player)")
+        playbackEndContinuation?.yield(player)
     }
 
     /// Start playback on active player node
@@ -924,25 +991,34 @@ actor AudioEngineActor {
         let wasPlaying = player.isPlaying
         let currentVolume = mixer.volume
 
+        // Mark as manual stop to prevent false natural-end callbacks
+        markManualStop()
+        
         // Stop player completely (clears buffers)
         player.stop()
 
         // CRITICAL: Store playback offset for position tracking
         if activePlayer == .a {
             playbackOffsetA = clampedFrame
+            isManualStopA = false  // Reset for new schedule
         } else {
             playbackOffsetB = clampedFrame
+            isManualStopB = false  // Reset for new schedule
         }
+        
+        let currentActivePlayer = activePlayer
 
-        // Schedule from new position
+        // Schedule from new position with natural end detection
         player.scheduleSegment(
             file,
             startingFrame: clampedFrame,
             frameCount: AVAudioFrameCount(file.length - clampedFrame),
             at: nil,
             completionCallbackType: .dataPlayedBack
-        ) { _ in
-            // Completion on audio thread - keep minimal
+        ) { [weak self] _ in
+            Task { [weak self] in
+                await self?.handlePlaybackCompletion(for: currentActivePlayer)
+            }
         }
 
         // Restore volume BEFORE playing
@@ -1088,6 +1164,27 @@ actor AudioEngineActor {
             Self.logger.debug("[FADE_DEBUG] \(mixerName): CANCELLED before completion")
             Self.logger.debug("[STOP_DIAGNOSTIC] fadeVolume CANCELLED: mixer=\(mixerName), playerIsPlaying=\(isPlayingEnd)")
         }
+    }
+
+    // MARK: - Natural Playback End Stream
+    
+    /// Create AsyncStream for natural playback end notifications
+    /// Subscribers receive PlayerNode when audio naturally finishes (not on manual stop)
+    func playbackEndStream() -> AsyncStream<PlayerNode> {
+        AsyncStream { continuation in
+            self.playbackEndContinuation = continuation
+            
+            continuation.onTermination = { @Sendable _ in
+                // Note: Can't clear continuation here due to actor isolation
+                // It will be replaced on next subscription
+            }
+        }
+    }
+    
+    /// Mark players for manual stop (prevents false natural-end signals)
+    private func markManualStop() {
+        isManualStopA = true
+        isManualStopB = true
     }
 
     // MARK: - Playback Position
@@ -1660,6 +1757,9 @@ actor AudioEngineActor {
 
     /// Stop the currently active player
     func stopActivePlayer() {
+        // Mark as manual stop to prevent false natural-end callbacks
+        markManualStop()
+        
         let player = getActivePlayerNode()
         player.stop()
     }
