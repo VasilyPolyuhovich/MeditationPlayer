@@ -62,7 +62,8 @@ await service.playSoundEffect(bell)
 ### Platform Integration
 - ✅ Swift 6 strict concurrency compliance
 - ✅ Background audio & Lock Screen controls
-- ✅ Skip forward/backward (±15s)
+- ✅ **Customizable remote commands** - delegate for lock screen/Control Center
+- ✅ Skip forward/backward (configurable intervals)
 - ✅ Click-free seek with fade
 - ✅ Advanced AudioSession configuration (minimizes interruptions)
 
@@ -276,6 +277,58 @@ try await service.skip(backward: 15.0)
 // Seek with fade
 try await service.seek(to: 60.0, fadeDuration: 0.5)
 ```
+
+### Remote Command Customization 🆕
+
+Customize lock screen and Control Center behavior:
+
+```swift
+// Create custom delegate
+@MainActor
+class MyRemoteDelegate: RemoteCommandDelegate {
+    
+    // Configure which commands are enabled
+    func remoteCommandEnabledCommands() -> RemoteCommandOptions {
+        [.play, .pause, .skipForward, .skipBackward]
+    }
+    
+    // Custom skip intervals (default: 15s)
+    func remoteCommandSkipIntervals() -> (forward: TimeInterval, backward: TimeInterval) {
+        (forward: 30.0, backward: 30.0)
+    }
+    
+    // Custom Now Playing info
+    func remoteCommandNowPlayingInfo(
+        for track: Track.Metadata,
+        position: PlaybackPosition
+    ) -> [String: Any]? {
+        return [
+            MPMediaItemPropertyTitle: "Custom Title",
+            MPMediaItemPropertyArtist: "My App",
+            MPMediaItemPropertyPlaybackDuration: position.duration,
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: position.currentTime,
+            MPNowPlayingInfoPropertyPlaybackRate: 1.0
+        ]
+    }
+    
+    // Custom skip handler (e.g., chapter navigation)
+    func remoteCommandShouldHandleSkipForward(_ interval: TimeInterval) async -> Bool {
+        await chapterManager.next()
+        return false  // Handled - skip SDK default behavior
+    }
+}
+
+// Set delegate
+let delegate = MyRemoteDelegate()
+await service.setRemoteCommandDelegate(delegate)
+
+// Reset to defaults
+await service.setRemoteCommandDelegate(nil)
+```
+
+**Available options:**
+- `RemoteCommandOptions`: `.play`, `.pause`, `.stop`, `.skipForward`, `.skipBackward`, `.nextTrack`, `.previousTrack`, `.seekTo`, `.changePlaybackRate`
+- Presets: `.playbackOnly`, `.standard`, `.full`
 
 ### State Observation
 
@@ -749,7 +802,16 @@ let config2 = PlayerConfiguration(audioSessionOptions: sharedOptions)
 
 ---
 
-## 🆕 What's New in v4.1.4
+## 🆕 What's New in v4.4
+
+### Remote Command Customization 🆕
+- **RemoteCommandDelegate** - customize lock screen and Control Center behavior
+- **Custom Now Playing info** - full control over displayed metadata
+- **Configurable commands** - enable/disable specific remote commands
+- **Custom handlers** - intercept commands for custom behavior (e.g., chapter navigation)
+- **Adjustable skip intervals** - change from default 15s to any value
+
+## What's New in v4.1.4
 
 ### Error Handling
 - **Throwing initialization** - `AudioPlayerService.init()` now `async throws`
@@ -789,7 +851,7 @@ let config2 = PlayerConfiguration(audioSessionOptions: sharedOptions)
 
 ---
 
-**Version**: 4.1.4
+**Version**: 4.4.0
 **Platform**: iOS 15+
 **Build**: [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

@@ -223,6 +223,19 @@ public actor AudioPlayerService: AudioPlayerProtocol {
                     try? await self?.skip(backward: interval)
                 }
             )
+
+            // Set toggle handler for headphone button support
+            manager.setExtendedHandlers(
+                togglePlayPauseHandler: { [weak self] in
+                    guard let self else { return }
+                    let currentState = await self.state
+                    if currentState == .playing {
+                        try? await self.pause()
+                    } else {
+                        try? await self.resume()
+                    }
+                }
+            )
         }
     }
 
@@ -1689,6 +1702,31 @@ public actor AudioPlayerService: AudioPlayerProtocol {
         }
     }
 
+    // MARK: - Remote Command Customization
+    
+    /// Set delegate for customizing remote command behavior
+    ///
+    /// Use this to customize lock screen and Control Center:
+    /// - Custom handlers for play/pause/skip commands
+    /// - Custom Now Playing info
+    /// - Configure which commands are enabled
+    ///
+    /// **Example:**
+    /// ```swift
+    /// await player.setRemoteCommandDelegate(myDelegate)
+    /// ```
+    ///
+    /// - Parameter delegate: The delegate to handle remote commands, or nil to use defaults
+    public func setRemoteCommandDelegate(_ delegate: sending (any RemoteCommandDelegate)?) async {
+        let manager = self.remoteCommandManager!
+        await MainActor.run {
+            manager.delegate = delegate
+            manager.reconfigure()
+        }
+    }
+    
+
+    
     // MARK: - Session Event Handlers
 
     /// Ensure audio session is active before critical operations

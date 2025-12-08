@@ -50,7 +50,7 @@ struct ContentView: View {
             case .overlay:
                 return [.overlayBasic, .overlaySwitching, .overlayPause]
             case .advanced:
-                return [.mvvmDemo, .seekAndSkip, .eventsStream, .queueDiagnostics, .multiInstance, .audioSessionDemo, .mantraMeditation, .fullMeditation]
+                return [.mvvmDemo, .seekAndSkip, .eventsStream, .queueDiagnostics, .multiInstance, .audioSessionDemo, .remoteCommandDemo, .mantraMeditation, .fullMeditation]
             }
         }
     }
@@ -82,6 +82,7 @@ struct ContentView: View {
         case queueDiagnostics = "Queue Diagnostics"
         case multiInstance = "Multiple Players"
         case audioSessionDemo = "Audio Session Test"
+        case remoteCommandDemo = "Remote Command Delegate"
         case mantraMeditation = "Stage 2: Mantra Practice"
         case fullMeditation = "3-Stage Meditation"
         
@@ -106,6 +107,7 @@ struct ContentView: View {
             case .queueDiagnostics: return "Monitor queue performance metrics"
             case .multiInstance: return "Run 2+ players simultaneously"
             case .audioSessionDemo: return "Work with external recorders"
+            case .remoteCommandDemo: return "Customize lock screen controls"
             case .mantraMeditation: return "MANY overlay switches (Stage 2)"
             case .fullMeditation: return "Complete 30-min session demo"
             }
@@ -210,6 +212,8 @@ struct ContentView: View {
             MultiInstanceView()
         case .audioSessionDemo:
             AudioSessionDemoView()
+        case .remoteCommandDemo:
+            RemoteCommandDemoView()
         case .mantraMeditation:
             MantraMeditationDemoView()
         case .fullMeditation:

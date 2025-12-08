@@ -62,10 +62,11 @@ actor AudioEngineActor {
     
     // MARK: - Natural Playback End Detection
     
-    /// Flag to distinguish manual stop from natural audio end
-    /// Set to true before calling player.stop(), reset after scheduling
-    private var isManualStopA = false
-    private var isManualStopB = false
+    /// Generation counter for schedule callbacks
+    /// Incremented on each new schedule, callbacks check if their generation matches current
+    /// This prevents stale callbacks (from previous schedules) from triggering false natural-end events
+    private var scheduleGenerationA: UInt64 = 0
+    private var scheduleGenerationB: UInt64 = 0
     
     /// Continuation for signaling natural playback end to subscribers
     private var playbackEndContinuation: AsyncStream<PlayerNode>.Continuation?
@@ -193,8 +194,9 @@ actor AudioEngineActor {
 
         guard isEngineRunning else { return }
 
-        // Mark as manual stop to prevent false natural-end callbacks
-        markManualStop()
+        // Increment generations to invalidate any pending callbacks
+        scheduleGenerationA &+= 1
+        scheduleGenerationB &+= 1
         
         playerNodeA.stop()
         playerNodeB.stop()
@@ -259,22 +261,22 @@ actor AudioEngineActor {
 
         if needsReschedule {
             // Resume from saved position
-            // Mark as manual stop before clearing state
-            markManualStop()
-            
             // Stop player completely to clear any stale state
             player.stop()
             
-            // Reset manual stop flag for new schedule
-            if activePlayer == .a {
-                isManualStopA = false
+            // Increment generation to invalidate any pending callbacks
+            let currentActivePlayer = activePlayer
+            let generation: UInt64
+            if currentActivePlayer == .a {
+                scheduleGenerationA &+= 1
+                generation = scheduleGenerationA
             } else {
-                isManualStopB = false
+                scheduleGenerationB &+= 1
+                generation = scheduleGenerationB
             }
 
             // Reschedule from offset (like seek) with natural end detection
             let remainingFrames = AVAudioFrameCount(file.length - offset)
-            let currentActivePlayer = activePlayer
             if remainingFrames > 0 {
                 player.scheduleSegment(
                     file,
@@ -284,7 +286,7 @@ actor AudioEngineActor {
                     completionCallbackType: .dataPlayedBack
                 ) { [weak self] _ in
                     Task { [weak self] in
-                        await self?.handlePlaybackCompletion(for: currentActivePlayer)
+                        await self?.handlePlaybackCompletion(for: currentActivePlayer, generation: generation)
                     }
                 }
             }
@@ -309,8 +311,9 @@ actor AudioEngineActor {
         // Cancel active crossfade if running
         await cancelActiveCrossfade()
 
-        // Mark as manual stop to prevent false natural-end callbacks
-        markManualStop()
+        // Increment generations to invalidate any pending callbacks
+        scheduleGenerationA &+= 1
+        scheduleGenerationB &+= 1
         
         playerNodeA.stop()
         playerNodeB.stop()
@@ -888,31 +891,35 @@ actor AudioEngineActor {
         let player = getActivePlayerNode()
         let currentActivePlayer = activePlayer
         
-        // Reset manual stop flag when scheduling new playback
+        // Increment generation for this new schedule
+        // This invalidates any pending callbacks from previous schedules
+        let generation: UInt64
         if currentActivePlayer == .a {
-            isManualStopA = false
+            scheduleGenerationA &+= 1
+            generation = scheduleGenerationA
         } else {
-            isManualStopB = false
+            scheduleGenerationB &+= 1
+            generation = scheduleGenerationB
         }
         
         // Schedule with dataPlayedBack - only fires when audio actually finishes
         // (accounts for downstream latency and device playback delay)
-        player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] callbackType in
+        player.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
             // Completion on audio render thread - hop to actor
             Task { [weak self] in
-                await self?.handlePlaybackCompletion(for: currentActivePlayer)
+                await self?.handlePlaybackCompletion(for: currentActivePlayer, generation: generation)
             }
         }
     }
     
     /// Handle playback completion callback from AVAudioPlayerNode
-    /// Filters out manual stops and signals only natural audio end
-    private func handlePlaybackCompletion(for player: PlayerNode) {
-        // Check if this was a manual stop (not natural end)
-        let wasManualStop = player == .a ? isManualStopA : isManualStopB
+    /// Uses generation counter to filter out stale callbacks from previous schedules
+    private func handlePlaybackCompletion(for player: PlayerNode, generation: UInt64) {
+        // Check if this callback is from the current schedule generation
+        let currentGeneration = player == .a ? scheduleGenerationA : scheduleGenerationB
         
-        guard !wasManualStop else {
-            Self.logger.debug("[PLAYBACK_END] Ignoring completion for player \(player) - was manual stop")
+        guard generation == currentGeneration else {
+            Self.logger.debug("[PLAYBACK_END] Ignoring stale completion for player \(player) - generation \(generation) != current \(currentGeneration)")
             return
         }
         
@@ -990,23 +997,23 @@ actor AudioEngineActor {
         // Save state BEFORE stopping
         let wasPlaying = player.isPlaying
         let currentVolume = mixer.volume
-
-        // Mark as manual stop to prevent false natural-end callbacks
-        markManualStop()
+        let currentActivePlayer = activePlayer
         
         // Stop player completely (clears buffers)
         player.stop()
 
         // CRITICAL: Store playback offset for position tracking
-        if activePlayer == .a {
+        // Increment generation to invalidate any pending callbacks from previous schedule
+        let generation: UInt64
+        if currentActivePlayer == .a {
             playbackOffsetA = clampedFrame
-            isManualStopA = false  // Reset for new schedule
+            scheduleGenerationA &+= 1
+            generation = scheduleGenerationA
         } else {
             playbackOffsetB = clampedFrame
-            isManualStopB = false  // Reset for new schedule
+            scheduleGenerationB &+= 1
+            generation = scheduleGenerationB
         }
-        
-        let currentActivePlayer = activePlayer
 
         // Schedule from new position with natural end detection
         player.scheduleSegment(
@@ -1017,7 +1024,7 @@ actor AudioEngineActor {
             completionCallbackType: .dataPlayedBack
         ) { [weak self] _ in
             Task { [weak self] in
-                await self?.handlePlaybackCompletion(for: currentActivePlayer)
+                await self?.handlePlaybackCompletion(for: currentActivePlayer, generation: generation)
             }
         }
 
@@ -1179,12 +1186,6 @@ actor AudioEngineActor {
                 // It will be replaced on next subscription
             }
         }
-    }
-    
-    /// Mark players for manual stop (prevents false natural-end signals)
-    private func markManualStop() {
-        isManualStopA = true
-        isManualStopB = true
     }
 
     // MARK: - Playback Position
@@ -1757,8 +1758,12 @@ actor AudioEngineActor {
 
     /// Stop the currently active player
     func stopActivePlayer() {
-        // Mark as manual stop to prevent false natural-end callbacks
-        markManualStop()
+        // Increment generation to invalidate any pending callbacks for active player
+        if activePlayer == .a {
+            scheduleGenerationA &+= 1
+        } else {
+            scheduleGenerationB &+= 1
+        }
         
         let player = getActivePlayerNode()
         player.stop()
