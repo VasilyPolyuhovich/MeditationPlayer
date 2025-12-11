@@ -251,15 +251,10 @@ actor PlaylistManager {
     func skipToNext() -> Track? {
         guard !tracks.isEmpty else { return nil }
 
-        if tracks.count == 1 {
-            // Single track - return same track for loop
-            return tracks[0]
-        }
-
         // Check repeat mode for navigation behavior
         switch configuration.repeatMode {
         case .off:
-            // Sequential mode - return nil at end
+            // Sequential mode - return nil at end (including single-track playlists)
             if currentIndex + 1 < tracks.count {
                 currentIndex += 1
                 return tracks[currentIndex]
@@ -267,7 +262,11 @@ actor PlaylistManager {
                 return nil // At end, no wrap-around
             }
 
-        case .singleTrack, .playlist:
+        case .singleTrack:
+            // Single track loop - return same track
+            return tracks[currentIndex]
+
+        case .playlist:
             // Loop mode - wrap around
             currentIndex = (currentIndex + 1) % tracks.count
             return tracks[currentIndex]
@@ -279,15 +278,10 @@ actor PlaylistManager {
     func skipToPrevious() -> Track? {
         guard !tracks.isEmpty else { return nil }
 
-        if tracks.count == 1 {
-            // Single track - return same track
-            return tracks[0]
-        }
-
         // Check repeat mode for navigation behavior
         switch configuration.repeatMode {
         case .off:
-            // Sequential mode - return nil at start
+            // Sequential mode - return nil at start (including single-track playlists)
             if currentIndex > 0 {
                 currentIndex -= 1
                 return tracks[currentIndex]
@@ -295,7 +289,11 @@ actor PlaylistManager {
                 return nil // At start, no wrap-around
             }
 
-        case .singleTrack, .playlist:
+        case .singleTrack:
+            // Single track loop - return same track
+            return tracks[currentIndex]
+
+        case .playlist:
             // Loop mode - wrap around
             currentIndex = (currentIndex - 1 + tracks.count) % tracks.count
             return tracks[currentIndex]
@@ -307,15 +305,10 @@ actor PlaylistManager {
     func peekNext() -> Track? {
         guard !tracks.isEmpty else { return nil }
 
-        if tracks.count == 1 {
-            // Single track - return same track for loop
-            return tracks[0]
-        }
-
         // Calculate next index based on repeat mode
         switch configuration.repeatMode {
         case .off:
-            // Sequential mode - return nil at end
+            // Sequential mode - return nil at end (including single-track playlists)
             if currentIndex + 1 < tracks.count {
                 let nextIndex = currentIndex + 1
                 return tracks[nextIndex]
@@ -323,7 +316,11 @@ actor PlaylistManager {
                 return nil // At end, no wrap-around
             }
 
-        case .singleTrack, .playlist:
+        case .singleTrack:
+            // Single track loop - return same track
+            return tracks[currentIndex]
+
+        case .playlist:
             // Loop mode - wrap around
             let nextIndex = (currentIndex + 1) % tracks.count
             return tracks[nextIndex]
@@ -335,15 +332,10 @@ actor PlaylistManager {
     func peekPrevious() -> Track? {
         guard !tracks.isEmpty else { return nil }
 
-        if tracks.count == 1 {
-            // Single track - return same track
-            return tracks[0]
-        }
-
         // Calculate previous index based on repeat mode
         switch configuration.repeatMode {
         case .off:
-            // Sequential mode - return nil at start
+            // Sequential mode - return nil at start (including single-track playlists)
             if currentIndex > 0 {
                 let prevIndex = currentIndex - 1
                 return tracks[prevIndex]
@@ -351,7 +343,11 @@ actor PlaylistManager {
                 return nil // At start, no wrap-around
             }
 
-        case .singleTrack, .playlist:
+        case .singleTrack:
+            // Single track loop - return same track
+            return tracks[currentIndex]
+
+        case .playlist:
             // Loop mode - wrap around
             let prevIndex = (currentIndex - 1 + tracks.count) % tracks.count
             return tracks[prevIndex]
