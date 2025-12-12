@@ -615,17 +615,20 @@ actor AudioEngineActor {
 
         let playerNode = player == .a ? playerNodeA : playerNodeB
         let offset = player == .a ? playbackOffsetA : playbackOffsetB
-        let sampleRate = file.fileFormat.sampleRate
+        let fileSampleRate = file.fileFormat.sampleRate
 
         if playerNode.isPlaying {
             guard let nodeTime = playerNode.lastRenderTime,
                   let playerTime = playerNode.playerTime(forNodeTime: nodeTime) else {
-                return Double(offset) / sampleRate
+                return Double(offset) / fileSampleRate
             }
-            let actualSampleTime = offset + playerTime.sampleTime
-            return Double(actualSampleTime) / sampleRate
+            // FIX: playerTime.sampleTime is in engine sample rate, not file sample rate
+            let playerSampleRate = playerTime.sampleRate
+            let playerTimeInSeconds = Double(playerTime.sampleTime) / playerSampleRate
+            let offsetInSeconds = Double(offset) / fileSampleRate
+            return offsetInSeconds + playerTimeInSeconds
         } else {
-            return Double(offset) / sampleRate
+            return Double(offset) / fileSampleRate
         }
     }
 
@@ -1195,32 +1198,34 @@ actor AudioEngineActor {
 
         let player = getActivePlayerNode()
         let offset = activePlayer == .a ? playbackOffsetA : playbackOffsetB
-        let sampleRate = file.fileFormat.sampleRate
+        let fileSampleRate = file.fileFormat.sampleRate
 
-        // ISSUE #6 FIX: Different logic for playing vs paused state
-        let actualSampleTime: AVAudioFramePosition
+        // Calculate duration using file's sample rate
+        let duration = Double(file.length) / fileSampleRate
 
         if player.isPlaying {
             // Player is playing - use offset + playerTime for accurate tracking
             guard let nodeTime = player.lastRenderTime,
                   let playerTime = player.playerTime(forNodeTime: nodeTime) else {
                 // Fallback to offset if times unavailable
-                actualSampleTime = offset
-                let currentTime = Double(actualSampleTime) / sampleRate
-                let duration = Double(file.length) / sampleRate
+                let currentTime = Double(offset) / fileSampleRate
                 return PlaybackPosition(currentTime: currentTime, duration: duration)
             }
-            actualSampleTime = offset + playerTime.sampleTime
+
+            // CRITICAL FIX: playerTime.sampleTime is counted at ENGINE sample rate (44100 Hz),
+            // NOT file sample rate (e.g., 24000 Hz). Use playerTime.sampleRate for conversion.
+            let playerSampleRate = playerTime.sampleRate
+            let playerTimeInSeconds = Double(playerTime.sampleTime) / playerSampleRate
+            let offsetInSeconds = Double(offset) / fileSampleRate
+            let currentTime = offsetInSeconds + playerTimeInSeconds
+
+            return PlaybackPosition(currentTime: currentTime, duration: duration)
         } else {
             // Player is paused - use ONLY offset (last known position)
             // playerTime.sampleTime may be stale or reset after pause
-            actualSampleTime = offset
+            let currentTime = Double(offset) / fileSampleRate
+            return PlaybackPosition(currentTime: currentTime, duration: duration)
         }
-
-        let currentTime = Double(actualSampleTime) / sampleRate
-        let duration = Double(file.length) / sampleRate
-
-        return PlaybackPosition(currentTime: currentTime, duration: duration)
     }
 
     // MARK: - Synchronized Crossfade (NEW)
